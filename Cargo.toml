@@ -1,0 +1,27 @@
+[package]
+name = "gglint"
+version = "0.2.0"
+edition = "2024"
+description = "A linter to catch issues in your AI agents"
+license = "Apache-2.0"
+
+[lib]
+# `cdylib` is the Python extension module, `rlib` is what the `gglint` command links.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Builds the Python bindings. maturin turns this on (see `pyproject.toml`).
+python = ["dep:pyo3"]
+
+[dependencies]
+memchr = "2"
+mimalloc = "0.1"
+rayon = "1"
+rustc-hash = "2"
+# Ruff's parser and syntax tree. Astral publishes these as internal crates with no
+# stability promise, so they're pinned to an exact version and upgraded on purpose.
+ruff_python_ast = "=0.0.19"
+ruff_python_parser = "=0.0.19"
+ruff_text_size = "=0.0.19"
+# `abi3-py311`: one wheel works on Python 3.11 and every later version.
+pyo3 = { version = "0.30", features = ["abi3-py311"], optional = true }
