@@ -16,6 +16,7 @@ use pyo3::exceptions::PyFileNotFoundError;
 use pyo3::prelude::*;
 
 use crate::discovery::{FileResult, scan};
+use crate::graph;
 
 /// An agent found in the source code.
 #[pyclass(frozen, get_all, module = "gglint")]
@@ -43,6 +44,9 @@ struct Agent {
     /// The module-level variable the agent is assigned to, which is the name other code
     /// imports it by: `agent` in `agent = create_agent(...)`.
     variable: Option<String>,
+    /// The function decorated as an agent factory that returns the agent: `researcher`
+    /// in crewAI's `@agent def researcher(self): return Agent(...)`.
+    factory: Option<String>,
 }
 
 #[pymethods]
@@ -80,8 +84,9 @@ struct Prompt {
     text: String,
     /// How many parts of the text are only known at runtime.
     dynamic_parts: usize,
-    /// The agent the prompt belongs to, by name or variable, if it's passed to the call
-    /// that creates the agent.
+    /// The agent the prompt is given to, by name or variable: the one created by the
+    /// call it's passed to, or the one it's passed to otherwise (`agent.run_sync(...)`,
+    /// `Task(agent=...)`, `@agent.instructions`), in this file or imported.
     agent: Option<String>,
     /// Other files the text came from, relative to the scanned directory: the module
     /// a constant was imported from, a text file, or a crewAI YAML config.
@@ -174,10 +179,31 @@ fn find_agents(py: Python<'_>, path: PathBuf) -> PyResult<Vec<Agent>> {
                 name: agent.name,
                 model: agent.model,
                 variable: agent.variable,
+                factory: agent.factory,
             });
         }
     }
     Ok(agents)
+}
+
+/// Returns the lineage graph of the Python files under `path` as JSON text, in
+/// networkx's node-link format. Use it to pass the graph on without parsing it.
+#[pyfunction]
+fn lineage_json(py: Python<'_>, path: PathBuf) -> PyResult<String> {
+    if !path.exists() {
+        return Err(PyFileNotFoundError::new_err(path.display().to_string()));
+    }
+    Ok(py.detach(|| graph::build(scan(std::slice::from_ref(&path), false)).to_json()))
+}
+
+/// Returns the lineage graph of the Python files under `path` as a dict, in networkx's
+/// node-link format: `networkx.node_link_graph(gglint.lineage_graph(path), edges="edges")`.
+#[pyfunction]
+fn lineage_graph<'py>(py: Python<'py>, path: PathBuf) -> PyResult<Bound<'py, PyAny>> {
+    let json = lineage_json(py, path)?;
+    // CPython's `json` module, written in C, builds the dicts faster than building
+    // them one at a time through PyO3.
+    py.import("json")?.call_method1("loads", (json,))
 }
 
 #[pymodule]
@@ -186,6 +212,8 @@ fn gglint(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Prompt>()?;
     module.add_function(wrap_pyfunction!(find_agents, module)?)?;
     module.add_function(wrap_pyfunction!(find_prompts, module)?)?;
+    module.add_function(wrap_pyfunction!(lineage_graph, module)?)?;
+    module.add_function(wrap_pyfunction!(lineage_json, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
