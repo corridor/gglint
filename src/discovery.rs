@@ -557,6 +557,103 @@ triage = Agent(name="triage", instructions="...")
     }
 
     #[test]
+    fn discovers_the_functions_that_build_agents() {
+        let found = agents(
+            "from langchain.agents import create_agent\n\
+             from langgraph.prebuilt import create_react_agent\n\
+             from deepagents import create_deep_agent\n\
+             import google.adk.agents as adk\n\
+             from autogen_agentchat.agents import AssistantAgent\n\
+             a = create_agent(model='x')\n\
+             b = create_react_agent('x', tools=[])\n\
+             c = create_deep_agent(tools=[])\n\
+             d = adk.LlmAgent(name='d')\n\
+             e = adk.SequentialAgent(name='e', sub_agents=[d])\n\
+             f = AssistantAgent('f', model_client=client)\n",
+        );
+        assert_eq!(
+            found,
+            vec![
+                (AgentKind::Instance, "langchain", "langchain.agents.create_agent".to_string()),
+                (AgentKind::Instance, "langgraph", "langgraph.prebuilt.create_react_agent".to_string()),
+                (AgentKind::Instance, "deepagents", "deepagents.create_deep_agent".to_string()),
+                (AgentKind::Instance, "google-adk", "google.adk.agents.LlmAgent".to_string()),
+                (AgentKind::Instance, "google-adk", "google.adk.agents.SequentialAgent".to_string()),
+                (AgentKind::Instance, "autogen", "autogen_agentchat.agents.AssistantAgent".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn re_exported_paths_are_the_same_agent() {
+        let found = agents(
+            "from crewai.agent import Agent\n\
+             from crewai.crew import Crew\n\
+             writer = Agent(role='writer')\n\
+             crew = Crew(agents=[writer])\n",
+        );
+        assert_eq!(
+            found,
+            vec![
+                (AgentKind::Instance, "crewai", "crewai.agent.Agent".to_string()),
+                (AgentKind::Instance, "crewai", "crewai.crew.Crew".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn names_and_models_are_read_from_literals_only() {
+        let parsed = parse_unchecked_source(
+            "from crewai import Agent\n\
+             from pydantic_ai import Agent as PydanticAgent\n\
+             a = Agent(role='writer', llm='gpt-4o')\n\
+             b = PydanticAgent('openai:gpt-4o', name='triage')\n\
+             c = PydanticAgent(MODEL, name=NAME)\n\
+             d = PydanticAgent(model=f'openai:{size}')\n",
+            PySourceType::Python,
+        );
+        let checker = check_module(parsed.syntax(), vec!["app"]);
+        let details: Vec<_> = discover(&checker)
+            .into_iter()
+            .map(|agent| (agent.name, agent.model))
+            .collect();
+        assert_eq!(
+            details,
+            vec![
+                (Some("writer".to_string()), Some("gpt-4o".to_string())),
+                (Some("triage".to_string()), Some("openai:gpt-4o".to_string())),
+                (None, None),
+                (None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn agents_inside_functions_are_found_without_a_variable() {
+        let parsed = parse_unchecked_source(
+            "from langchain.agents import create_agent\n\
+             def build():\n    return create_agent(model='x')\n",
+            PySourceType::Python,
+        );
+        let checker = check_module(parsed.syntax(), vec!["app"]);
+        let found = discover(&checker);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].variable, None);
+    }
+
+    #[test]
+    fn a_name_rebound_before_the_call_is_not_an_agent() {
+        assert!(
+            agents(
+                "from langchain.agents import create_agent\n\
+                 create_agent = lambda **kwargs: kwargs\n\
+                 bot = create_agent(model='x')\n"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn ignores_unrelated_classes_named_agent() {
         assert!(agents("class Agent:\n    pass\n\nbot = Agent()\n").is_empty());
     }
