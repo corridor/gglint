@@ -7,6 +7,9 @@ gglint statically analyses AI agents. It reads a Python codebase and reports:
 - **Prompts**: the system prompts, instructions, personas, templates and user messages
   passed to those agents and to the Anthropic, OpenAI and Google model APIs, with their
   text worked out from the source.
+- **Lineage**: a graph of which text reaches which agent: the constants, functions, files
+  and config entries prompt text comes from, the prompts built from them, and the agents
+  they are given to.
 
 gglint never runs the code it reads. Nothing is imported, no dependency is installed and
 no environment is built, so it is safe to point at any repository, including untrusted
@@ -24,6 +27,7 @@ command.
 - [Command line](#command-line)
 - [Agents](#agents)
 - [Prompts](#prompts)
+- [Lineage graph](#lineage-graph)
 - [How it works](#how-it-works)
 - [Performance](#performance)
 - [Limitations](#limitations)
@@ -149,6 +153,7 @@ complete, independent scan. The full types are in [`gglint.pyi`](gglint.pyi).
 | `name`           | `support`                       | The agent's name when written as a literal (`name=`, `role=`, or the class or function name) |
 | `model`          | `openai:gpt-4o`                 | The model when written as a literal                                                          |
 | `variable`       | `agent`                         | The module-level variable it is assigned to, which is the name other code imports it by      |
+| `factory`        | `researcher`                    | The function decorated as an agent factory that returns it, such as crewAI's `@agent`        |
 
 ### `find_prompts(path) -> list[Prompt]`
 
@@ -163,18 +168,20 @@ complete, independent scan. The full types are in [`gglint.pyi`](gglint.pyi).
 | `argument`       | `system_prompt`                   | The argument it was passed as, or `return` for a function whose return value is the prompt               |
 | `text`           | `You are a support agent. ...`    | The text. Parts only known at runtime are written as `{expression}`                                      |
 | `dynamic_parts`  | `0`                               | How many parts of `text` are only known at runtime                                                       |
-| `agent`          | `support`                         | The agent it configures, by name or variable, when passed to the call that creates the agent             |
+| `agent`          | `support`                         | The agent it is given to, by name, variable or factory: see [Lineage graph](#lineage-graph)              |
 | `sources`        | `["support/prompts/__init__.py"]` | Other files the text came from: an imported module, a text file read at runtime, or a crewAI YAML config |
 
 ### From Rust
 
 The crate is also a library. `gglint::discovery::scan(&[root], false)` returns a
 `FileResult` per Python file found, each with its `agents` and `prompts`.
+`gglint::graph::build(results)` turns them into the [lineage graph](#lineage-graph), and
+`Graph::to_json()` writes it.
 
 ## Command line
 
 ```console
-$ gglint [--all] [PATH ...]
+$ gglint [--all] [--graph] [PATH ...]
 ```
 
 - With no path it scans the current directory. Several paths are scanned together.
@@ -187,6 +194,8 @@ $ gglint [--all] [PATH ...]
 - It exits with status 1 when there are no Python files under the paths, and 0 otherwise.
 - `--all` parses every file, including the ones that cannot contain an agent or prompt.
   It is only useful for measuring the parser.
+- `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
+  time taken to standard error.
 
 ## Agents
 
@@ -213,7 +222,13 @@ There are three kinds:
   a subclass defined in the same file. Agents created inside functions are found too,
   without a `variable`.
 - `agent_class`: a class that subclasses an agent, `class Reviewer(Agent): ...`.
-- `agent_factory`: a function decorated as an agent, `@agent def researcher(self): ...`.
+- `agent_factory`: a function decorated as an agent whose agent can't be seen in its body,
+  `@agent def researcher(self): return build()`.
+
+A decorator only names an agent: the agent is what the function returns. So a factory that
+returns an agent created in it, `@agent def researcher(self): return Agent(...)` (or
+`a = Agent(...)` then `return a`), is reported once, as that `agent`, with `factory` set to
+`researcher`, the name crewAI knows it by.
 
 `name` and `model` are only filled in when written as literals: `name=NAME` or
 `model=f"openai:{size}"` leave them empty rather than guessing.
@@ -297,6 +312,87 @@ SystemMessage(content=SUPPORT)                       # reported, with the text o
 Whitespace alone does not count as written text, so `f"\n{system_prompt}\n"` is not
 reported either.
 
+## Lineage graph
+
+The lineage graph shows which text reaches which agent. It is built from the scan in the
+same call and adds a few milliseconds to it (see [Performance](#performance)).
+
+```text
+constant TONE ──feeds──▶ prompt (a.py, system_prompt) ──given_to──▶ agent triage
+      │
+      └──feeds──▶ constant RULES ──feeds──▶ prompt (b.py, instructions) ──given_to──▶ agent helper
+file summarise.md ──feeds──▶ prompt (bots.py, system_prompt) ──given_to──▶ agent summariser
+```
+
+```python
+graph = gglint.lineage_graph("path/to/repo")   # a dict
+text = gglint.lineage_json("path/to/repo")     # the same as JSON text, to pass on unparsed
+
+import networkx
+G = networkx.node_link_graph(graph, edges="edges")
+```
+
+```console
+$ gglint --graph path/to/repo > graph.json
+```
+
+### Nodes
+
+Every node has `id`, `kind`, `label` (a short name to show), `path`, `module`, `line` and
+`column`.
+
+| `kind`   | What it is                                                                                                                                                                                                                           | Other attributes                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `agent`  | An agent, as [found](#agents)                                                                                                                                                                                                        | `framework`, `agent_kind`, `via`, `name`, `model`, `variable`, `factory` |
+| `prompt` | A prompt, as [found](#prompts): text passed to a sink, where it is passed                                                                                                                                                            | `framework`, `role`, `via`, `argument`, `text`, `dynamic_parts`          |
+| `source` | A named definition prompt text comes from. `source_kind` is `constant` (a module-level variable), `function` (whose return value is used), `file` (read at runtime) or `config` (a field of a crewAI YAML entry) | `source_kind`, `name`, `text`, `dynamic_parts`                           |
+
+Text written inline at the sink is part of the prompt, not a source. Variables local to a
+function are not sources either: only module-level names can be shared, and sharing is
+what the graph shows. A source used by several prompts is one node with an edge to each,
+which is how one constant reaches many agents.
+
+Ids are derived from names, so they stay the same between scans of the same code:
+`agent:app.bots.support`, `prompt:app/bots.py:12:19`, `constant:app.prompts.TONE`,
+`function:app.prompts.build`, `file:app/system.md`,
+`config:app/config/agents.yaml#writer.role`. An agent is named by its variable, then its
+factory, then its name. An id that would repeat gets `#2`, `#3` in source order.
+
+### Edges
+
+| `kind`     | From → to                          | Meaning                                                                                                                                                       |
+| ---------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feeds`    | source → prompt, or source → source | The source's text is part of the target's. `position` is the order the target uses its sources in. `RULES = BASE + "..."` gives `BASE → RULES → prompt` |
+| `given_to` | prompt → agent                     | The prompt is given to the agent. `link` says how (below)                                                                                                     |
+
+| `link`        | Example                                                                     |
+| ------------- | --------------------------------------------------------------------------- |
+| `constructor` | `Agent(instructions="...")`                                                 |
+| `method`      | `agent.run_sync("...")`, including on an agent imported from another module |
+| `argument`    | `Runner.run(agent, "...")`, `Task(description="...", agent=self.researcher())` |
+| `decorator`   | `@agent.instructions def rules(): return "..."`                             |
+| `nested`      | `create_react_agent(prompt=SystemMessage("..."))`                           |
+
+An agent is followed through a variable (`agent = Agent(...)`), written inline, returned
+by a crewAI factory (`self.researcher()`), or imported from another module by its
+variable (`from app.bots import support`, `bots.support`), where the closest module of
+that name wins. `support.run_sync(...)` on an imported name is only a prompt if `support`
+turns out to be an agent whose class has `run_sync` as a sink.
+
+The JSON is networkx's node-link format, which most graph tools read:
+`{"directed": true, "multigraph": false, "graph": {"schema": 1}, "nodes": [...], "edges": [...]}`.
+`schema` is the version of this format. The full types are `LineageGraph`, `GraphNode`
+and `GraphEdge` in [`gglint.pyi`](gglint.pyi).
+
+### Seeing it
+
+gglint does not draw. To look at a graph while working on gglint, a throwaway viewer
+writes one HTML page that draws it with Cytoscape.js:
+
+```sh
+cargo run --release --example visualize -- path/to/repo graph.html
+```
+
 ## How it works
 
 ```text
@@ -327,7 +423,15 @@ reported either.
    project's other modules, files read at runtime and crewAI YAML configs. When several
    modules match an import, the one closest to the importing file wins, which handles
    repositories holding several projects.
-7. **Filter**: prompts with no written text are dropped.
+7. **Link imported agents** ([`discovery.rs`](src/discovery.rs)): prompts given to an agent
+   imported from another module are linked to it by module and variable.
+8. **Filter**: prompts with no written text are dropped.
+9. **Graph**, on request ([`graph.rs`](src/graph.rs)): while text is worked out, the parts
+   that come from a source are marked, and each prompt records the agent it is given to.
+   The graph is built from those in one pass over the results, without reading any code.
+   The design, and the tools it follows (Ruff's `analyze graph`, Joern's code property
+   graph, sqlglot's lineage, GitHub's stack-graphs), are in
+   [the design notes](docs/superpowers/specs/2026-10-29-lineage-graph-design.md).
 
 Files are processed in parallel with `rayon`, and `mimalloc` replaces the system
 allocator, which is much slower for the many small allocations parsing makes.
@@ -346,14 +450,29 @@ Measured with the release build on a 16-thread Mac, wall-clock time for the whol
 Scan time grows with the number of files that mention a framework, since the others are
 skipped before parsing, not with the size of the codebase.
 
+Building the lineage graph and writing its JSON adds, on the same machine:
+
+| Codebase                             | Files  | Nodes  | Edges  | Added   |
+| ------------------------------------ | ------ | ------ | ------ | ------- |
+| `deepagents` repository              | 1,106  | 1,412  | 49     | ~4 ms   |
+| A Python 3.14 `site-packages`        | 31,016 | 21     | 5      | ~2 ms   |
+| Generated: 10,000 agent files        | 11,000 | 82,000 | 91,000 | ~200 ms |
+
+Its cost grows with the number of agents, prompts and sources, not with the size of the
+codebase.
+
 ## Limitations
 
 gglint reads code one file at a time and does not run it, so it reports what the code
 says, not what it does:
 
-- **Agents** built in another file and imported, compiled LangGraph `StateGraph`s, and
-  agents returned by the project's own factory functions are not found yet. An agent is
-  found only in a file that imports its framework.
+- **Agents** re-exported through another module (an `__init__.py` that imports and passes
+  them on), compiled LangGraph `StateGraph`s, and agents returned by the project's own
+  undecorated factory functions are not linked yet. An agent is found only in a file that
+  imports its framework, and a prompt only in a file that imports a framework or SDK, so a
+  file that runs an imported agent without importing any framework is not read.
+- **Prompts passed on in messages**, such as `agent.invoke({"messages": [HumanMessage(...)]})`,
+  are found, but not linked to the agent, because `invoke` is not a registered sink.
 - **Function parameters are not followed to their callers.** A prompt passed into a
   function, such as `def make(system_prompt): create_agent(system_prompt=system_prompt)`,
   has no written text at the sink and is not reported, even when a caller passes a
@@ -379,7 +498,8 @@ uv run python -c "import gglint"    # the Python package, after `uv sync` in the
 ```
 
 Unit tests live next to the code they test. [`tests/scan.rs`](tests/scan.rs) scans real
-directories and [`tests/cli.rs`](tests/cli.rs) runs the command.
+directories, [`tests/graph.rs`](tests/graph.rs) builds lineage graphs from them and
+[`tests/cli.rs`](tests/cli.rs) runs the command.
 
 ### Project layout
 
@@ -390,6 +510,8 @@ directories and [`tests/cli.rs`](tests/cli.rs) runs the command.
 | [`src/semantic.rs`](src/semantic.rs)   | Scopes, bindings and qualified names                                |
 | [`src/prompts.rs`](src/prompts.rs)     | The prompt sink registry and how prompt text is worked out          |
 | [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
+| [`src/graph.rs`](src/graph.rs)         | The lineage graph and its JSON                                      |
+| [`examples/visualize.rs`](examples/visualize.rs) | A throwaway HTML viewer for the graph                     |
 | [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                    |
 | [`src/main.rs`](src/main.rs)           | The `gglint` command                                                |
 | [`gglint.pyi`](gglint.pyi)             | Type stubs for the Python package                                   |
@@ -402,7 +524,15 @@ directories and [`tests/cli.rs`](tests/cli.rs) runs the command.
   existing ones.
 - **Adding a prompt sink**: add it to `REGISTRY` in `src/prompts.rs`, or to
   `CLIENT_METHODS` for a method on an SDK client, with the arguments that take a prompt
-  and their role. Add a test in `src/prompts.rs`.
+  and their role. A sink that isn't the call creating the agent says which agent its
+  prompts are given to (`AgentArg`: the receiver, as in `agent.run_sync`, or an argument,
+  as in `Task(agent=...)`). Add a test in `src/prompts.rs`.
+- **Adding to the lineage graph**: a new kind of node is a `NodeData` variant and a new
+  kind of edge an `EdgeKind` variant in `src/graph.rs`, both written by `Graph::to_json`.
+  What they come from is recorded during the scan, as prompts record their sources and
+  agent, never by reading code in `graph.rs`. Raise `SCHEMA_VERSION` when the JSON changes
+  in a way readers must know about, keep `gglint.pyi` in step, and add a test in
+  `tests/graph.rs`.
 - **Changing the Python API**: the bindings are in `src/python.rs`, behind the `python`
   feature that maturin turns on. Keep `gglint.pyi` in step with them.
 - **Upgrading Ruff's crates**: `ruff_python_ast`, `ruff_python_parser` and

@@ -6,13 +6,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
+use rustc_hash::FxHashMap;
 use ruff_python_ast::{Expr, ExprCall, PySourceType};
 use ruff_python_parser::parse_unchecked_source;
 use ruff_text_size::{Ranged, TextSize};
 
 use crate::checker::{CandidateKind, Checker, check_module};
 use crate::project::{self, FileContext, Part};
-use crate::prompts::{self, Role};
+use crate::prompts::{self, AgentTarget, Link, PromptSink, Role};
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -113,7 +114,18 @@ pub struct DiscoveredAgent {
     /// The module-level variable the agent is assigned to, which is the name other
     /// code imports it by: `agent` in `agent = create_agent(...)`.
     pub variable: Option<String>,
+    /// The function decorated as an agent factory that returns this agent, which is
+    /// the name the framework knows it by: `researcher` in crewAI's
+    /// `@agent def researcher(self): return Agent(...)`.
+    pub factory: Option<String>,
     pub offset: TextSize,
+}
+
+impl DiscoveredAgent {
+    /// How to refer to the agent: its name, or the variable or factory it's reached by.
+    pub fn display_name(&self) -> Option<&str> {
+        self.name.as_deref().or(self.variable.as_deref()).or(self.factory.as_deref())
+    }
 }
 
 /// Matches a module's candidates against the registry.
@@ -160,50 +172,78 @@ pub fn discover(checker: &Checker<'_>) -> Vec<DiscoveredAgent> {
             name: Some(class.name.to_string()),
             model: None,
             variable: None,
+            factory: None,
             offset: class.name.range.start(),
         });
     }
 
+    // Functions decorated as agents, such as crewAI's `@agent def researcher(self)`. A
+    // decorator only names an agent: the agent is the value the function returns. So
+    // a factory that returns an agent created in it, `return Agent(...)`, is that
+    // agent, reachable by the factory's name as a module-level agent is by its
+    // variable. Only a factory whose agent can't be seen is an agent of its own.
+    let mut factories = Vec::new();
+    let mut factory_of_call: FxHashMap<TextSize, &str> = FxHashMap::default();
     for candidate in &checker.candidates {
+        let CandidateKind::Decorator {
+            function: Some(function),
+            ..
+        } = candidate.kind
+        else {
+            continue;
+        };
         let Some(qualified_name) = &candidate.qualified_name else {
             continue;
         };
         let qualified_name = qualified_name.to_string();
-
-        match &candidate.kind {
-            CandidateKind::Call(call) => {
-                if let Some(&framework) = agent_classes.get(&qualified_name) {
-                    agents.push(DiscoveredAgent {
-                        framework,
-                        kind: AgentKind::Instance,
-                        via: qualified_name,
-                        name: literal_keyword(call, &["name", "role"]),
-                        model: literal_keyword(call, &["model", "llm"])
-                            .or_else(|| first_literal_argument(call)),
-                        variable: candidate.assigned_to.map(str::to_string),
-                        offset: candidate.start(),
-                    });
-                }
-            }
-            CandidateKind::Decorator { function, .. } => {
-                let signature = REGISTRY.iter().find(|signature| {
-                    signature.kind == SignatureKind::Decorator
-                        && signature.qualified_name == qualified_name
-                });
-                if let (Some(signature), Some(function)) = (signature, function) {
-                    agents.push(DiscoveredAgent {
-                        framework: signature.framework,
-                        kind: AgentKind::Factory,
-                        via: qualified_name,
-                        name: Some(function.name.to_string()),
-                        model: None,
-                        variable: None,
-                        offset: function.name.range.start(),
-                    });
-                }
-            }
-            CandidateKind::Base(_) => {}
+        let Some(signature) = REGISTRY.iter().find(|signature| {
+            signature.kind == SignatureKind::Decorator && signature.qualified_name == qualified_name
+        }) else {
+            continue;
+        };
+        let returned = checker.returned_call(function.name.range.start());
+        if let Some(call) = returned {
+            factory_of_call.insert(call, function.name.as_str());
         }
+        factories.push((signature, qualified_name, function, returned));
+    }
+
+    for candidate in &checker.candidates {
+        let (CandidateKind::Call(call), Some(qualified_name)) = (&candidate.kind, &candidate.qualified_name) else {
+            continue;
+        };
+        let qualified_name = qualified_name.to_string();
+        if let Some(&framework) = agent_classes.get(&qualified_name) {
+            agents.push(DiscoveredAgent {
+                framework,
+                kind: AgentKind::Instance,
+                via: qualified_name,
+                name: literal_keyword(call, &["name", "role"]),
+                model: literal_keyword(call, &["model", "llm"]).or_else(|| first_literal_argument(call)),
+                variable: candidate.assigned_to.map(str::to_string),
+                factory: factory_of_call.get(&candidate.start()).map(|name| (*name).to_string()),
+                offset: candidate.start(),
+            });
+        }
+    }
+
+    for (signature, qualified_name, function, returned) in factories {
+        let returns_agent = returned.is_some_and(|call| {
+            agents.iter().any(|agent| agent.kind == AgentKind::Instance && agent.offset == call)
+        });
+        if returns_agent {
+            continue;
+        }
+        agents.push(DiscoveredAgent {
+            framework: signature.framework,
+            kind: AgentKind::Factory,
+            via: qualified_name,
+            name: Some(function.name.to_string()),
+            model: None,
+            variable: None,
+            factory: None,
+            offset: function.name.range.start(),
+        });
     }
 
     agents.sort_by_key(|agent| agent.offset);
@@ -224,9 +264,14 @@ pub struct DiscoveredPrompt {
     pub text: String,
     /// How many parts of the text are only known at runtime.
     pub dynamic_parts: usize,
-    /// The agent the prompt belongs to, by name or variable, when it's passed to the
-    /// call that creates the agent.
+    /// The agent in the same file the prompt is given to, by name or variable: the
+    /// one created by the call it's passed to, or the one it's passed to otherwise
+    /// (`agent.run_sync(...)`, `Task(agent=...)`, `@agent.instructions`).
     pub agent: Option<String>,
+    /// The agent the prompt is given to, and how, for the lineage graph.
+    pub link: Option<(AgentLink, Link)>,
+    /// See [`prompts::Prompt::requires`].
+    pub(crate) requires: Option<&'static PromptSink>,
     /// Other files the text came from: the module a constant was imported from, a
     /// text file read at runtime, or a crewAI YAML config.
     pub sources: Vec<PathBuf>,
@@ -235,8 +280,21 @@ pub struct DiscoveredPrompt {
     pub(crate) parts: Vec<Part>,
 }
 
-/// Turns the checker's prompts into results, linking each to the agent created by the
-/// same call. Text from other files is filled in later, by `project::resolve`.
+/// The agent a prompt is given to.
+#[derive(Clone, Debug)]
+pub enum AgentLink {
+    /// The agent at this index of the file's agents.
+    Local(usize),
+    /// An agent imported from another module, by its absolute name: `app.bots.support`.
+    /// `origin` is the importing file, used to pick between modules of the same name.
+    /// [`scan`] replaces it with [`AgentLink::Elsewhere`], or drops it.
+    Import { name: Vec<String>, origin: PathBuf },
+    /// The agent at index `agent` of the file at index `file` of the scan's results.
+    Elsewhere { file: usize, agent: usize },
+}
+
+/// Turns the checker's prompts into results, linking each to the agent it's given to.
+/// Text from other files is filled in later, by `project::resolve`.
 pub fn discover_prompts(
     checker: &Checker<'_>,
     agents: &[DiscoveredAgent],
@@ -246,10 +304,30 @@ pub fn discover_prompts(
         .prompts
         .iter()
         .map(|prompt| {
-            let agent = prompt.call.and_then(|call| {
-                let agent = agents.iter().find(|agent| agent.offset == call.start())?;
-                agent.name.clone().or_else(|| agent.variable.clone())
+            let link = prompt.target.as_ref().and_then(|(target, link)| {
+                let found = match target {
+                    AgentTarget::Call(start) => agents
+                        .iter()
+                        .position(|agent| agent.kind == AgentKind::Instance && agent.offset == *start)
+                        .map(AgentLink::Local),
+                    AgentTarget::Factory(name) => agents
+                        .iter()
+                        .position(|agent| {
+                            agent.factory.as_deref() == Some(*name)
+                                || agent.kind == AgentKind::Factory && agent.name.as_deref() == Some(*name)
+                        })
+                        .map(AgentLink::Local),
+                    AgentTarget::Import(name) => project::absolute_name(name, context).map(|name| AgentLink::Import {
+                        name,
+                        origin: context.path.to_path_buf(),
+                    }),
+                };
+                Some((found?, *link))
             });
+            let agent = match &link {
+                Some((AgentLink::Local(index), _)) => agents[*index].display_name().map(str::to_string),
+                _ => None,
+            };
             let parts = project::to_parts(checker, &prompt.pieces, context);
             let (text, dynamic_parts) = project::render(&parts);
             DiscoveredPrompt {
@@ -260,6 +338,8 @@ pub fn discover_prompts(
                 text,
                 dynamic_parts,
                 agent,
+                link,
+                requires: prompt.requires,
                 sources: Vec::new(),
                 offset: prompt.start(),
                 parts,
@@ -268,6 +348,87 @@ pub fn discover_prompts(
         .collect();
     found.sort_by_key(|prompt| prompt.offset);
     found
+}
+
+/// Links prompts given to agents imported from another module to those agents, by
+/// module and variable, and drops the prompts of methods called on imported names
+/// that turn out not to be sinks of an agent.
+fn link_imported_agents(results: &mut [FileResult]) {
+    let imported = |prompt: &DiscoveredPrompt| matches!(prompt.link, Some((AgentLink::Import { .. }, _)));
+    if !results.iter().flat_map(|result| &result.prompts).any(|(_, prompt)| imported(prompt)) {
+        return;
+    }
+
+    // `app.bots.support` is `support` in a module whose name ends with `app.bots`: the
+    // name a module is imported by depends on which directory was scanned. So each
+    // agent is indexed by every suffix of its module's name, followed by its variable
+    // (`bots.support`, `app.bots.support`, ...), and a lookup is one hash probe. If
+    // several modules match, the one closest to the importing file wins, as for
+    // imported text.
+    let mut by_name: FxHashMap<String, Vec<(usize, usize)>> = FxHashMap::default();
+    for (file, result) in results.iter().enumerate() {
+        for (index, (_, agent)) in result.agents.iter().enumerate() {
+            let Some(variable) = &agent.variable else {
+                continue;
+            };
+            let mut name = variable.clone();
+            by_name.entry(name.clone()).or_default().push((file, index));
+            for segment in result.module.rsplit('.').filter(|segment| !segment.is_empty()) {
+                name = format!("{segment}.{name}");
+                by_name.entry(name.clone()).or_default().push((file, index));
+            }
+        }
+    }
+    let lookup = |name: &[String], origin: &Path| -> Option<(usize, usize)> {
+        by_name
+            .get(&name.join("."))?
+            .iter()
+            .copied()
+            .max_by_key(|&(file, _)| project::common_prefix(&results[file].path, origin))
+    };
+    let mut found = Vec::new();
+    for (file, result) in results.iter().enumerate() {
+        for (index, (_, prompt)) in result.prompts.iter().enumerate() {
+            let Some((AgentLink::Import { name, origin }, _)) = &prompt.link else {
+                continue;
+            };
+            let agent = lookup(name, origin).filter(|&(agent_file, agent)| match prompt.requires {
+                // `support.run_sync`: a sink only if `support` is an agent whose class
+                // has `run_sync` as this sink.
+                Some(sink) => {
+                    let via = &results[agent_file].agents[agent].1.via;
+                    let method = prompt.via.as_deref().and_then(|via| via.rsplit('.').next()).unwrap_or("");
+                    let segments: Vec<&str> = via.split('.').chain([method]).collect();
+                    prompts::find_sink(&segments).is_some_and(|found| std::ptr::eq(found, sink))
+                }
+                None => true,
+            });
+            found.push((file, index, agent));
+        }
+    }
+    for (file, index, agent) in found.into_iter().rev() {
+        match agent {
+            Some((agent_file, agent)) => {
+                let (via, name) = {
+                    let agent = &results[agent_file].agents[agent].1;
+                    (agent.via.clone(), agent.display_name().map(str::to_string))
+                };
+                let prompt = &mut results[file].prompts[index].1;
+                if prompt.requires.take().is_some() {
+                    let method = prompt.via.as_deref().and_then(|via| via.rsplit('.').next()).unwrap_or("");
+                    prompt.via = Some(format!("{via}.{method}"));
+                }
+                prompt.agent = name;
+                if let Some((link, _)) = &mut prompt.link {
+                    *link = AgentLink::Elsewhere { file: agent_file, agent };
+                }
+            }
+            None if results[file].prompts[index].1.requires.is_some() => {
+                results[file].prompts.remove(index);
+            }
+            None => results[file].prompts[index].1.link = None,
+        }
+    }
 }
 
 /// The value of the first matching keyword argument, if it's a string literal.
@@ -316,6 +477,7 @@ pub fn scan(roots: &[PathBuf], parse_all: bool) -> Vec<FileResult> {
     // Prompt text imported from other modules or read from other files. Those files
     // may have been skipped by the prefilter, so this opens them as needed.
     project::resolve(&mut results, &files);
+    link_imported_agents(&mut results);
     // A prompt is text someone wrote. One made only of values known at runtime, such
     // as `HumanMessage(content=m.content)` relaying a message, has nothing to read.
     for result in &mut results {
@@ -438,7 +600,10 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
             .collect();
         result.prompts = prompts
             .into_iter()
-            .map(|prompt| (lines.location(prompt.offset), prompt))
+            .map(|mut prompt| {
+                project::locate_sources(&mut prompt.parts, path, &lines);
+                (lines.location(prompt.offset), prompt)
+            })
             .collect();
     }
     Some(result)
@@ -495,19 +660,19 @@ pub(crate) fn module_path(root: &Path, path: &Path) -> Vec<String> {
 ///
 /// Counting newlines from the start of the file for every result made big files with
 /// many agents quadratic: a 1 MB test file with 195 agents spent 70% of its time there.
-struct LineIndex {
+pub(crate) struct LineIndex {
     line_starts: Vec<usize>,
 }
 
 impl LineIndex {
-    fn new(source: &str) -> Self {
+    pub(crate) fn new(source: &str) -> Self {
         let mut line_starts = vec![0];
         line_starts.extend(memchr::memchr_iter(b'\n', source.as_bytes()).map(|index| index + 1));
         Self { line_starts }
     }
 
     /// Converts a byte offset to a 1-based line and column.
-    fn location(&self, offset: TextSize) -> Location {
+    pub(crate) fn location(&self, offset: TextSize) -> Location {
         let offset = usize::from(offset);
         let line = self.line_starts.partition_point(|&start| start <= offset);
         Location {

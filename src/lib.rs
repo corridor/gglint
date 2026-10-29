@@ -22,6 +22,7 @@
 
 pub mod checker;
 pub mod discovery;
+pub mod graph;
 pub mod project;
 pub mod prompts;
 pub mod semantic;

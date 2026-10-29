@@ -25,13 +25,13 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 use ruff_python_ast::PySourceType;
 use ruff_python_parser::parse_unchecked_source;
-use ruff_text_size::Ranged;
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::{Checker, check_module};
-use crate::discovery::{FileResult, module_path};
+use crate::discovery::{FileResult, LineIndex, Location, module_path};
 use crate::prompts::{Anchor, PathStep, Piece, SourcePath};
-use crate::semantic::{BindingKind, QualifiedName};
+use crate::semantic::{BindingId, BindingKind, QualifiedName};
 
 /// How many modules deep an imported prompt is followed: `agent.py` imports it from
 /// `prompts/__init__.py`, which imports it from `prompts/root.py`, and so on.
@@ -67,6 +67,93 @@ pub enum Part {
         field: &'static str,
         source: String,
     },
+    /// The parts up to the matching [`Part::End`] come from this source. Read by the
+    /// lineage graph; the text is the same without them.
+    Begin(SourceRef),
+    End,
+}
+
+/// Where a part of a prompt's text is defined: a node of the lineage graph.
+#[derive(Clone, Debug)]
+pub struct SourceRef {
+    pub kind: SourceKind,
+    /// `app.prompts.TONE` for a constant or function, the entry and field
+    /// (`writer.role`) for a config, empty for a file.
+    pub name: String,
+    /// The file it's defined in, or the file read.
+    pub path: PathBuf,
+    /// Where the name is defined in `path`. Set once the file's lines are known.
+    pub offset: Option<TextSize>,
+    pub location: Option<Location>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SourceKind {
+    /// A module-level variable assigned text: `TONE = "Be brief."`.
+    Constant,
+    /// A function whose return value is the text: `build()`, `instructions=build`.
+    Function,
+    /// A file read at runtime: `Path("system.md").read_text()`.
+    File,
+    /// A field of an entry in a crewAI YAML config.
+    Config,
+}
+
+impl SourceKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SourceKind::Constant => "constant",
+            SourceKind::Function => "function",
+            SourceKind::File => "file",
+            SourceKind::Config => "config",
+        }
+    }
+}
+
+impl SourceRef {
+    /// A module-level name of the module `context` describes.
+    fn binding(checker: &Checker<'_>, context: &FileContext<'_>, binding: BindingId) -> Self {
+        let binding = checker.semantic.binding(binding);
+        let kind = match binding.kind {
+            BindingKind::FunctionDefinition => SourceKind::Function,
+            _ => SourceKind::Constant,
+        };
+        let mut name = context.module_path.join(".");
+        if !name.is_empty() {
+            name.push('.');
+        }
+        name.push_str(&context.source[binding.range]);
+        Self {
+            kind,
+            name,
+            path: context.path.to_path_buf(),
+            offset: Some(binding.range.start()),
+            location: None,
+        }
+    }
+
+    fn file(kind: SourceKind, path: &Path, name: String) -> Self {
+        Self {
+            kind,
+            name,
+            path: path.to_path_buf(),
+            offset: None,
+            location: None,
+        }
+    }
+}
+
+/// Fills in the location of each source defined in the file `lines` indexes.
+pub(crate) fn locate_sources(parts: &mut [Part], path: &Path, lines: &LineIndex) {
+    for part in parts {
+        if let Part::Begin(source) = part {
+            if let (Some(offset), None) = (source.offset, source.location) {
+                if source.path == path {
+                    source.location = Some(lines.location(offset));
+                }
+            }
+        }
+    }
 }
 
 /// What a file's pieces need to be turned into parts.
@@ -99,7 +186,9 @@ fn push_parts(checker: &Checker<'_>, pieces: &[Piece<'_>], context: &FileContext
             Piece::Dynamic(expr) => out.push(Part::Dynamic(source(*expr))),
             Piece::Returned { function, expr } => match checker.function_return(*function) {
                 Some(returned) if depth < MAX_CALL_DEPTH => {
+                    out.push(Part::Begin(SourceRef::binding(checker, context, *function)));
                     push_parts(checker, returned, context, depth + 1, out);
+                    out.push(Part::End);
                 }
                 _ => out.push(Part::Dynamic(source(*expr))),
             },
@@ -122,13 +211,15 @@ fn push_parts(checker: &Checker<'_>, pieces: &[Piece<'_>], context: &FileContext
                 field,
                 source: source(*expr),
             }),
+            Piece::Origin(binding) => out.push(Part::Begin(SourceRef::binding(checker, context, *binding))),
+            Piece::End => out.push(Part::End),
         }
     }
 }
 
 /// Resolves the dots of a relative import: in `app/agent.py`, `.prompt.ROOT` is
 /// `app.prompt.ROOT`. `None` if the dots go above the scanned directory.
-fn absolute_name(name: &QualifiedName<'_>, context: &FileContext<'_>) -> Option<Vec<String>> {
+pub(crate) fn absolute_name(name: &QualifiedName<'_>, context: &FileContext<'_>) -> Option<Vec<String>> {
     let segments = name.segments();
     let level = segments.iter().take_while(|segment| **segment == ".").count();
     if level == 0 {
@@ -198,6 +289,7 @@ pub fn render(parts: &[Part]) -> (String, usize) {
                 text.push_str(source);
                 text.push('}');
             }
+            Part::Begin(_) | Part::End => {}
         }
     }
     (text, dynamic_parts)
@@ -268,12 +360,18 @@ impl ModuleIndex {
     }
 }
 
-fn common_prefix(a: &Path, b: &Path) -> usize {
+pub(crate) fn common_prefix(a: &Path, b: &Path) -> usize {
     a.components().zip(b.components()).take_while(|(a, b)| a == b).count()
 }
 
-/// The text of a module-level name, by module, name, and whether it's called.
-type Exports = FxHashMap<(usize, String, bool), Option<Vec<Part>>>;
+/// The text of a module-level name, by module, name, and whether it's called, and
+/// the source it's defined as (`None` for a name the module imports and passes on).
+type Exports = FxHashMap<(usize, String, bool), Option<Export>>;
+
+struct Export {
+    source: Option<SourceRef>,
+    parts: Vec<Part>,
+}
 
 /// Fills in imported names, files and crewAI configs in every prompt of `results`.
 /// `files` is every Python file that was scanned, with the directory it was found
@@ -345,14 +443,17 @@ fn resolve_imports(results: &mut [FileResult], files: &[(&Path, PathBuf)]) {
                     continue;
                 };
                 let found = index.lookup(&name, &origin).and_then(|(module, attribute)| {
-                    let parts = exports.get(&(module, attribute, called))?.as_ref()?;
-                    Some((module, parts))
+                    let export = exports.get(&(module, attribute, called))?.as_ref()?;
+                    Some((module, export))
                 });
                 match found {
-                    Some((module, found)) => {
+                    Some((module, Export { source: origin, parts: found })) => {
                         // A module that only passes the name on isn't where the text is.
                         if found.iter().any(|part| !matches!(part, Part::Import { .. })) {
                             add_source(&mut prompt.sources, &index.modules[module].path);
+                        }
+                        if let Some(origin) = origin {
+                            parts.push(Part::Begin(origin.clone()));
                         }
                         // If a passed-on name can't be found either, show what's
                         // written here, not the name in the module that passed it on.
@@ -365,6 +466,9 @@ fn resolve_imports(results: &mut [FileResult], files: &[(&Path, PathBuf)]) {
                             },
                             part => part.clone(),
                         }));
+                        if origin.is_some() {
+                            parts.push(Part::End);
+                        }
                     }
                     None => parts.push(Part::Dynamic(source)),
                 }
@@ -388,7 +492,7 @@ fn module_exports(
     index: &ModuleIndex,
     module: usize,
     names: FxHashSet<(String, bool)>,
-) -> Vec<((usize, String, bool), Option<Vec<Part>>)> {
+) -> Vec<((usize, String, bool), Option<Export>)> {
     let entry = &index.modules[module];
     let not_found = |names: FxHashSet<(String, bool)>| {
         names
@@ -410,33 +514,49 @@ fn module_exports(
         source: &source,
     };
 
+    let lines = LineIndex::new(&source);
     names
         .into_iter()
         .map(|(name, called)| {
-            let parts = export(&checker, &context, &name, called);
-            ((module, name, called), parts)
+            let mut found = export(&checker, &context, &name, called);
+            if let Some(Export { source: Some(source), parts }) = &mut found {
+                if let Some(offset) = source.offset {
+                    source.location = Some(lines.location(offset));
+                }
+                locate_sources(parts, &entry.path, &lines);
+            }
+            ((module, name, called), found)
         })
         .collect()
 }
 
 /// The text of the module-level name `name`, or what it returns if it's `called`.
-fn export(checker: &Checker<'_>, context: &FileContext<'_>, name: &str, called: bool) -> Option<Vec<Part>> {
+fn export(checker: &Checker<'_>, context: &FileContext<'_>, name: &str, called: bool) -> Option<Export> {
     let binding = checker.semantic.global_scope().get(name)?;
+    let defined = |parts| {
+        Some(Export {
+            source: Some(SourceRef::binding(checker, context, binding)),
+            parts,
+        })
+    };
     match &checker.semantic.binding(binding).kind {
         // A function passed as a prompt, `instruction=build`, also stands for what it
         // returns: frameworks call it to get the prompt.
-        BindingKind::FunctionDefinition => Some(to_parts(checker, checker.function_return(binding)?, context)),
+        BindingKind::FunctionDefinition => defined(to_parts(checker, checker.function_return(binding)?, context)),
         // Re-exported: `from .root import ROOT` in `prompts/__init__.py`.
         BindingKind::Import(qualified_name) | BindingKind::FromImport(qualified_name) => {
             let name = absolute_name(qualified_name, context)?;
-            Some(vec![Part::Import {
-                name,
-                called,
-                source: name_source(qualified_name),
-                origin: context.path.to_path_buf(),
-            }])
+            Some(Export {
+                source: None,
+                parts: vec![Part::Import {
+                    name,
+                    called,
+                    source: name_source(qualified_name),
+                    origin: context.path.to_path_buf(),
+                }],
+            })
         }
-        _ if !called => Some(to_parts(checker, checker.binding_text(binding)?, context)),
+        _ if !called => defined(to_parts(checker, checker.binding_text(binding)?, context)),
         _ => None,
     }
 }
@@ -491,19 +611,23 @@ fn resolve_files(results: &mut [FileResult]) {
 
     for result in results.iter_mut() {
         result.prompts.retain_mut(|(_, prompt)| {
+            if !prompt.parts.iter().any(|part| matches!(part, Part::File { .. } | Part::Config { .. })) {
+                return true;
+            }
             let mut keep = true;
-            let mut sources = std::mem::take(&mut prompt.sources);
-            for part in &mut prompt.parts {
+            let mut parts = Vec::with_capacity(prompt.parts.len() + 2);
+            for part in std::mem::take(&mut prompt.parts) {
                 match part {
                     Part::File { paths, source } => {
-                        let found = paths.iter().find_map(|path| Some((path, texts.get(path)?)));
-                        *part = match found {
+                        match paths.iter().find_map(|path| Some((path, texts.get(path)?))) {
                             Some((path, text)) => {
-                                add_source(&mut sources, path);
-                                Part::Text(text.clone())
+                                add_source(&mut prompt.sources, path);
+                                parts.push(Part::Begin(SourceRef::file(SourceKind::File, path, String::new())));
+                                parts.push(Part::Text(text.clone()));
+                                parts.push(Part::End);
                             }
-                            None => Part::Dynamic(std::mem::take(source)),
-                        };
+                            None => parts.push(Part::Dynamic(source)),
+                        }
                     }
                     Part::Config {
                         path,
@@ -511,24 +635,27 @@ fn resolve_files(results: &mut [FileResult]) {
                         field,
                         source,
                     } => {
-                        let Some(config) = configs.get(path) else {
-                            *part = Part::Dynamic(std::mem::take(source));
+                        let Some(config) = configs.get(&path) else {
+                            parts.push(Part::Dynamic(source));
                             continue;
                         };
-                        match config.get(key.as_str()).and_then(|entry| entry.get(*field)) {
+                        match config.get(key.as_str()).and_then(|entry| entry.get(field)) {
                             Some(text) => {
-                                add_source(&mut sources, path);
-                                *part = Part::Text(text.clone());
+                                add_source(&mut prompt.sources, &path);
+                                let name = format!("{key}.{field}");
+                                parts.push(Part::Begin(SourceRef::file(SourceKind::Config, &path, name)));
+                                parts.push(Part::Text(text.clone()));
+                                parts.push(Part::End);
                             }
                             // The config is there but doesn't set this field, so no
                             // prompt is passed for it.
                             None => keep = false,
                         }
                     }
-                    _ => {}
+                    part => parts.push(part),
                 }
             }
-            prompt.sources = sources;
+            prompt.parts = parts;
             keep
         });
     }

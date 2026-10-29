@@ -77,3 +77,27 @@ fn fails_when_there_are_no_python_files() {
             .contains("No Python files found.")
     );
 }
+
+#[test]
+fn graph_prints_the_lineage_graph_as_json() {
+    let dir = TempDir::new();
+    dir.write(
+        "bot.py",
+        "from langchain.agents import create_agent\n\
+         TONE = \"Be brief.\"\n\
+         agent = create_agent(model=\"x\", system_prompt=TONE)\n",
+    );
+
+    let output = gglint(&["--graph".as_ref(), dir.path().as_os_str()]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("{\"directed\":true"), "{stdout}");
+    assert!(stdout.contains("\"id\":\"agent:bot.agent\""), "{stdout}");
+    assert!(
+        stdout.contains("{\"source\":\"constant:bot.TONE\",\"target\":\"prompt:bot.py:3:47\",\"kind\":\"feeds\",\"position\":0}"),
+        "{stdout}"
+    );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Graph of 3 node(s) and 2 edge(s) from 1 file(s)"), "{stderr}");
+}

@@ -1,17 +1,20 @@
-//! The `gglint` command: prints the agents found under the given directories.
+//! The `gglint` command: prints the agents found under the given directories, or with
+//! `--graph`, the lineage graph as JSON.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, Location, scan};
+use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
 
 fn main() -> ExitCode {
     let mut parse_all = false;
+    let mut graph = false;
     let mut roots = Vec::new();
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--all" => parse_all = true,
+            "--graph" => graph = true,
             _ => roots.push(PathBuf::from(arg)),
         }
     }
@@ -21,6 +24,9 @@ fn main() -> ExitCode {
 
     let start = Instant::now();
     let results = scan(&roots, parse_all);
+    if graph {
+        return print_graph(results, start);
+    }
 
     let mut total_agents = 0;
     let mut total_prompts = 0;
@@ -63,6 +69,27 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn print_graph(results: Vec<FileResult>, start: Instant) -> ExitCode {
+    let files = results.len();
+    let scanned = start.elapsed();
+    let graph = gglint::graph::build(results);
+    let json = graph.to_json();
+    let elapsed = start.elapsed();
+    println!("{json}");
+    eprintln!(
+        "\nGraph of {} node(s) and {} edge(s) from {files} file(s); {:.2} ms, of which {:.2} ms building it",
+        graph.nodes.len(),
+        graph.edges.len(),
+        elapsed.as_secs_f64() * 1000.0,
+        (elapsed - scanned).as_secs_f64() * 1000.0,
+    );
+    if files == 0 {
+        eprintln!("No Python files found.");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
 fn print_agent(path: &Path, location: Location, agent: &DiscoveredAgent) {
     let kind = match agent.kind {
         AgentKind::Instance => "agent",
@@ -75,6 +102,9 @@ fn print_agent(path: &Path, location: Location, agent: &DiscoveredAgent) {
     }
     if let Some(model) = &agent.model {
         details.push(format!("model={model:?}"));
+    }
+    if let Some(factory) = &agent.factory {
+        details.push(format!("factory={factory:?}"));
     }
     println!(
         "{}:{}  {:<14} {:<13} via {}{}",

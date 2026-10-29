@@ -40,7 +40,7 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::FxHashMap;
 
-use crate::prompts::{self, Piece, Prompt, PromptSink, SourcePath};
+use crate::prompts::{self, AgentTarget, Link, Piece, Prompt, PromptSink, SourcePath};
 use crate::semantic::{
     BindingId, BindingKind, QualifiedName, ScopeId, ScopeKind, SemanticModel, Snapshot,
     StarImport,
@@ -83,6 +83,14 @@ impl Ranged for Candidate<'_> {
     }
 }
 
+/// A function whose return value is a prompt: `@agent.instructions def f(): ...`.
+#[derive(Clone)]
+struct PromptFunction<'a> {
+    sink: &'static PromptSink,
+    via: String,
+    target: Option<(AgentTarget<'a>, Link)>,
+}
+
 /// Work postponed until the enclosing scope has been fully visited.
 #[derive(Default)]
 struct Visit<'a> {
@@ -105,9 +113,13 @@ pub struct Checker<'a> {
     binding_calls: FxHashMap<BindingId, &'a ast::ExprCall>,
     /// Functions whose return value is a prompt, by the start of their name:
     /// `@agent.instructions def f(): ...`.
-    prompt_functions: FxHashMap<TextSize, (&'static PromptSink, String)>,
+    prompt_functions: FxHashMap<TextSize, PromptFunction<'a>>,
     /// The prompt function whose body is being visited, and its scope.
-    prompt_function: Option<(ScopeId, &'static PromptSink, String)>,
+    prompt_function: Option<(ScopeId, PromptFunction<'a>)>,
+    /// Prompt sinks passed directly as a prompt to another sink, by the start of their
+    /// call, mapped to the start of that call:
+    /// `create_react_agent(prompt=SystemMessage("..."))`.
+    nested_sinks: FxHashMap<TextSize, TextSize>,
     /// The file path each variable is assigned:
     /// `PROMPTS = Path(__file__).parent / "prompts"`.
     binding_paths: FxHashMap<BindingId, SourcePath<'a>>,
@@ -116,6 +128,12 @@ pub struct Checker<'a> {
     /// The text each function returns, if it has exactly one `return` and that
     /// returns a string. `None` once a second `return` is seen.
     function_returns: FxHashMap<BindingId, Option<Vec<Piece<'a>>>>,
+    /// The call each function returns, by the start of the function's name, if it has
+    /// exactly one `return` and that returns a call, directly or through a variable:
+    /// `return Agent(...)`, or `a = Agent(...)` then `return a`. `None` once a second
+    /// `return` is seen. What a variable holds is in `binding_calls`; this is the same
+    /// for a function, so `@agent def researcher()` is known to be the agent it returns.
+    returned_calls: FxHashMap<TextSize, Option<TextSize>>,
     /// The function whose body is being visited, and its scope.
     function: Option<(ScopeId, BindingId)>,
 }
@@ -134,9 +152,11 @@ pub fn check_module<'a>(module: &'a ModModule, module_path: Vec<&'a str>) -> Che
         binding_calls: FxHashMap::default(),
         prompt_functions: FxHashMap::default(),
         prompt_function: None,
+        nested_sinks: FxHashMap::default(),
         binding_paths: FxHashMap::default(),
         binding_opened: FxHashMap::default(),
         function_returns: FxHashMap::default(),
+        returned_calls: FxHashMap::default(),
         function: None,
     };
     checker.visit_body(&module.body);
@@ -298,8 +318,14 @@ impl<'a> Visitor<'a> for Checker<'a> {
             Expr::Call(call) => {
                 let qualified_name = self.resolve_expr(&call.func);
                 if let Some((sink, via)) = self.prompt_sink(&call.func, qualified_name.as_ref()) {
-                    let found = prompts::prompts_of_call(self, sink, via.to_string(), call);
+                    let mut nested = Vec::new();
+                    let found = prompts::prompts_of_call(self, sink, via.to_string(), call, &mut nested);
                     self.prompts.extend(found);
+                    for inner in nested {
+                        self.nested_sinks.insert(inner, call.start());
+                    }
+                } else if let Some(name) = &qualified_name {
+                    self.visit_imported_agent_call(call, name);
                 }
                 self.candidates.push(Candidate {
                     kind: CandidateKind::Call(call),
@@ -413,8 +439,15 @@ impl<'a> Checker<'a> {
         if let Some(function) = function {
             if let Some((sink, via)) = self.prompt_sink(target, qualified_name.as_ref()) {
                 if sink.returns_prompt() {
-                    self.prompt_functions
-                        .insert(function.name.range.start(), (sink, via.to_string()));
+                    let target = prompts::receiver_target(self, sink, target, Link::Decorator);
+                    self.prompt_functions.insert(
+                        function.name.range.start(),
+                        PromptFunction {
+                            sink,
+                            via: via.to_string(),
+                            target,
+                        },
+                    );
                 }
             }
         }
@@ -475,7 +508,7 @@ impl<'a> Checker<'a> {
                 self.prompt_function = self
                     .prompt_functions
                     .get(&function.name.range.start())
-                    .map(|(sink, via)| (scope, *sink, via.clone()));
+                    .map(|prompt_function| (scope, prompt_function.clone()));
                 self.bind_parameters(&function.parameters);
                 self.visit_body(&function.body);
             }
@@ -596,21 +629,27 @@ impl<'a> Checker<'a> {
                     .entry(function)
                     .and_modify(|returns| *returns = None)
                     .or_insert(text);
+                let call = value.and_then(|value| self.call_of(value));
+                self.returned_calls
+                    .entry(self.semantic.binding(function).range.start())
+                    .and_modify(|returns| *returns = None)
+                    .or_insert(call);
             }
         }
         let Some(value) = value else {
             return;
         };
-        if let Some((scope, sink, via)) = &self.prompt_function {
+        if let Some((scope, function)) = &self.prompt_function {
             if *scope == self.semantic.scope_id {
                 self.prompts.push(Prompt {
-                    framework: sink.framework,
+                    framework: function.sink.framework,
                     role: prompts::Role::System,
-                    via: Some(via.clone()),
+                    via: Some(function.via.clone()),
                     argument: "return",
                     value,
                     pieces: prompts::text_or_dynamic(self, value),
-                    call: None,
+                    target: function.target.clone(),
+                    requires: None,
                 });
             }
         }
@@ -633,10 +672,7 @@ impl<'a> Checker<'a> {
             .find(|id| self.semantic.scopes[*id].kind == ScopeKind::Class);
         let declared = class
             .and_then(|class| self.semantic.scopes[class].get(name))
-            .and_then(|binding| match self.binding_text(binding)? {
-                [Piece::Text(text, _)] => Some(*text),
-                _ => None,
-            });
+            .and_then(|binding| prompts::single_text(self.binding_text(binding)?));
         declared.or(match name {
             "agents_config" => Some("config/agents.yaml"),
             "tasks_config" => Some("config/tasks.yaml"),
@@ -693,6 +729,94 @@ impl<'a> Checker<'a> {
             _ => return None,
         };
         Some(self.resolve_expr(&call.func)?.append(&tail))
+    }
+
+    /// `support.run_sync("...")`, where `support` is imported from another module.
+    /// Whether `support` is an agent is only known once every file has been checked,
+    /// so the prompts are recorded for each sink the method could be, and
+    /// `discovery::link_imported_agents` keeps the ones that match the agent.
+    fn visit_imported_agent_call(&mut self, call: &'a ast::ExprCall, name: &QualifiedName<'a>) {
+        let Expr::Attribute(attribute) = call.func.as_ref() else {
+            return;
+        };
+        let method = attribute.attr.as_str();
+        if !prompts::is_sink_method(method) {
+            return;
+        }
+        if !matches!(self.agent_target(&attribute.value), Some(AgentTarget::Import(_))) {
+            return;
+        }
+        for sink in prompts::receiver_sinks(method) {
+            let mut nested = Vec::new();
+            let found = prompts::prompts_of_call(self, sink, name.to_string(), call, &mut nested);
+            self.prompts.extend(found.into_iter().map(|prompt| Prompt {
+                requires: Some(sink),
+                ..prompt
+            }));
+        }
+    }
+
+    /// The start of the call `expr` is, or holds: `Agent(...)`, or `a` after
+    /// `a = Agent(...)`.
+    fn call_of(&self, expr: &'a Expr) -> Option<TextSize> {
+        match expr {
+            Expr::Call(call) => Some(call.start()),
+            Expr::Name(name) => {
+                let binding = self.semantic.lookup_symbol(name.id.as_str())?;
+                Some(self.binding_calls.get(&binding)?.start())
+            }
+            _ => None,
+        }
+    }
+
+    /// The call the function named at `name` returns. See `returned_calls`.
+    pub fn returned_call(&self, name: TextSize) -> Option<TextSize> {
+        self.returned_calls.get(&name).copied().flatten()
+    }
+
+    /// The call that `call`, a prompt sink, is passed to as a prompt, if any.
+    pub fn nested_in(&self, call: TextSize) -> Option<TextSize> {
+        self.nested_sinks.get(&call).copied()
+    }
+
+    /// The agent `expr` refers to, as far as this file can tell: `agent` where
+    /// `agent = Agent(...)`, `Agent(...)` itself, `self.researcher()` in a crewAI crew,
+    /// or a name imported from another module.
+    pub fn agent_target(&self, expr: &'a Expr) -> Option<AgentTarget<'a>> {
+        match expr {
+            Expr::Call(call) => match call.func.as_ref() {
+                Expr::Attribute(attribute)
+                    if matches!(attribute.value.as_ref(), Expr::Name(name) if name.id.as_str() == "self") =>
+                {
+                    Some(AgentTarget::Factory(attribute.attr.as_str()))
+                }
+                _ => Some(AgentTarget::Call(call.start())),
+            },
+            Expr::Name(name) => {
+                let binding = self.semantic.lookup_symbol(name.id.as_str())?;
+                if let Some(call) = self.binding_calls.get(&binding) {
+                    return Some(AgentTarget::Call(call.start()));
+                }
+                match self.semantic.binding(binding).kind {
+                    BindingKind::Import(_) | BindingKind::FromImport(_) => {
+                        self.resolve_expr(expr).map(AgentTarget::Import)
+                    }
+                    _ => None,
+                }
+            }
+            // `bots.support`, where `bots` is an imported module.
+            Expr::Attribute(_) => {
+                let name = self.resolve_expr(expr)?;
+                let root = collect_dotted_name(expr)?[0];
+                let binding = self.semantic.lookup_symbol(root)?;
+                matches!(
+                    self.semantic.binding(binding).kind,
+                    BindingKind::Import(_) | BindingKind::FromImport(_) | BindingKind::SubmoduleImport(_)
+                )
+                .then_some(AgentTarget::Import(name))
+            }
+            _ => None,
+        }
     }
 
     // -----------------------------------------------------------------------

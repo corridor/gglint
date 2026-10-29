@@ -35,7 +35,7 @@
 use std::sync::LazyLock;
 
 use ruff_python_ast::{self as ast, Expr, FStringPartRef, InterpolatedStringElement, Operator};
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::checker::Checker;
@@ -66,7 +66,7 @@ impl Role {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Arg {
     /// `name=...`
     Keyword(&'static str),
@@ -89,10 +89,23 @@ enum SinkKind {
     Returns,
 }
 
+/// Which agent a sink's prompts are given to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgentArg {
+    /// The one the call creates, if it creates one: `Agent(instructions=...)`.
+    Created,
+    /// The object the method is called on: `agent.run_sync(...)`, `@agent.instructions`.
+    Receiver,
+    /// One passed with the prompt: `Runner.run(agent, ...)`, `Task(agent=...)`.
+    Argument(Arg),
+}
+
+#[derive(Debug)]
 pub struct PromptSink {
     pub framework: &'static str,
     kind: SinkKind,
     args: &'static [(Arg, Role)],
+    agent: AgentArg,
 }
 
 const fn call(framework: &'static str, args: &'static [(Arg, Role)]) -> PromptSink {
@@ -100,7 +113,47 @@ const fn call(framework: &'static str, args: &'static [(Arg, Role)]) -> PromptSi
         framework,
         kind: SinkKind::Call,
         args,
+        agent: AgentArg::Created,
     }
+}
+
+/// How a prompt reaches its agent: an edge label of the lineage graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Link {
+    /// Passed to the call that creates the agent: `Agent(instructions=...)`.
+    Constructor,
+    /// Passed to a method of the agent: `agent.run_sync("...")`.
+    Method,
+    /// Passed alongside the agent: `Runner.run(agent, "...")`, `Task(agent=a, ...)`.
+    Argument,
+    /// Returned by a function decorated with the agent's method: `@agent.instructions`.
+    Decorator,
+    /// Passed in a prompt object given to the call that creates the agent:
+    /// `create_react_agent(prompt=SystemMessage("..."))`.
+    Nested,
+}
+
+impl Link {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Link::Constructor => "constructor",
+            Link::Method => "method",
+            Link::Argument => "argument",
+            Link::Decorator => "decorator",
+            Link::Nested => "nested",
+        }
+    }
+}
+
+/// The agent a prompt is given to, as far as the file it's in can tell.
+#[derive(Clone, Debug)]
+pub enum AgentTarget<'a> {
+    /// Created by the call starting here, in this file.
+    Call(TextSize),
+    /// Returned by the crewAI `@agent` factory of this name: `agent=self.researcher()`.
+    Factory(&'a str),
+    /// Imported from another module: `from app.bots import support`.
+    Import(QualifiedName<'a>),
 }
 
 use Arg::{Config, Keyword, MessageTuples, Positional};
@@ -110,14 +163,21 @@ const PYDANTIC_AGENT: PromptSink = call(
     "pydantic-ai",
     &[(Keyword("system_prompt"), System), (Keyword("instructions"), System)],
 );
-const PYDANTIC_RUN: PromptSink = call("pydantic-ai", &[(Positional(0, "user_prompt"), User)]);
+const PYDANTIC_RUN: PromptSink = PromptSink {
+    agent: AgentArg::Receiver,
+    ..call("pydantic-ai", &[(Positional(0, "user_prompt"), User)])
+};
 const PYDANTIC_DECORATOR: PromptSink = PromptSink {
     framework: "pydantic-ai",
     kind: SinkKind::Returns,
     args: &[],
+    agent: AgentArg::Receiver,
 };
 const OPENAI_AGENT: PromptSink = call("openai-agents", &[(Keyword("instructions"), System)]);
-const OPENAI_RUNNER: PromptSink = call("openai-agents", &[(Positional(1, "input"), User)]);
+const OPENAI_RUNNER: PromptSink = PromptSink {
+    agent: AgentArg::Argument(Positional(0, "starting_agent")),
+    ..call("openai-agents", &[(Positional(1, "input"), User)])
+};
 const CREWAI_AGENT: PromptSink = call(
     "crewai",
     &[
@@ -127,14 +187,17 @@ const CREWAI_AGENT: PromptSink = call(
         (Config(&["role", "goal", "backstory"]), System),
     ],
 );
-const CREWAI_TASK: PromptSink = call(
-    "crewai",
-    &[
-        (Keyword("description"), User),
-        (Keyword("expected_output"), User),
-        (Config(&["description", "expected_output"]), User),
-    ],
-);
+const CREWAI_TASK: PromptSink = PromptSink {
+    agent: AgentArg::Argument(Keyword("agent")),
+    ..call(
+        "crewai",
+        &[
+            (Keyword("description"), User),
+            (Keyword("expected_output"), User),
+            (Config(&["description", "expected_output"]), User),
+        ],
+    )
+};
 const ADK_AGENT: PromptSink = call(
     "google-adk",
     &[
@@ -289,6 +352,21 @@ pub fn is_sink_method(segment: &str) -> bool {
     SINKS.by_last_segment.contains_key(segment)
 }
 
+/// The sinks that are a method of an agent, called `method`: `run_sync` is
+/// `pydantic_ai.Agent.run_sync`.
+pub fn receiver_sinks(method: &str) -> impl Iterator<Item = &'static PromptSink> {
+    let mut sinks: Vec<&'static PromptSink> = Vec::new();
+    for (_, sink) in SINKS.by_last_segment.get(method).into_iter().flatten() {
+        if sink.kind == SinkKind::Call
+            && sink.agent == AgentArg::Receiver
+            && !sinks.iter().any(|seen| std::ptr::eq(*seen, *sink))
+        {
+            sinks.push(sink);
+        }
+    }
+    sinks.into_iter()
+}
+
 pub fn find_sink(segments: &[&str]) -> Option<&'static PromptSink> {
     let candidates = SINKS.by_last_segment.get(segments.last()?)?;
     candidates
@@ -329,6 +407,24 @@ pub enum Piece<'a> {
         field: &'static str,
         expr: &'a Expr,
     },
+    /// The pieces up to the matching [`Piece::End`] are the text of this module-level
+    /// variable: `TONE` in `f"{TONE} Answer briefly."`. Only the lineage graph reads
+    /// these markers; the text is the same without them.
+    Origin(BindingId),
+    End,
+}
+
+/// The text of `pieces` if it's a single piece of written text, ignoring origin markers.
+pub fn single_text<'p, 'a>(pieces: &'p [Piece<'a>]) -> Option<&'a str> {
+    let mut text = None;
+    for piece in pieces {
+        match piece {
+            Piece::Text(value, _) if text.is_none() => text = Some(*value),
+            Piece::Origin(_) | Piece::End => {}
+            _ => return None,
+        }
+    }
+    text
 }
 
 /// A file path as written in the source, such as `Path(__file__).parent / "system.md"`.
@@ -372,9 +468,11 @@ pub struct Prompt<'a> {
     /// The expression the prompt was written as, at the sink.
     pub value: &'a Expr,
     pub pieces: Vec<Piece<'a>>,
-    /// The call it was passed to, which is also where the agent is reported when the
-    /// call creates one.
-    pub call: Option<TextRange>,
+    /// The agent the prompt is given to, and how.
+    pub target: Option<(AgentTarget<'a>, Link)>,
+    /// For a method called on an imported name, the sink it's assumed to be: kept only
+    /// if the name is an agent that has this sink as that method.
+    pub requires: Option<&'static PromptSink>,
 }
 
 impl Ranged for Prompt<'_> {
@@ -452,7 +550,16 @@ fn push_text<'a>(checker: &Checker<'a>, expr: &'a Expr, out: &mut Vec<Piece<'a>>
                 return false;
             };
             if let Some(text) = checker.binding_text(binding) {
+                // A module-level name can be shared by several prompts, so it's a node
+                // of the lineage graph.
+                let shared = checker.semantic.binding(binding).scope.is_global();
+                if shared {
+                    out.push(Piece::Origin(binding));
+                }
                 out.extend_from_slice(text);
+                if shared {
+                    out.push(Piece::End);
+                }
                 return true;
             }
             push_import(checker, binding, expr, false, out)
@@ -698,13 +805,11 @@ pub fn path_of<'a>(checker: &Checker<'a>, expr: &'a Expr) -> Option<SourcePath<'
             if let Some(path) = checker.binding_path(binding) {
                 return Some(path.clone());
             }
-            match checker.binding_text(binding)? {
-                [Piece::Text(text, _)] => Some(SourcePath {
-                    anchor: Anchor::WorkingDirectory,
-                    steps: vec![PathStep::Join(text)],
-                }),
-                _ => None,
-            }
+            let text = single_text(checker.binding_text(binding)?)?;
+            Some(SourcePath {
+                anchor: Anchor::WorkingDirectory,
+                steps: vec![PathStep::Join(text)],
+            })
         }
         Expr::Attribute(attribute) if attribute.attr.as_str() == "parent" => {
             let mut path = path_of(checker, &attribute.value)?;
@@ -822,18 +927,66 @@ impl PromptSink {
     }
 }
 
-/// Finds the prompts passed to `call`, which goes to `sink`.
+/// The value passed for `arg`, if any.
+fn argument_value<'a>(call: &'a ast::ExprCall, arg: Arg) -> Option<&'a Expr> {
+    match arg {
+        Keyword(name) => call.arguments.find_keyword(name).map(|keyword| &keyword.value),
+        Positional(index, name) => call
+            .arguments
+            .find_positional(index)
+            .or_else(|| call.arguments.find_keyword(name).map(|keyword| &keyword.value)),
+        MessageTuples | Config(_) => None,
+    }
+}
+
+/// The agent the prompts passed to `call`, which goes to `sink`, are given to.
+fn call_target<'a>(checker: &Checker<'a>, sink: &PromptSink, call: &'a ast::ExprCall) -> Option<(AgentTarget<'a>, Link)> {
+    match sink.agent {
+        AgentArg::Created => Some(match checker.nested_in(call.start()) {
+            Some(outer) => (AgentTarget::Call(outer), Link::Nested),
+            None => (AgentTarget::Call(call.start()), Link::Constructor),
+        }),
+        AgentArg::Receiver => receiver_target(checker, sink, &call.func, Link::Method),
+        AgentArg::Argument(arg) => {
+            let target = checker.agent_target(argument_value(call, arg)?)?;
+            Some((target, Link::Argument))
+        }
+    }
+}
+
+/// The agent a method of it, `func`, is called on, if `sink` takes its agent that way:
+/// `agent` in `agent.run_sync(...)` or `@agent.instructions`.
+pub fn receiver_target<'a>(
+    checker: &Checker<'a>,
+    sink: &PromptSink,
+    func: &'a Expr,
+    link: Link,
+) -> Option<(AgentTarget<'a>, Link)> {
+    if sink.agent != AgentArg::Receiver {
+        return None;
+    }
+    let Expr::Attribute(attribute) = func else {
+        return None;
+    };
+    Some((checker.agent_target(&attribute.value)?, link))
+}
+
+/// Finds the prompts passed to `call`, which goes to `sink`. Prompt sinks passed as a
+/// prompt, such as `SystemMessage(...)` in `create_react_agent(prompt=...)`, report
+/// their own text; the start of their calls is added to `nested`.
 pub fn prompts_of_call<'a>(
     checker: &Checker<'a>,
     sink: &'static PromptSink,
     via: String,
     call: &'a ast::ExprCall,
+    nested: &mut Vec<TextSize>,
 ) -> Vec<Prompt<'a>> {
     let mut prompts = Vec::new();
     let mut config_prompts = Vec::new();
     if sink.kind != SinkKind::Call {
         return prompts;
     }
+    let target = call_target(checker, sink, call);
     let mut push = |argument: &'static str, role: Role, value: &'a Expr| {
         match value {
             // `system_prompt=None` passes no prompt.
@@ -843,6 +996,7 @@ pub fn prompts_of_call<'a>(
             Expr::Call(inner) => {
                 let resolved = checker.resolve_expr(&inner.func);
                 if checker.prompt_sink(&inner.func, resolved.as_ref()).is_some() {
+                    nested.push(inner.start());
                     return;
                 }
             }
@@ -855,7 +1009,8 @@ pub fn prompts_of_call<'a>(
             argument,
             value,
             pieces: callable_text(checker, value).unwrap_or_else(|| text_or_dynamic(checker, value)),
-            call: Some(call.range()),
+            target: target.clone(),
+            requires: None,
         });
     };
 
@@ -933,7 +1088,8 @@ pub fn prompts_of_call<'a>(
                             field,
                             expr: &keyword.value,
                         }],
-                        call: Some(call.range()),
+                        target: target.clone(),
+                        requires: None,
                     });
                 }
             }
@@ -1001,7 +1157,8 @@ pub fn prompt_of_message_dict<'a>(checker: &Checker<'a>, dict: &'a ast::ExprDict
         argument: "content",
         value: content,
         pieces: text_or_dynamic(checker, content),
-        call: None,
+        target: None,
+        requires: None,
     })
 }
 
