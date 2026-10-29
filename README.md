@@ -108,14 +108,14 @@ wheels are built by CI, so the Docker image needs no Rust.
 **Anywhere else**, install it from its directory:
 
 ```sh
-pip install ./path/to/gglint          # builds a wheel with maturin
-maturin develop --release             # or, inside a virtualenv, while working on gglint
+pip install ./path/to/gglint # builds a wheel with maturin
+maturin develop --release    # or, inside a virtualenv, while working on gglint
 ```
 
 **The command** is built with Cargo:
 
 ```sh
-cargo build --release                 # target/release/gglint
+cargo build --release # target/release/gglint
 cargo run --release -- path/to/repo
 ```
 
@@ -138,33 +138,33 @@ complete, independent scan. The full types are in [`gglint.pyi`](gglint.pyi).
 
 ### `find_agents(path) -> list[Agent]`
 
-| Attribute        | Example                         | Meaning                                                                                       |
-| ---------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
-| `path`           | `support/bot.py`                | The file, relative to the scanned directory, with `/` separators                              |
-| `module`         | `support.bot`                   | The module's dotted path, as if the scanned directory were on `sys.path`                      |
-| `line`, `column` | `7`, `9`                        | 1-based                                                                                       |
-| `framework`      | `langchain`                     | See [Agents](#agents)                                                                         |
-| `kind`           | `agent`                         | `agent`, `agent_class` or `agent_factory`                                                     |
-| `via`            | `langchain.agents.create_agent` | The qualified name that was called, subclassed or used as a decorator                         |
-| `name`           | `support`                       | The agent's name when written as a literal (`name=`, `role=`, or the class or function name)  |
-| `model`          | `openai:gpt-4o`                 | The model when written as a literal                                                           |
-| `variable`       | `agent`                         | The module-level variable it is assigned to, which is the name other code imports it by       |
+| Attribute        | Example                         | Meaning                                                                                      |
+| ---------------- | ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `path`           | `support/bot.py`                | The file, relative to the scanned directory, with `/` separators                             |
+| `module`         | `support.bot`                   | The module's dotted path, as if the scanned directory were on `sys.path`                     |
+| `line`, `column` | `7`, `9`                        | 1-based                                                                                      |
+| `framework`      | `langchain`                     | See [Agents](#agents)                                                                        |
+| `kind`           | `agent`                         | `agent`, `agent_class` or `agent_factory`                                                    |
+| `via`            | `langchain.agents.create_agent` | The qualified name that was called, subclassed or used as a decorator                        |
+| `name`           | `support`                       | The agent's name when written as a literal (`name=`, `role=`, or the class or function name) |
+| `model`          | `openai:gpt-4o`                 | The model when written as a literal                                                          |
+| `variable`       | `agent`                         | The module-level variable it is assigned to, which is the name other code imports it by      |
 
 ### `find_prompts(path) -> list[Prompt]`
 
-| Attribute        | Example                            | Meaning                                                                                                   |
-| ---------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `path`           | `support/bot.py`                   | The file, relative to the scanned directory, with `/` separators                                          |
-| `module`         | `support.bot`                      | The module's dotted path                                                                                  |
-| `line`, `column` | `10`, `19`                         | 1-based position of the prompt's expression                                                               |
-| `framework`      | `langchain`                        | The framework or SDK, or `messages` for a `{"role": ..., "content": ...}` dict                            |
-| `role`           | `system`                           | `system` (instructions, persona), `user` (a request or task) or `template` (role decided elsewhere)       |
-| `via`            | `langchain.agents.create_agent`    | What the prompt was passed to, or `None` for a message dict                                               |
-| `argument`       | `system_prompt`                    | The argument it was passed as, or `return` for a function whose return value is the prompt                |
-| `text`           | `You are a support agent. ...`     | The text. Parts only known at runtime are written as `{expression}`                                       |
-| `dynamic_parts`  | `0`                                | How many parts of `text` are only known at runtime                                                        |
-| `agent`          | `support`                          | The agent it configures, by name or variable, when passed to the call that creates the agent             |
-| `sources`        | `["support/prompts/__init__.py"]`  | Other files the text came from: an imported module, a text file read at runtime, or a crewAI YAML config |
+| Attribute        | Example                           | Meaning                                                                                                  |
+| ---------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `path`           | `support/bot.py`                  | The file, relative to the scanned directory, with `/` separators                                         |
+| `module`         | `support.bot`                     | The module's dotted path                                                                                 |
+| `line`, `column` | `10`, `19`                        | 1-based position of the prompt's expression                                                              |
+| `framework`      | `langchain`                       | The framework or SDK, or `messages` for a `{"role": ..., "content": ...}` dict                           |
+| `role`           | `system`                          | `system` (instructions, persona), `user` (a request or task) or `template` (role decided elsewhere)      |
+| `via`            | `langchain.agents.create_agent`   | What the prompt was passed to, or `None` for a message dict                                              |
+| `argument`       | `system_prompt`                   | The argument it was passed as, or `return` for a function whose return value is the prompt               |
+| `text`           | `You are a support agent. ...`    | The text. Parts only known at runtime are written as `{expression}`                                      |
+| `dynamic_parts`  | `0`                               | How many parts of `text` are only known at runtime                                                       |
+| `agent`          | `support`                         | The agent it configures, by name or variable, when passed to the call that creates the agent             |
+| `sources`        | `["support/prompts/__init__.py"]` | Other files the text came from: an imported module, a text file read at runtime, or a crewAI YAML config |
 
 ### From Rust
 
@@ -222,25 +222,25 @@ There are three kinds:
 
 A string is a prompt because of **where it is passed**, not what it says.
 `system = platform.system()` is not a prompt and `instructions = "- Use currentColor"` is.
-So gglint starts from a registry of *sinks*, the arguments that take a prompt, and works
+So gglint starts from a registry of _sinks_, the arguments that take a prompt, and works
 out the text of whatever is passed to them.
 
 ### Where prompts are found
 
-| Framework or SDK | Sinks                                                                                                                                                                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pydantic-ai`    | `Agent(system_prompt=, instructions=)`; `agent.run`, `run_sync`, `run_stream`, `iter` (`user_prompt`); functions decorated with `@agent.system_prompt` or `@agent.instructions` (their return value)                                                          |
-| `openai-agents`  | `Agent(instructions=)`; `Runner.run`, `run_sync`, `run_streamed` (`input`)                                                                                                                                                                                    |
-| `crewai`         | `Agent(role=, goal=, backstory=)`; `Task(description=, expected_output=)`; the same fields of an `agents.yaml` or `tasks.yaml` entry passed as `config=self.agents_config["name"]`                                                                             |
-| `google-adk`     | `Agent` / `LlmAgent(instruction=, global_instruction=, static_instruction=)`                                                                                                                                                                                  |
-| `google-genai`   | `types.GenerateContentConfig(system_instruction=)`; `google.generativeai.GenerativeModel(system_instruction=)`                                                                                                                                                |
-| `autogen`        | `AssistantAgent(system_message=)`                                                                                                                                                                                                                             |
+| Framework or SDK | Sinks                                                                                                                                                                                                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pydantic-ai`    | `Agent(system_prompt=, instructions=)`; `agent.run`, `run_sync`, `run_stream`, `iter` (`user_prompt`); functions decorated with `@agent.system_prompt` or `@agent.instructions` (their return value)                                                                           |
+| `openai-agents`  | `Agent(instructions=)`; `Runner.run`, `run_sync`, `run_streamed` (`input`)                                                                                                                                                                                                     |
+| `crewai`         | `Agent(role=, goal=, backstory=)`; `Task(description=, expected_output=)`; the same fields of an `agents.yaml` or `tasks.yaml` entry passed as `config=self.agents_config["name"]`                                                                                             |
+| `google-adk`     | `Agent` / `LlmAgent(instruction=, global_instruction=, static_instruction=)`                                                                                                                                                                                                   |
+| `google-genai`   | `types.GenerateContentConfig(system_instruction=)`; `google.generativeai.GenerativeModel(system_instruction=)`                                                                                                                                                                 |
+| `autogen`        | `AssistantAgent(system_message=)`                                                                                                                                                                                                                                              |
 | `langchain`      | `create_agent(system_prompt=)`; `SystemMessage(content)`, `HumanMessage(content)`; `ChatPromptTemplate.from_messages([(role, text), ...])`, `ChatPromptTemplate.from_template`; `PromptTemplate`; `SystemMessagePromptTemplate` and `HumanMessagePromptTemplate.from_template` |
-| `langgraph`      | `create_react_agent(prompt=)`                                                                                                                                                                                                                                 |
-| `deepagents`     | `create_deep_agent(system_prompt=, instructions=)`                                                                                                                                                                                                            |
-| `anthropic`      | `client.messages.create` / `stream` and their `beta` variants (`system=`), on `Anthropic`, `AsyncAnthropic`, `AnthropicBedrock` and `AnthropicVertex`                                                                                                         |
-| `openai`         | `client.responses.create` / `stream` (`instructions=`, `input=`); `client.beta.assistants.create(instructions=)`, on `OpenAI`, `AsyncOpenAI`, `AzureOpenAI` and `AsyncAzureOpenAI`                                                                            |
-| `messages`       | Any `{"role": "system" \| "developer" \| "user", "content": ...}` dict                                                                                                                                                                                         |
+| `langgraph`      | `create_react_agent(prompt=)`                                                                                                                                                                                                                                                  |
+| `deepagents`     | `create_deep_agent(system_prompt=, instructions=)`                                                                                                                                                                                                                             |
+| `anthropic`      | `client.messages.create` / `stream` and their `beta` variants (`system=`), on `Anthropic`, `AsyncAnthropic`, `AnthropicBedrock` and `AnthropicVertex`                                                                                                                          |
+| `openai`         | `client.responses.create` / `stream` (`instructions=`, `input=`); `client.beta.assistants.create(instructions=)`, on `OpenAI`, `AsyncOpenAI`, `AzureOpenAI` and `AsyncAzureOpenAI`                                                                                             |
+| `messages`       | Any `{"role": "system" \| "developer" \| "user", "content": ...}` dict                                                                                                                                                                                                         |
 
 The registry, with every module path each name is re-exported from, is `REGISTRY` and
 `CLIENT_METHODS` in [`src/prompts.rs`](src/prompts.rs). Methods are matched through the
@@ -252,21 +252,21 @@ sink, such as a `SystemMessage` inside `from_messages`, is reported once.
 
 The text is built from the source without running it:
 
-| Written as                                                    | Reported as                                                                    |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `"You review code."`, `"a" "b"`                               | The literal, with implicit concatenation joined                                |
-| `BASE + "\nBe brief."`                                        | The parts joined                                                               |
-| `f"Today is {date}."`                                         | `Today is {date}.`, with `date` filled in when it is a known string            |
-| `"Hello {name}".format(name=n)`, `.format_map(...)`           | The template, placeholders kept                                                |
-| `"Hello %s" % name`                                           | The template                                                                   |
-| `"\n".join([intro, rules])`                                   | The parts joined with the separator, when the list is written out              |
-| `.strip()`, `.lstrip()`, `.rstrip()`                          | The string it is called on                                                     |
-| `textwrap.dedent(...)`, `inspect.cleandoc(...)`               | The argument                                                                   |
-| A variable                                                    | The text of the last assignment to it written before that point                |
-| A function in the same module, `build()`                      | What it returns                                                                |
-| `prompts.ROOT`, `from app.prompts import ROOT`, `prompts.build()` | The text from that module, even when it lives in another file             |
+| Written as                                                                             | Reported as                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"You review code."`, `"a" "b"`                                                        | The literal, with implicit concatenation joined                                                                                                                                                                   |
+| `BASE + "\nBe brief."`                                                                 | The parts joined                                                                                                                                                                                                  |
+| `f"Today is {date}."`                                                                  | `Today is {date}.`, with `date` filled in when it is a known string                                                                                                                                               |
+| `"Hello {name}".format(name=n)`, `.format_map(...)`                                    | The template, placeholders kept                                                                                                                                                                                   |
+| `"Hello %s" % name`                                                                    | The template                                                                                                                                                                                                      |
+| `"\n".join([intro, rules])`                                                            | The parts joined with the separator, when the list is written out                                                                                                                                                 |
+| `.strip()`, `.lstrip()`, `.rstrip()`                                                   | The string it is called on                                                                                                                                                                                        |
+| `textwrap.dedent(...)`, `inspect.cleandoc(...)`                                        | The argument                                                                                                                                                                                                      |
+| A variable                                                                             | The text of the last assignment to it written before that point                                                                                                                                                   |
+| A function in the same module, `build()`                                               | What it returns                                                                                                                                                                                                   |
+| `prompts.ROOT`, `from app.prompts import ROOT`, `prompts.build()`                      | The text from that module, even when it lives in another file                                                                                                                                                     |
 | `Path("system.md").read_text()`, `open(path).read()`, `with open(path) as f: f.read()` | The contents of the file. Paths may be built from literals and `__file__` with `/`, `.joinpath()`, `.parent`, `.parents[i]`, `.resolve()`, `.absolute()`, `os.path.join`, `os.path.dirname` and `os.path.abspath` |
-| `config=self.agents_config["writer"]`                         | The fields of that entry in the crewAI YAML config next to the code            |
+| `config=self.agents_config["writer"]`                                                  | The fields of that entry in the crewAI YAML config next to the code                                                                                                                                               |
 
 Anything else, such as a function parameter, an attribute of a runtime object or a value
 read from the environment, is kept in the text as `{expression}` and counted in
@@ -336,12 +336,12 @@ allocator, which is much slower for the many small allocations parsing makes.
 
 Measured with the release build on a 16-thread Mac, wall-clock time for the whole scan:
 
-| Codebase                                  | Files  | Size    | Parsed | Time       |
-| ----------------------------------------- | ------ | ------- | ------ | ---------- |
-| `langgraph` repository                    | 479    | 6.8 MiB | 394    | ~70 ms     |
-| 130 agent-skill repositories              | 393    | 6.1 MiB | 75     | ~200 ms    |
-| A Python 3.13 `site-packages`             | 13,155 | 142 MiB | 2,230  | ~600 ms    |
-| Python 3.13 standard library, `--all`     | 1,748  | 32 MiB  | 1,748  | ~110 ms    |
+| Codebase                              | Files  | Size    | Parsed | Time    |
+| ------------------------------------- | ------ | ------- | ------ | ------- |
+| `langgraph` repository                | 479    | 6.8 MiB | 394    | ~70 ms  |
+| 130 agent-skill repositories          | 393    | 6.1 MiB | 75     | ~200 ms |
+| A Python 3.13 `site-packages`         | 13,155 | 142 MiB | 2,230  | ~600 ms |
+| Python 3.13 standard library, `--all` | 1,748  | 32 MiB  | 1,748  | ~110 ms |
 
 Scan time grows with the number of files that mention a framework, since the others are
 skipped before parsing, not with the size of the codebase.
@@ -383,16 +383,16 @@ directories and [`tests/cli.rs`](tests/cli.rs) runs the command.
 
 ### Project layout
 
-| Path                                   | Purpose                                                                     |
-| -------------------------------------- | --------------------------------------------------------------------------- |
-| [`src/discovery.rs`](src/discovery.rs) | Finding files, the prefilter, the agent registry and the scan               |
-| [`src/checker.rs`](src/checker.rs)     | The walk over the syntax tree that builds the semantic model                |
-| [`src/semantic.rs`](src/semantic.rs)   | Scopes, bindings and qualified names                                        |
-| [`src/prompts.rs`](src/prompts.rs)     | The prompt sink registry and how prompt text is worked out                  |
-| [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs         |
-| [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                            |
-| [`src/main.rs`](src/main.rs)           | The `gglint` command                                                        |
-| [`gglint.pyi`](gglint.pyi)             | Type stubs for the Python package                                           |
+| Path                                   | Purpose                                                             |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| [`src/discovery.rs`](src/discovery.rs) | Finding files, the prefilter, the agent registry and the scan       |
+| [`src/checker.rs`](src/checker.rs)     | The walk over the syntax tree that builds the semantic model        |
+| [`src/semantic.rs`](src/semantic.rs)   | Scopes, bindings and qualified names                                |
+| [`src/prompts.rs`](src/prompts.rs)     | The prompt sink registry and how prompt text is worked out          |
+| [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
+| [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                    |
+| [`src/main.rs`](src/main.rs)           | The `gglint` command                                                |
+| [`gglint.pyi`](gglint.pyi)             | Type stubs for the Python package                                   |
 
 ### Common changes
 
