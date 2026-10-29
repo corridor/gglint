@@ -220,3 +220,34 @@ fn a_missing_path_gives_no_results() {
     let dir = TempDir::new();
     assert!(scan_dir(&dir.path().join("missing")).is_empty());
 }
+
+#[test]
+fn only_prompts_with_text_written_in_the_code_are_reported() {
+    let dir = TempDir::new();
+    dir.write("app/prompts.py", "SUPPORT = \"You answer support tickets.\"\n");
+    dir.write(
+        "app/bot.py",
+        "from langchain_core.messages import HumanMessage, SystemMessage\n\
+         from app.prompts import SUPPORT\n\
+         from vendor import VENDOR_PROMPT\n\
+         \n\
+         def relay(state, name, system_prompt):\n\
+         \x20   for m in state[\"messages\"]:\n\
+         \x20       HumanMessage(content=m.content)\n\
+         \x20   SystemMessage(content=system_prompt)\n\
+         \x20   SystemMessage(content=f\"\\n{system_prompt}\\n\")\n\
+         \x20   SystemMessage(content=VENDOR_PROMPT)\n\
+         \x20   {\"role\": \"user\", \"content\": state[\"input\"]}\n\
+         \x20   HumanMessage(content=f\"Hi {name}, how can I help?\")\n\
+         \x20   SystemMessage(content=SUPPORT)\n",
+    );
+
+    let results = scan_dir(dir.path());
+
+    let texts: Vec<&str> = results
+        .iter()
+        .flat_map(|result| &result.prompts)
+        .map(|(_, prompt)| prompt.text.as_str())
+        .collect();
+    assert_eq!(texts, vec!["Hi {name}, how can I help?", "You answer support tickets."]);
+}

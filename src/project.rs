@@ -203,6 +203,15 @@ pub fn render(parts: &[Part]) -> (String, usize) {
     (text, dynamic_parts)
 }
 
+/// Whether any of the text was written in the code, rather than all of it being known
+/// only at runtime. Call it after `resolve`, which turns text from other files into
+/// [`Part::Text`].
+pub fn has_written_text(parts: &[Part]) -> bool {
+    parts
+        .iter()
+        .any(|part| matches!(part, Part::Text(text) if !text.trim().is_empty()))
+}
+
 // ---------------------------------------------------------------------------
 // Resolution
 // ---------------------------------------------------------------------------
@@ -787,28 +796,14 @@ researcher:
                 ("instruction".into(), "You advise.".into(), strings(&["app/prompts/root.py"])),
                 ("instruction".into(), "Be brief.".into(), strings(&["app/prompts/root.py"])),
                 ("instruction".into(), "Be brief.".into(), strings(&["app/prompts/root.py"])),
-                // Two `return`s: which one runs is only known at runtime.
-                ("instruction".into(), "{branches(1)}".into(), vec![]),
+                // `branches(1)` has two `return`s, and which one runs is only known at
+                // runtime. `os.environ['PROMPT']` and `prompts.MISSING` have no text in
+                // the code. None of them is reported.
                 ("instruction".into(), "Summarise.".into(), strings(&["app/system.md"])),
-                (
-                    "instruction".into(),
-                    "{os.environ['PROMPT']}{prompts.MISSING}".into(),
-                    vec![]
-                ),
                 // The config has no `backstory`, so none is passed. `tasks.yaml` doesn't
-                // exist, so the task's fields stay unknown.
+                // exist, so the task has no text and isn't reported.
                 ("role".into(), "Researcher".into(), strings(&["crew/config/agents.yaml"])),
                 ("goal".into(), "Find {topic}".into(), strings(&["crew/config/agents.yaml"])),
-                (
-                    "description".into(),
-                    "{self.tasks_config['missing']}".into(),
-                    vec![]
-                ),
-                (
-                    "expected_output".into(),
-                    "{self.tasks_config['missing']}".into(),
-                    vec![]
-                ),
             ]
         );
     }

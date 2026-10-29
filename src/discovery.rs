@@ -316,6 +316,11 @@ pub fn scan(roots: &[PathBuf], parse_all: bool) -> Vec<FileResult> {
     // Prompt text imported from other modules or read from other files. Those files
     // may have been skipped by the prefilter, so this opens them as needed.
     project::resolve(&mut results, &files);
+    // A prompt is text someone wrote. One made only of values known at runtime, such
+    // as `HumanMessage(content=m.content)` relaying a message, has nothing to read.
+    for result in &mut results {
+        result.prompts.retain(|(_, prompt)| project::has_written_text(&prompt.parts));
+    }
     results
 }
 
