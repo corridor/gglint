@@ -24,16 +24,26 @@
 //! While walking, the checker also records every call, class base and decorator as a
 //! [`Candidate`], together with the qualified name it resolved to at that point. Agent
 //! discovery then only has to compare those names against a registry.
+//!
+//! Prompts are found during the walk itself (see `prompts.rs`), because a prompt's
+//! text depends on what its variables hold at that point. To make that possible, the
+//! checker remembers, for each variable, the text it was assigned, the file path it
+//! was assigned (`PROMPTS = Path(__file__).parent / "prompts"`), and the call it was
+//! assigned (`client = Anthropic()`, so `client.messages.create` can be recognised).
+//! It also remembers what each function returns, so `instruction=build()` can use it.
 
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{
     self as ast, Comprehension, ExceptHandler, Expr, ExprContext, ModModule, Parameters,
     Pattern, Stmt,
 };
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::{Ranged, TextRange, TextSize};
+use rustc_hash::FxHashMap;
 
+use crate::prompts::{self, Piece, Prompt, PromptSink, SourcePath};
 use crate::semantic::{
-    BindingKind, QualifiedName, ScopeId, ScopeKind, SemanticModel, Snapshot, StarImport,
+    BindingId, BindingKind, QualifiedName, ScopeId, ScopeKind, SemanticModel, Snapshot,
+    StarImport,
 };
 
 /// A syntax node that might create an agent, found during the walk.
@@ -76,17 +86,38 @@ impl Ranged for Candidate<'_> {
 /// Work postponed until the enclosing scope has been fully visited.
 #[derive(Default)]
 struct Visit<'a> {
-    functions: Vec<(Snapshot, &'a ast::StmtFunctionDef)>,
+    functions: Vec<(Snapshot, &'a ast::StmtFunctionDef, BindingId)>,
     lambdas: Vec<(Snapshot, &'a ast::ExprLambda)>,
 }
 
 pub struct Checker<'a> {
     pub semantic: SemanticModel<'a>,
     pub candidates: Vec<Candidate<'a>>,
+    pub prompts: Vec<Prompt<'a>>,
     visit: Visit<'a>,
     /// The name of the module-level assignment whose value is being visited, until the
     /// call that is that value takes it.
     assigned_to: Option<&'a str>,
+    /// The text of each variable assigned a string, worked out where it's assigned:
+    /// `BASE = "You are..."`, `RULES = BASE + "..."`.
+    binding_texts: FxHashMap<BindingId, Vec<Piece<'a>>>,
+    /// The call each variable is assigned: `client = Anthropic()`.
+    binding_calls: FxHashMap<BindingId, &'a ast::ExprCall>,
+    /// Functions whose return value is a prompt, by the start of their name:
+    /// `@agent.instructions def f(): ...`.
+    prompt_functions: FxHashMap<TextSize, (&'static PromptSink, String)>,
+    /// The prompt function whose body is being visited, and its scope.
+    prompt_function: Option<(ScopeId, &'static PromptSink, String)>,
+    /// The file path each variable is assigned:
+    /// `PROMPTS = Path(__file__).parent / "prompts"`.
+    binding_paths: FxHashMap<BindingId, SourcePath<'a>>,
+    /// The file each `with open(...) as f:` variable reads.
+    binding_opened: FxHashMap<BindingId, SourcePath<'a>>,
+    /// The text each function returns, if it has exactly one `return` and that
+    /// returns a string. `None` once a second `return` is seen.
+    function_returns: FxHashMap<BindingId, Option<Vec<Piece<'a>>>>,
+    /// The function whose body is being visited, and its scope.
+    function: Option<(ScopeId, BindingId)>,
 }
 
 /// Builds the semantic model for a module and collects agent candidates.
@@ -96,8 +127,17 @@ pub fn check_module<'a>(module: &'a ModModule, module_path: Vec<&'a str>) -> Che
     let mut checker = Checker {
         semantic: SemanticModel::new(module_path),
         candidates: Vec::new(),
+        prompts: Vec::new(),
         visit: Visit::default(),
         assigned_to: None,
+        binding_texts: FxHashMap::default(),
+        binding_calls: FxHashMap::default(),
+        prompt_functions: FxHashMap::default(),
+        prompt_function: None,
+        binding_paths: FxHashMap::default(),
+        binding_opened: FxHashMap::default(),
+        function_returns: FxHashMap::default(),
+        function: None,
     };
     checker.visit_body(&module.body);
     checker.visit_deferred();
@@ -173,12 +213,12 @@ impl<'a> Visitor<'a> for Checker<'a> {
                     self.visit_annotation(returns);
                 }
 
-                self.add_binding(
+                let binding = self.semantic.push_binding(
                     function.name.as_str(),
                     function.name.range,
                     BindingKind::FunctionDefinition,
                 );
-                self.visit.functions.push((self.semantic.snapshot(), function));
+                self.visit.functions.push((self.semantic.snapshot(), function, binding));
             }
             Stmt::ClassDef(class) => {
                 for decorator in &class.decorator_list {
@@ -228,6 +268,11 @@ impl<'a> Visitor<'a> for Checker<'a> {
                     self.visit_expr(target);
                 }
             }
+            Stmt::Assign(_) | Stmt::AnnAssign(_) | Stmt::AugAssign(_) => self.visit_assignment(stmt),
+            Stmt::Return(ast::StmtReturn { value, .. }) => {
+                self.visit_return(value.as_deref());
+                visitor::walk_stmt(self, stmt);
+            }
             Stmt::Global(global) => {
                 if !self.semantic.at_top_level() {
                     for name in &global.names {
@@ -252,6 +297,10 @@ impl<'a> Visitor<'a> for Checker<'a> {
         match expr {
             Expr::Call(call) => {
                 let qualified_name = self.resolve_expr(&call.func);
+                if let Some((sink, via)) = self.prompt_sink(&call.func, qualified_name.as_ref()) {
+                    let found = prompts::prompts_of_call(self, sink, via.to_string(), call);
+                    self.prompts.extend(found);
+                }
                 self.candidates.push(Candidate {
                     kind: CandidateKind::Call(call),
                     qualified_name,
@@ -267,6 +316,12 @@ impl<'a> Visitor<'a> for Checker<'a> {
                 ..
             }) => {
                 self.add_binding(id.as_str(), *range, BindingKind::Assignment);
+            }
+            Expr::Dict(dict) => {
+                if let Some(prompt) = prompts::prompt_of_message_dict(self, dict) {
+                    self.prompts.push(prompt);
+                }
+                visitor::walk_expr(self, expr);
             }
             Expr::Named(named) => {
                 self.visit_expr(&named.value);
@@ -296,6 +351,23 @@ impl<'a> Visitor<'a> for Checker<'a> {
                 None => self.visit_generators(&comprehension.generators, &[comprehension.value.as_ref()]),
             },
             _ => visitor::walk_expr(self, expr),
+        }
+    }
+
+    fn visit_with_item(&mut self, with_item: &'a ast::WithItem) {
+        self.visit_expr(&with_item.context_expr);
+        let Some(target) = &with_item.optional_vars else {
+            return;
+        };
+        self.visit_expr(target);
+        // `with open(path) as f:`, so `f.read()` reads `path`.
+        let (Expr::Call(call), Expr::Name(name)) = (&with_item.context_expr, target.as_ref()) else {
+            return;
+        };
+        if let Some(path) = prompts::opened_path(self, call) {
+            if let Some(binding) = self.semantic.current_scope().get(name.id.as_str()) {
+                self.binding_opened.insert(binding, path);
+            }
         }
     }
 
@@ -338,6 +410,14 @@ impl<'a> Checker<'a> {
             _ => decorator,
         };
         let qualified_name = self.resolve_expr(target);
+        if let Some(function) = function {
+            if let Some((sink, via)) = self.prompt_sink(target, qualified_name.as_ref()) {
+                if sink.returns_prompt() {
+                    self.prompt_functions
+                        .insert(function.name.range.start(), (sink, via.to_string()));
+                }
+            }
+        }
         self.candidates.push(Candidate {
             kind: CandidateKind::Decorator {
                 expr: decorator,
@@ -388,12 +468,19 @@ impl<'a> Checker<'a> {
     fn visit_deferred(&mut self) {
         let snapshot = self.semantic.snapshot();
         while !self.visit.functions.is_empty() || !self.visit.lambdas.is_empty() {
-            for (snapshot, function) in std::mem::take(&mut self.visit.functions) {
+            for (snapshot, function, binding) in std::mem::take(&mut self.visit.functions) {
                 self.semantic.restore(snapshot);
-                self.semantic.push_scope(ScopeKind::Function);
+                let scope = self.semantic.push_scope(ScopeKind::Function);
+                self.function = Some((scope, binding));
+                self.prompt_function = self
+                    .prompt_functions
+                    .get(&function.name.range.start())
+                    .map(|(sink, via)| (scope, *sink, via.clone()));
                 self.bind_parameters(&function.parameters);
                 self.visit_body(&function.body);
             }
+            self.prompt_function = None;
+            self.function = None;
             for (snapshot, lambda) in std::mem::take(&mut self.visit.lambdas) {
                 self.semantic.restore(snapshot);
                 self.semantic.push_scope(ScopeKind::Lambda);
@@ -404,6 +491,208 @@ impl<'a> Checker<'a> {
             }
         }
         self.semantic.restore(snapshot);
+    }
+
+    // -----------------------------------------------------------------------
+    // Prompts
+    // -----------------------------------------------------------------------
+
+    /// Visits `x = ...`, `x: T = ...` and `x += ...`, and remembers what `x` holds if
+    /// it's a string or a call.
+    fn visit_assignment(&mut self, stmt: &'a Stmt) {
+        let (target, value, append) = match stmt {
+            Stmt::Assign(ast::StmtAssign { targets, value, .. }) => match targets.as_slice() {
+                [Expr::Name(name)] => (Some(name), value.as_ref(), false),
+                _ => (None, value.as_ref(), false),
+            },
+            Stmt::AnnAssign(ast::StmtAnnAssign {
+                target,
+                value: Some(value),
+                ..
+            }) => (target.as_name_expr(), value.as_ref(), false),
+            Stmt::AugAssign(ast::StmtAugAssign {
+                target,
+                op: ast::Operator::Add,
+                value,
+                ..
+            }) => (target.as_name_expr(), value.as_ref(), true),
+            _ => {
+                visitor::walk_stmt(self, stmt);
+                return;
+            }
+        };
+        let Some(target) = target else {
+            visitor::walk_stmt(self, stmt);
+            return;
+        };
+
+        // The value is read before the name is rebound: in `p = p + "..."` and
+        // `p += "..."`, the `p` on the right is the old one.
+        let path = if append || value.is_string_literal_expr() {
+            None
+        } else {
+            prompts::path_of(self, value)
+        };
+        let text = if append {
+            let previous = self
+                .semantic
+                .lookup_symbol(target.id.as_str())
+                .and_then(|binding| self.binding_texts.get(&binding));
+            previous.and_then(|previous| {
+                let mut text = previous.clone();
+                text.extend(prompts::text_or_dynamic(self, value));
+                Some(text)
+            })
+        } else {
+            prompts::text_of(self, value)
+        };
+
+        visitor::walk_stmt(self, stmt);
+
+        let Some(binding) = self.semantic.current_scope().get(target.id.as_str()) else {
+            return;
+        };
+        if let Some(text) = text {
+            self.binding_texts.insert(binding, text);
+        }
+        if let Some(path) = path {
+            self.binding_paths.insert(binding, path);
+        }
+        if let Expr::Call(call) = value {
+            if !append {
+                self.binding_calls.insert(binding, call);
+            }
+        }
+    }
+
+    /// The text a variable holds, if it was assigned a string.
+    pub fn binding_text(&self, binding: BindingId) -> Option<&[Piece<'a>]> {
+        self.binding_texts.get(&binding).map(Vec::as_slice)
+    }
+
+    /// The file path a variable holds, if it was assigned one.
+    pub fn binding_path(&self, binding: BindingId) -> Option<&SourcePath<'a>> {
+        self.binding_paths.get(&binding)
+    }
+
+    /// The file a `with open(...) as f:` variable reads.
+    pub fn binding_opened(&self, binding: BindingId) -> Option<&SourcePath<'a>> {
+        self.binding_opened.get(&binding)
+    }
+
+    /// The text `function` returns, if it has exactly one `return` and that returns a
+    /// string.
+    pub fn function_return(&self, function: BindingId) -> Option<&[Piece<'a>]> {
+        self.function_returns.get(&function)?.as_deref()
+    }
+
+    /// Records what the function being visited returns, and reports it as a prompt
+    /// if the function is decorated as one (`@agent.instructions`).
+    fn visit_return(&mut self, value: Option<&'a Expr>) {
+        if let Some((scope, function)) = self.function {
+            if scope == self.semantic.scope_id {
+                let text = value.and_then(|value| prompts::text_of(self, value));
+                self.function_returns
+                    .entry(function)
+                    .and_modify(|returns| *returns = None)
+                    .or_insert(text);
+            }
+        }
+        let Some(value) = value else {
+            return;
+        };
+        if let Some((scope, sink, via)) = &self.prompt_function {
+            if *scope == self.semantic.scope_id {
+                self.prompts.push(Prompt {
+                    framework: sink.framework,
+                    role: prompts::Role::System,
+                    via: Some(via.clone()),
+                    argument: "return",
+                    value,
+                    pieces: prompts::text_or_dynamic(self, value),
+                    call: None,
+                });
+            }
+        }
+    }
+
+    /// The YAML file a crewAI `self.agents_config` or `self.tasks_config` refers to:
+    /// the class attribute of that name (`agents_config = "config/agents.yaml"`) in
+    /// the class being visited, or crewAI's default.
+    pub fn crewai_config_file(&self, attribute: &'a ast::ExprAttribute) -> Option<&'a str> {
+        let Expr::Name(receiver) = attribute.value.as_ref() else {
+            return None;
+        };
+        if receiver.id.as_str() != "self" {
+            return None;
+        }
+        let name = attribute.attr.as_str();
+        let class = self
+            .semantic
+            .ancestor_ids(self.semantic.scope_id)
+            .find(|id| self.semantic.scopes[*id].kind == ScopeKind::Class);
+        let declared = class
+            .and_then(|class| self.semantic.scopes[class].get(name))
+            .and_then(|binding| match self.binding_text(binding)? {
+                [Piece::Text(text, _)] => Some(*text),
+                _ => None,
+            });
+        declared.or(match name {
+            "agents_config" => Some("config/agents.yaml"),
+            "tasks_config" => Some("config/tasks.yaml"),
+            _ => None,
+        })
+    }
+
+    /// The prompt sink `func` refers to, and its qualified name, if any. `resolved` is
+    /// what `func` already resolved to, which the walker works out for every call.
+    ///
+    /// Methods on objects are resolved through the call the object was created by:
+    /// with `client = Anthropic()`, `client.messages.create` is
+    /// `anthropic.Anthropic.messages.create`.
+    pub fn prompt_sink(
+        &self,
+        func: &'a Expr,
+        resolved: Option<&QualifiedName<'a>>,
+    ) -> Option<(&'static PromptSink, QualifiedName<'a>)> {
+        if let Some(name) = resolved {
+            return prompts::find_sink(name.segments()).map(|sink| (sink, name.clone()));
+        }
+        // An unresolved method call, such as `client.messages.create`. Almost every one
+        // stops here, before the object is looked up.
+        let Expr::Attribute(attribute) = func else {
+            return None;
+        };
+        if !prompts::is_sink_method(attribute.attr.as_str()) {
+            return None;
+        }
+        let name = self.resolve_through_instance(func)?;
+        let sink = prompts::find_sink(name.segments())?;
+        Some((sink, name))
+    }
+
+    /// `client.messages.create`, where `client = Anthropic()`, or
+    /// `Anthropic().messages.create` → `anthropic.Anthropic.messages.create`.
+    fn resolve_through_instance(&self, expr: &'a Expr) -> Option<QualifiedName<'a>> {
+        let mut tail = Vec::new();
+        let mut current = expr;
+        while let Expr::Attribute(attribute) = current {
+            tail.push(attribute.attr.as_str());
+            current = &attribute.value;
+        }
+        if tail.is_empty() {
+            return None;
+        }
+        tail.reverse();
+        let call = match current {
+            Expr::Name(name) => {
+                let binding = self.semantic.lookup_symbol(name.id.as_str())?;
+                *self.binding_calls.get(&binding)?
+            }
+            Expr::Call(call) => call,
+            _ => return None,
+        };
+        Some(self.resolve_expr(&call.func)?.append(&tail))
     }
 
     // -----------------------------------------------------------------------

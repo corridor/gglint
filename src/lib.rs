@@ -1,11 +1,15 @@
-//! gglint: discovers AI agents defined in Python source code.
+//! gglint: discovers the AI agents and prompts defined in Python source code.
 //!
 //! The pipeline for each file:
 //!
 //! ```text
 //! source text ─ruff_python_parser─▶ syntax tree ─checker.rs─▶ semantic model + candidates
-//!                                                         ─discovery.rs─▶ agents
+//!                                                         ─discovery.rs─▶ agents, prompts
 //! ```
+//!
+//! Files are checked in parallel. Afterwards, `project.rs` fills in prompt text that
+//! lives in other files: constants imported from other modules, text files read at
+//! runtime, and crewAI YAML configs. It only opens the files prompts point to.
 //!
 //! Tokenizing and parsing are done by Ruff's parser, used as a library. `checker.rs` is
 //! Python-specific. `semantic.rs` doesn't know about any language.
@@ -18,6 +22,8 @@
 
 pub mod checker;
 pub mod discovery;
+pub mod project;
+pub mod prompts;
 pub mod semantic;
 
 #[cfg(feature = "python")]

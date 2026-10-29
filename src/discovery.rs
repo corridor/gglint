@@ -1,5 +1,6 @@
 //! Agent discovery: matches what the checker found against a registry of agent
-//! constructors, and scans directories of Python files in parallel.
+//! constructors, and scans directories of Python files in parallel. Prompts are found
+//! by the checker (see `prompts.rs`) and turned into results here.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,8 @@ use ruff_python_parser::parse_unchecked_source;
 use ruff_text_size::{Ranged, TextSize};
 
 use crate::checker::{CandidateKind, Checker, check_module};
+use crate::project::{self, FileContext, Part};
+use crate::prompts::{self, Role};
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -207,6 +210,66 @@ pub fn discover(checker: &Checker<'_>) -> Vec<DiscoveredAgent> {
     agents
 }
 
+#[derive(Debug)]
+pub struct DiscoveredPrompt {
+    pub framework: &'static str,
+    pub role: Role,
+    /// What the prompt was passed to, such as `pydantic_ai.Agent`, or `None` for a
+    /// message dict.
+    pub via: Option<String>,
+    /// The argument it was passed as, such as `system_prompt`, or `return` for a
+    /// function whose return value is the prompt.
+    pub argument: &'static str,
+    /// The prompt's text. Parts only known at runtime are written as `{expression}`.
+    pub text: String,
+    /// How many parts of the text are only known at runtime.
+    pub dynamic_parts: usize,
+    /// The agent the prompt belongs to, by name or variable, when it's passed to the
+    /// call that creates the agent.
+    pub agent: Option<String>,
+    /// Other files the text came from: the module a constant was imported from, a
+    /// text file read at runtime, or a crewAI YAML config.
+    pub sources: Vec<PathBuf>,
+    pub offset: TextSize,
+    /// The text before the cross-file step fills it in.
+    pub(crate) parts: Vec<Part>,
+}
+
+/// Turns the checker's prompts into results, linking each to the agent created by the
+/// same call. Text from other files is filled in later, by `project::resolve`.
+pub fn discover_prompts(
+    checker: &Checker<'_>,
+    agents: &[DiscoveredAgent],
+    context: &FileContext<'_>,
+) -> Vec<DiscoveredPrompt> {
+    let mut found: Vec<DiscoveredPrompt> = checker
+        .prompts
+        .iter()
+        .map(|prompt| {
+            let agent = prompt.call.and_then(|call| {
+                let agent = agents.iter().find(|agent| agent.offset == call.start())?;
+                agent.name.clone().or_else(|| agent.variable.clone())
+            });
+            let parts = project::to_parts(checker, &prompt.pieces, context);
+            let (text, dynamic_parts) = project::render(&parts);
+            DiscoveredPrompt {
+                framework: prompt.framework,
+                role: prompt.role,
+                via: prompt.via.clone(),
+                argument: prompt.argument,
+                text,
+                dynamic_parts,
+                agent,
+                sources: Vec::new(),
+                offset: prompt.start(),
+                parts,
+            }
+        })
+        .collect();
+    found.sort_by_key(|prompt| prompt.offset);
+    found
+}
+
 /// The value of the first matching keyword argument, if it's a string literal.
 fn literal_keyword(call: &ExprCall, names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| {
@@ -246,16 +309,20 @@ pub fn scan(roots: &[PathBuf], parse_all: bool) -> Vec<FileResult> {
     files.sort_by(|(_, a), (_, b)| a.cmp(b));
 
     let prefilter = Prefilter::new();
-    files
+    let mut results: Vec<FileResult> = files
         .par_iter()
         .filter_map(|(root, path)| check_file(root, path, &prefilter, parse_all))
-        .collect()
+        .collect();
+    // Prompt text imported from other modules or read from other files. Those files
+    // may have been skipped by the prefilter, so this opens them as needed.
+    project::resolve(&mut results, &files);
+    results
 }
 
 /// Skips files that can't contain an agent before spending time parsing them.
 ///
-/// A file can only construct a framework's agent if it imports that framework, so its
-/// text must contain the framework's top-level module name. One fast byte search per
+/// A file can only construct a framework's agent, or pass a prompt to it, if it imports
+/// that framework, so its text must contain the framework's top-level module name. One fast byte search per
 /// name (`memchr` uses SIMD) is far cheaper than lexing and parsing. False positives,
 /// such as the word "agents" in a comment, only cost a parse.
 ///
@@ -270,6 +337,7 @@ impl Prefilter {
         let mut roots: Vec<&'static str> = REGISTRY
             .iter()
             .filter_map(|signature| signature.qualified_name.split('.').next())
+            .chain(prompts::registry_roots())
             .collect();
         roots.sort_unstable();
         roots.dedup();
@@ -308,6 +376,7 @@ pub struct FileResult {
     pub parsed: bool,
     pub warning: Option<String>,
     pub agents: Vec<(Location, DiscoveredAgent)>,
+    pub prompts: Vec<(Location, DiscoveredPrompt)>,
 }
 
 /// Reads, parses and checks one file.
@@ -326,6 +395,7 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
         parsed: false,
         warning: None,
         agents: Vec::new(),
+        prompts: Vec::new(),
     };
     if !parse_all && !prefilter.may_contain_agents(&source) {
         return Some(result);
@@ -345,11 +415,27 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
     }
 
     let module_path: Vec<&str> = module_path.iter().map(String::as_str).collect();
-    let checker = check_module(parsed.syntax(), module_path);
-    result.agents = discover(&checker)
-        .into_iter()
-        .map(|agent| (line_column(&source, agent.offset), agent))
-        .collect();
+    let checker = check_module(parsed.syntax(), module_path.clone());
+    let agents = discover(&checker);
+    let context = FileContext {
+        path,
+        root,
+        module_path: &module_path,
+        is_package: path.file_name().is_some_and(|name| name == "__init__.py"),
+        source: &source,
+    };
+    let prompts = discover_prompts(&checker, &agents, &context);
+    if !agents.is_empty() || !prompts.is_empty() {
+        let lines = LineIndex::new(&source);
+        result.agents = agents
+            .into_iter()
+            .map(|agent| (lines.location(agent.offset), agent))
+            .collect();
+        result.prompts = prompts
+            .into_iter()
+            .map(|prompt| (lines.location(prompt.offset), prompt))
+            .collect();
+    }
     Some(result)
 }
 
@@ -383,7 +469,7 @@ fn collect_python_files(path: &Path, files: &mut Vec<PathBuf>) {
 }
 
 /// `root/myapp/agents.py` → `["myapp", "agents"]`; `root/myapp/__init__.py` → `["myapp"]`.
-fn module_path(root: &Path, path: &Path) -> Vec<String> {
+pub(crate) fn module_path(root: &Path, path: &Path) -> Vec<String> {
     let relative = path.strip_prefix(root).unwrap_or(path);
     let mut segments: Vec<String> = relative
         .with_extension("")
@@ -399,12 +485,35 @@ fn module_path(root: &Path, path: &Path) -> Vec<String> {
     segments
 }
 
-/// Converts a byte offset to a 1-based line and column.
+/// The byte offset where each line starts, so turning an offset into a line number is a
+/// binary search (Ruff: `LineIndex`).
+///
+/// Counting newlines from the start of the file for every result made big files with
+/// many agents quadratic: a 1 MB test file with 195 agents spent 70% of its time there.
+struct LineIndex {
+    line_starts: Vec<usize>,
+}
+
+impl LineIndex {
+    fn new(source: &str) -> Self {
+        let mut line_starts = vec![0];
+        line_starts.extend(memchr::memchr_iter(b'\n', source.as_bytes()).map(|index| index + 1));
+        Self { line_starts }
+    }
+
+    /// Converts a byte offset to a 1-based line and column.
+    fn location(&self, offset: TextSize) -> Location {
+        let offset = usize::from(offset);
+        let line = self.line_starts.partition_point(|&start| start <= offset);
+        Location {
+            line,
+            column: offset - self.line_starts[line - 1] + 1,
+        }
+    }
+}
+
 fn line_column(source: &str, offset: TextSize) -> Location {
-    let before = &source[..usize::from(offset)];
-    let line = before.matches('\n').count() + 1;
-    let column = before.len() - before.rfind('\n').map_or(0, |index| index + 1) + 1;
-    Location { line, column }
+    LineIndex::new(source).location(offset)
 }
 
 #[cfg(test)]
@@ -498,6 +607,20 @@ triage = Agent(name="triage", instructions="...")
             variables,
             vec![Some("agent".to_string()), Some("other".to_string()), None, None]
         );
+    }
+
+    #[test]
+    fn line_index_locations() {
+        let lines = LineIndex::new("ab\ncd\n\nefg");
+        let at = |offset: u32| {
+            let location = lines.location(TextSize::new(offset));
+            (location.line, location.column)
+        };
+        assert_eq!(at(0), (1, 1));
+        assert_eq!(at(2), (1, 3));
+        assert_eq!(at(3), (2, 1));
+        assert_eq!(at(6), (3, 1));
+        assert_eq!(at(9), (4, 3));
     }
 
     #[test]
