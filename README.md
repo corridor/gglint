@@ -25,6 +25,7 @@ command.
 - [Installation](#installation)
 - [Python API](#python-api)
 - [Command line](#command-line)
+- [Asking questions](#asking-questions)
 - [Agents](#agents)
 - [Prompts](#prompts)
 - [Lineage graph](#lineage-graph)
@@ -196,6 +197,74 @@ $ gglint [--all] [--graph] [PATH ...]
   It is only useful for measuring the parser.
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
+
+## Asking questions
+
+`gglint ask` answers questions about the agents and prompts it finds, on your machine,
+in milliseconds, without a language model or an LLM API:
+
+```console
+$ gglint ask path/to/repo "which agents use gpt-4o"
+1 agent uses gpt-4o: support.
+  support/bot.py:7  agent support (langchain, openai:gpt-4o)
+(agents_by_model, layer 1, 0.41 ms)
+
+$ gglint chat path/to/repo         # one question per line, the repository scanned once
+$ gglint models                    # whether the embedding model is downloaded, and where
+$ gglint models pull               # download it ahead of time
+```
+
+`ask` and `chat` take `--offline` (never download) and `--no-embed` (keywords only).
+From Python:
+
+```python
+repo = gglint.Repo("path/to/repo")           # embed= and download= are optional
+answer = repo.ask("show the system prompt of support")
+print(answer.text, answer.intent, answer.elapsed_ms)
+for fact in answer.facts:
+    print(f"{fact.path}:{fact.line}", fact.label)
+```
+
+### What it answers
+
+A summary of the repository; the agents, prompts, models and frameworks; one agent's
+details or prompts; the agents using a model or framework; prompts with parts set at
+runtime; prompts read from other files; near-duplicate prompts; agents with no system
+prompt; what a file defines; and prompts about a topic ("prompts about refunds"). A name
+that isn't in the code gets the closest ones instead. Questions the code can't answer,
+such as why an agent misbehaves, are out of scope. Every answer lists the facts it rests
+on, each with its file and line.
+
+### How it works
+
+| Layer | What it does                                                                                                                                                                                                                                                                                                                                                                                                           | Speed (2,000 prompts) |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| 0     | A graph of the scan: agents, prompts, files, models, linked; near-duplicates found with MinHash ([`gaoya`](https://github.com/serega/gaoya)). One query per kind of question.                                                                                                                                                                                                                                          | < 1 ms                |
+| 1     | Understands the question: names matched to the repository's own (Jaro-Winkler, for typos), the kind of question by nearest example question ([`intents.txt`](src/ask/intents.txt)) using static embeddings ([model2vec](https://github.com/MinishLab/model2vec-rs), `potion-code-16M`), topic searches by [BM25](https://github.com/Michael-JB/bm25) fused with embedding similarity. Without the model, word overlap. | < 10 ms               |
+
+A static embedding model is a lookup table from token to vector: encoding a question is
+looking its tokens up and averaging them. No neural network runs, so it takes
+microseconds on any CPU. It is loaded once per process and shared by every `Repo`.
+
+Measured on a 2019 Intel i9 (8 cores), on the generated 2,000-prompt repository in
+[`tests/latency.rs`](tests/latency.rs): answers in 0.3 to 4 ms, the repository scanned
+and the embedding model loaded in about 0.5 s.
+
+### The model
+
+| Model                                                                           | Size  | Licence |
+| ------------------------------------------------------------------------------- | ----- | ------- |
+| [`minishlab/potion-code-16M`](https://huggingface.co/minishlab/potion-code-16M) | 65 MB | MIT     |
+
+It's downloaded from Hugging Face on first use, pinned to a commit and checked against
+its SHA-256 ([`src/ask/models.rs`](src/ask/models.rs)), and cached in
+`$GGLINT_MODELS_DIR`, else `$XDG_CACHE_HOME/gglint/models`, else
+`~/.cache/gglint/models`. For a machine without internet, copy that directory over and
+set `GGLINT_MODELS_DIR`. Without it, questions are understood by keywords. Layer 0
+never uses the network.
+
+The Cargo feature `embed` is on by default; `--no-default-features` builds gglint with
+Layer 0 and keyword understanding only, and nothing to download.
 
 ## Agents
 
@@ -512,6 +581,7 @@ directories, [`tests/graph.rs`](tests/graph.rs) builds lineage graphs from them 
 | [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
 | [`src/graph.rs`](src/graph.rs)         | The lineage graph and its JSON                                      |
 | [`examples/visualize.rs`](examples/visualize.rs) | A throwaway HTML viewer for the graph                     |
+| [`src/ask/`](src/ask/)                 | `gglint ask`: the graph, queries, understanding and its model       |
 | [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                    |
 | [`src/main.rs`](src/main.rs)           | The `gglint` command                                                |
 | [`gglint.pyi`](gglint.pyi)             | Type stubs for the Python package                                   |

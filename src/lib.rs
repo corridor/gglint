@@ -20,6 +20,7 @@
 // The syntax tree and model expose more than discovery reads today. Rules will use the rest.
 #![allow(dead_code)]
 
+pub mod ask;
 pub mod checker;
 pub mod discovery;
 pub mod graph;

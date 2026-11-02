@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use pyo3::exceptions::PyFileNotFoundError;
 use pyo3::prelude::*;
 
+use crate::ask;
 use crate::discovery::{FileResult, scan};
 use crate::graph;
 
@@ -206,14 +207,137 @@ fn lineage_graph<'py>(py: Python<'py>, path: PathBuf) -> PyResult<Bound<'py, PyA
     py.import("json")?.call_method1("loads", (json,))
 }
 
+/// One thing an answer rests on, and where it is in the code.
+#[pyclass(frozen, get_all, module = "gglint")]
+struct Fact {
+    /// The file, relative to the scanned directory, with `/` separators.
+    path: String,
+    /// 1-based.
+    line: usize,
+    label: String,
+}
+
+#[pymethods]
+impl Fact {
+    fn __repr__(&self) -> String {
+        format!("Fact(path={:?}, line={}, label={:?})", self.path, self.line, self.label)
+    }
+}
+
+/// An answer to a question about the code.
+#[pyclass(frozen, module = "gglint")]
+struct Answer {
+    inner: ask::Answer,
+}
+
+#[pymethods]
+impl Answer {
+    /// The answer, from the graph of agents and prompts.
+    #[getter]
+    fn text(&self) -> &str {
+        &self.inner.text
+    }
+
+    /// What the answer rests on.
+    #[getter]
+    fn facts(&self) -> Vec<Fact> {
+        self.inner
+            .facts
+            .iter()
+            .map(|fact| Fact {
+                path: fact.path.clone(),
+                line: fact.line,
+                label: fact.label.clone(),
+            })
+            .collect()
+    }
+
+    /// The kind of question, such as `"agents_by_model"`.
+    #[getter]
+    fn intent(&self) -> &'static str {
+        self.inner.intent
+    }
+
+    /// 0 when keywords understood the question, 1 when the embedding model did.
+    #[getter]
+    fn layer(&self) -> u8 {
+        self.inner.layer
+    }
+
+    #[getter]
+    fn elapsed_ms(&self) -> f64 {
+        self.inner.elapsed.as_secs_f64() * 1000.0
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Answer(text={:?}, intent={:?}, facts={})", self.inner.text, self.inner.intent, self.inner.facts.len())
+    }
+}
+
+/// A scanned repository that answers questions about its agents and prompts.
+#[pyclass(frozen, module = "gglint")]
+struct Repo {
+    inner: ask::Repo,
+}
+
+#[pymethods]
+impl Repo {
+    /// Scans `path` and loads the embedding model, downloading it on first use unless
+    /// `download` is false. The model is loaded once per process and shared.
+    #[new]
+    #[pyo3(signature = (path, *, embed = true, download = true))]
+    fn new(py: Python<'_>, path: PathBuf, embed: bool, download: bool) -> PyResult<Repo> {
+        if !path.exists() {
+            return Err(PyFileNotFoundError::new_err(path.display().to_string()));
+        }
+        let options = ask::Options { embed, download };
+        let inner = py.detach(|| ask::Repo::open(std::slice::from_ref(&path), &options));
+        Ok(Repo { inner })
+    }
+
+    /// Why the embedding model couldn't be loaded, if it couldn't.
+    #[getter]
+    fn warnings(&self) -> Vec<String> {
+        self.inner.warnings.clone()
+    }
+
+    /// Answers `question` in milliseconds.
+    fn ask(&self, py: Python<'_>, question: &str) -> Answer {
+        Answer {
+            inner: py.detach(|| self.inner.ask(question)),
+        }
+    }
+}
+
+/// Downloads the embedding model `Repo` uses, if it isn't cached yet, and checks every
+/// file's SHA-256. For building it into an image ahead of time.
+#[cfg(feature = "embed")]
+#[pyfunction]
+fn pull_models(py: Python<'_>) -> PyResult<Vec<PathBuf>> {
+    use crate::ask::models::{EMBED_FILES, ensure, verify};
+
+    py.detach(|| {
+        EMBED_FILES
+            .iter()
+            .map(|file| ensure(file, true).and_then(|path| verify(file).map(|()| path)))
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+}
+
 #[pymodule]
 fn gglint(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Agent>()?;
     module.add_class::<Prompt>()?;
+    module.add_class::<Repo>()?;
+    module.add_class::<Answer>()?;
+    module.add_class::<Fact>()?;
     module.add_function(wrap_pyfunction!(find_agents, module)?)?;
     module.add_function(wrap_pyfunction!(find_prompts, module)?)?;
     module.add_function(wrap_pyfunction!(lineage_graph, module)?)?;
     module.add_function(wrap_pyfunction!(lineage_json, module)?)?;
+    #[cfg(feature = "embed")]
+    module.add_function(wrap_pyfunction!(pull_models, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

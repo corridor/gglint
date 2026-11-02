@@ -1,4 +1,6 @@
-//! Shared helpers for the integration tests.
+//! Shared helpers for the integration tests. Each test binary uses some of them.
+
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -10,8 +10,13 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [features]
+default = ["embed"]
 # Builds the Python bindings. maturin turns this on (see `pyproject.toml`).
 python = ["dep:pyo3"]
+# `gglint ask`, Layer 1: understands questions with static embeddings (model2vec).
+embed = ["download", "dep:model2vec-rs"]
+# Downloads the model above from Hugging Face on first use.
+download = ["dep:ureq", "dep:sha2"]
 
 [dependencies]
 memchr = "2"
@@ -23,5 +28,13 @@ rustc-hash = "2"
 ruff_python_ast = "=0.0.19"
 ruff_python_parser = "=0.0.19"
 ruff_text_size = "=0.0.19"
+# `gglint ask`. Every one of these is MIT or Apache-2.0 (see `THIRD_PARTY_LICENSES`).
+bm25 = "=2.3.2"
+gaoya = "=0.2.2"
+strsim = "=0.11.1"
+# `fancy-regex` keeps the tokenizer pure Rust (the default, `onig`, compiles C).
+model2vec-rs = { version = "=0.3.0", default-features = false, features = ["fancy-regex"], optional = true }
+ureq = { version = "=3.4.2", optional = true }
+sha2 = { version = "=0.11.1", optional = true }
 # `abi3-py311`: one wheel works on Python 3.11 and every later version.
 pyo3 = { version = "0.30", features = ["abi3-py311"], optional = true }
