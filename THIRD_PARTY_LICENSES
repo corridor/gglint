@@ -25,3 +25,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+`gglint ask` (src/ask/) uses the libraries and models below. Each is used under the
+MIT License (text above) or the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0,
+the same text as this project's LICENSE file).
+
+Libraries, linked into gglint:
+
+  bm25 2.3.2              MIT                Copyright (c) 2024 Michael Barlow
+                          https://github.com/Michael-JB/bm25
+  gaoya 0.2.2             MIT                Copyright (c) 2022 Sergey Melderis
+                          https://github.com/serega/gaoya
+  strsim 0.11.1           MIT                Copyright (c) 2015 Danny Guo
+                          https://github.com/rapidfuzz/strsim-rs
+  model2vec-rs 0.3.0      MIT                Copyright (c) 2025 The Minish Lab
+                          https://github.com/MinishLab/model2vec-rs
+  tokenizers, safetensors Apache-2.0         Copyright Hugging Face, Inc.
+                          https://github.com/huggingface/tokenizers
+  ureq 3.4.2              MIT OR Apache-2.0  Copyright (c) 2019 Martin Algesten
+                          https://github.com/algesten/ureq
+  sha2 0.11.1             MIT OR Apache-2.0  Copyright (c) 2016-2026 The RustCrypto Project Developers
+                          https://github.com/RustCrypto/hashes
+
+The model, downloaded on first use (never bundled), pinned by commit and SHA-256 in
+src/ask/models.rs:
+
+  minishlab/potion-code-16M                   MIT         The Minish Lab
+    https://huggingface.co/minishlab/potion-code-16M

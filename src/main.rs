@@ -1,17 +1,172 @@
-//! The `gglint` command: prints the agents found under the given directories, or with
-//! `--graph`, the lineage graph as JSON.
+//! The `gglint` command: prints the agents found under the given directories, or the
+//! lineage graph as JSON, and answers questions about them.
+//!
+//! ```text
+//! gglint [--all] [PATH ...]           list agents and prompts
+//! gglint --graph [PATH ...]           print the lineage graph as JSON
+//! gglint ask [FLAGS] [PATH] QUESTION  answer one question
+//! gglint chat [FLAGS] [PATH]          answer each line read from standard input
+//! gglint models [pull]                show, or download, the models `ask` uses
+//! ```
+//!
+//! Flags for `ask` and `chat`: `--offline` (never download), `--no-embed` (no
+//! embedding model: keywords only).
 
+use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
+use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("ask") => ask(&args[1..]),
+        Some("chat") => chat(&args[1..]),
+        Some("models") => models(&args[1..]),
+        _ => list(&args),
+    }
+}
+
+/// Splits `ask` and `chat` arguments into options and the remaining words.
+fn ask_options(args: &[String]) -> (Options, Vec<&str>) {
+    let mut options = Options::default();
+    let mut rest = Vec::new();
+    for arg in args {
+        match arg.as_str() {
+            "--offline" => options.download = false,
+            "--no-embed" => options.embed = false,
+            _ => rest.push(arg.as_str()),
+        }
+    }
+    (options, rest)
+}
+
+fn open(path: &str, options: &Options) -> Option<Repo> {
+    if !Path::new(path).exists() {
+        eprintln!("error: {path} doesn't exist");
+        return None;
+    }
+    let start = Instant::now();
+    let repo = Repo::open(&[PathBuf::from(path)], options);
+    eprintln!(
+        "gglint: {} agent(s) and {} prompt(s) in {} file(s), ready in {:.0} ms",
+        repo.graph().agents.len(),
+        repo.graph().prompts.len(),
+        repo.graph().files,
+        start.elapsed().as_secs_f64() * 1000.0,
+    );
+    Some(repo)
+}
+
+fn print_warnings(repo: &Repo) {
+    for warning in &repo.warnings {
+        eprintln!("warning: {warning}");
+    }
+}
+
+fn print_answer(answer: &Answer) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = writeln!(stdout, "{}", answer.text);
+    for fact in &answer.facts {
+        let _ = writeln!(stdout, "  {}:{}  {}", fact.path, fact.line, fact.label);
+    }
+    let _ = stdout.flush();
+    eprintln!(
+        "({}, layer {}, {:.2} ms)",
+        answer.intent,
+        answer.layer,
+        answer.elapsed.as_secs_f64() * 1000.0
+    );
+}
+
+fn ask(args: &[String]) -> ExitCode {
+    let (options, rest) = ask_options(args);
+    let (path, question) = match rest.as_slice() {
+        [question] => (".", question.to_string()),
+        [path, question @ ..] if !question.is_empty() => (*path, question.join(" ")),
+        _ => {
+            eprintln!("usage: gglint ask [--offline] [--no-embed] [PATH] QUESTION");
+            return ExitCode::FAILURE;
+        }
+    };
+    let Some(repo) = open(path, &options) else {
+        return ExitCode::FAILURE;
+    };
+    print_warnings(&repo);
+    print_answer(&repo.ask(&question));
+    ExitCode::SUCCESS
+}
+
+fn chat(args: &[String]) -> ExitCode {
+    let (options, rest) = ask_options(args);
+    let path = rest.first().copied().unwrap_or(".");
+    let Some(repo) = open(path, &options) else {
+        return ExitCode::FAILURE;
+    };
+    print_warnings(&repo);
+    let interactive = std::io::stdin().is_terminal();
+    if interactive {
+        eprintln!("Ask about the agents and prompts in {path}. Ctrl-D to quit.");
+    }
+    let mut lines = std::io::stdin().lock().lines();
+    loop {
+        if interactive {
+            eprint!("> ");
+        }
+        let Some(Ok(line)) = lines.next() else { break };
+        let question = line.trim();
+        if question.is_empty() {
+            continue;
+        }
+        print_answer(&repo.ask(question));
+    }
+    ExitCode::SUCCESS
+}
+
+#[cfg(feature = "download")]
+fn models(args: &[String]) -> ExitCode {
+    use gglint::ask::models::{EMBED_FILES, cached, ensure, local_path, verify};
+
+    let files = EMBED_FILES;
+    match args.first().map(String::as_str) {
+        None => {
+            for file in &files {
+                let state = if cached(std::slice::from_ref(file)) { "cached " } else { "missing" };
+                println!("{state}  {}/{}  {}", file.repo, file.file, local_path(file).display());
+            }
+            ExitCode::SUCCESS
+        }
+        Some("pull") => {
+            for file in &files {
+                if let Err(error) = ensure(file, true).and_then(|_| verify(file)) {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
+                println!("ok  {}/{}", file.repo, file.file);
+            }
+            ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!("unknown `gglint models` command {other:?}; use `gglint models` or `gglint models pull`");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "download"))]
+fn models(_: &[String]) -> ExitCode {
+    eprintln!("gglint was built without the embedding model (the `embed` feature)");
+    ExitCode::FAILURE
+}
+
+fn list(args: &[String]) -> ExitCode {
     let mut parse_all = false;
     let mut graph = false;
     let mut roots = Vec::new();
-    for arg in std::env::args().skip(1) {
+    for arg in args {
         match arg.as_str() {
             "--all" => parse_all = true,
             "--graph" => graph = true,

@@ -1,6 +1,7 @@
 """Finds the AI agents and prompts defined in Python source code. The scan runs in Rust."""
 
 import os
+import pathlib
 import typing as t
 
 __version__: str
@@ -137,3 +138,61 @@ def lineage_graph(path: str | os.PathLike[str]) -> LineageGraph:
 
 def lineage_json(path: str | os.PathLike[str]) -> str:
     """Return ``lineage_graph(path)`` as JSON text, to pass on without parsing it."""
+
+@t.final
+class Fact:
+    """One thing an answer rests on, and where it is in the code."""
+
+    path: str
+    """The file, relative to the scanned directory, with ``/`` separators."""
+    line: int
+    """1-based."""
+    label: str
+
+@t.final
+class Answer:
+    """An answer to a question about the code."""
+
+    @property
+    def text(self) -> str:
+        """The answer, from the graph of agents and prompts."""
+    @property
+    def facts(self) -> list[Fact]:
+        """What the answer rests on."""
+    @property
+    def intent(self) -> str:
+        """The kind of question, such as ``"agents_by_model"``."""
+    @property
+    def layer(self) -> t.Literal[0, 1]:
+        """0 when keywords understood the question, 1 when the embedding model did."""
+    @property
+    def elapsed_ms(self) -> float: ...
+
+@t.final
+class Repo:
+    """A scanned repository that answers questions about its agents and prompts, on this machine, without a language
+    model."""
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        embed: bool = True,
+        download: bool = True,
+    ) -> None:
+        """Scan ``path`` and load the embedding model, downloading it on first use unless ``download`` is false.
+
+        The model is loaded once per process and shared. Raises ``FileNotFoundError`` if ``path`` doesn't exist.
+        """
+    @property
+    def warnings(self) -> list[str]:
+        """Why the embedding model couldn't be loaded, if it couldn't."""
+    def ask(self, question: str) -> Answer:
+        """Answer ``question`` in milliseconds."""
+
+def pull_models() -> list[pathlib.Path]:
+    """Download the embedding model ``Repo`` uses, if it isn't cached yet, and check its files' SHA-256.
+
+    The model goes to ``$GGLINT_MODELS_DIR`` (else ``~/.cache/gglint/models``). Returns the paths of its files. For
+    building it into an image ahead of time. Raises ``RuntimeError`` if it can't be downloaded or doesn't match.
+    """
