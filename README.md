@@ -10,9 +10,9 @@ gglint statically analyses AI agents. It reads a Python codebase and reports:
 - **Lineage**: a graph of which text reaches which agent: the constants, functions, files
   and config entries prompt text comes from, the prompts built from them, and the agents
   they are given to.
-- **Diagrams**: the LangGraph graphs the code builds, drawn as LangGraph draws them, with
-  what each node does: the models it calls, the prompts, tools and project functions it
-  uses, and when each branch is taken.
+- **Diagrams**: the LangGraph graphs the code builds, at two levels of detail: drawn as
+  LangGraph draws them, with what each node does, and as the parts they're made of, such
+  as a router, an agent with its tools and a guardrail, and how work moves between them.
 
 gglint never runs the code it reads. Nothing is imported, no dependency is installed and
 no environment is built, so it is safe to point at any repository, including untrusted
@@ -207,7 +207,7 @@ $ gglint diagram [TIER] [--json] [PATH ...]
 ```
 
 - Prints the [diagram](#diagrams) of the LangGraph graphs under the paths as Mermaid, or as
-  JSON with `--json`. `TIER` is the level of detail, `code` by default.
+  JSON with `--json`. `TIER` is the level of detail, `code` (the default) or `workflow`.
 - It exits with status 1 when no graph is found.
 
 ## Asking questions
@@ -477,15 +477,20 @@ cargo run --release --example visualize -- path/to/repo graph.html
 ## Diagrams
 
 `gglint diagram` draws the LangGraph graphs a codebase builds, from the code that builds
-them, without running it.
+them, without running it, at two levels of detail. Each is built from the one below it,
+so every box of a higher level lists what it's made of in the lower one:
+
+- **code**: each graph as LangGraph draws it, with what each node does.
+- **workflow**: the parts of each graph, such as a router, an agent with its tools or a
+  guardrail, and how work moves between them.
 
 ```console
 $ gglint diagram code path/to/repo > graph.mmd    # Mermaid
-$ gglint diagram code --json path/to/repo         # the same as JSON
+$ gglint diagram workflow --json path/to/repo     # JSON
 ```
 
 ```python
-mermaid = gglint.diagram("path/to/repo", tier="code")
+mermaid = gglint.diagram("path/to/repo", tier="workflow")
 data = json.loads(gglint.diagram("path/to/repo", tier="code", format="json"))
 ```
 
@@ -569,6 +574,71 @@ The JSON has one entry per graph, with its `nodes` (`name`, `kind`, `function`, 
 
 Only files that mention `StateGraph` are read for graphs, so drawing adds nothing to the
 scan of other files, and under a millisecond to the scan of a graph's.
+
+### Workflow
+
+The `workflow` tier groups each graph's nodes into parts and draws how work moves between
+them. It is built from the `code` tier alone, with fixed rules, so it is the same on every
+run and every part can be followed back to its nodes. On a triage pipeline of ten nodes it
+draws this, shortened here:
+
+```mermaid
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	router{{"Router<hr/><small><em>run_future_agents_in_parallel<br>model: claude-sonnet-5-5<br>in parallel: run_pi, run_router, run_speculative_agent</em></small>"}}:::router
+	template["Template response"]:::responder
+	triage("Triage agent<hr/><small><em>identify_protocol · triage_decision · tools · update_state_after_tool · post_triage · pre_approval<br>model: claude-sonnet-5-5 ⟳ tools<br>uses: read_schmitt_thompson_protocol_document + 8 more</em></small>"):::agent
+	guardrail[/"Guardrail"\]:::guardrail
+	general("General medical agent"):::agent
+	__end__([<p>__end__</p>]):::last
+	__start__ --> router;
+	router -. &nbsp;NON_CLINICAL, OUT_OF_CONTEXT, HUMAN_AGENT&nbsp; .-> template;
+	router -. &nbsp;FOLLOWUP_CASE, ONGOING_TRIAGE, NEW_CASE&nbsp; .-> triage;
+	router -. &nbsp;CLINICAL_NON_TRIAGE, GENERAL_HEALTH&nbsp; .-> general;
+	triage --> guardrail;
+	general --> guardrail;
+	guardrail -. &nbsp;retry&nbsp; .-> triage;
+	guardrail -. &nbsp;retry&nbsp; .-> general;
+	guardrail -.-> __end__;
+	template --> __end__;
+	classDef router fill:#ece8ff,stroke:#6b5bd6
+	classDef guardrail fill:#fde4ec,stroke:#c2416b
+	classDef agent fill:#e3f4ec,stroke:#2e9d6a
+	classDef responder fill:#fff1dc,stroke:#d08a1e
+```
+
+Each node gets a role from its place in the graph and what it does:
+
+| Role         | The node                                                                       |
+| ------------ | ------------------------------------------------------------------------------ |
+| `guardrail`  | is where several nodes go next, can send their work back, and isn't the start  |
+| `supervisor` | is the same, but the graph starts there                                        |
+| `router`     | decides between two or more nodes                                              |
+| `agent`      | calls a model                                                                  |
+| `tools`      | is a `ToolNode`                                                                |
+| `responder`  | answers without a model and ends the graph                                     |
+| `step`       | does anything else                                                             |
+
+Then nodes that work as one become one part, by these rules in order:
+
+1. **A tool loop**: an agent, the `ToolNode` that runs the tools bound to its model, and
+   the steps from the tools back to it.
+2. **A shared resource**: agents that call the same project function, when at most half
+   of the graph's agents call it. A function every agent calls says nothing about which
+   belong together.
+3. **A producer**: a node whose output, a state key few nodes write, is read only by one
+   part, routers and guardrails aside, joins that part.
+
+A part is named after the word its nodes' names share most (ties go to the agent that runs
+the part's tools), or, for the only router or guardrail, after its role. An edge between
+parts stands for the edges between their nodes, and is labelled with what it's taken on:
+the enum values and quoted constants its conditions test, and its `path_map` keys. An edge
+from a guardrail back to a part that goes to it is a `retry`. Branches that are never
+returned are left out.
+
+The JSON has one entry per graph, with its `parts` (`name`, `role`, `members`, `models`,
+`tools`, `tool_loop`, `uses`, `parallel`) and `handoffs` (`source`, `target`,
+`conditional`, `retry`, `when`, and the `edges` of the `code` tier they stand for).
 
 ## How it works
 
@@ -665,7 +735,9 @@ says, not what it does:
   `HumanMessage(content="hello")`, are reported.
 - **Only the registered sinks are seen.** A prompt passed to an SDK or argument that is not
   in the registry is not found; see [Development](#development) to add one.
-- **Diagrams** read a graph from the builder's calls in the file that creates it. A node or
+- **Diagrams** read a graph from the builder's calls in the file that creates it. The
+  `workflow` tier's parts follow from the rules above, not from what the code is for: two
+  agents that do different jobs but share a narrow helper become one part. A node or
   edge named by a value only known at runtime is written as `{expression}`, and then no
   node is assumed to end the graph. A builder passed to another function, a router defined
   in another module, and a model made by a function in another module with more than one

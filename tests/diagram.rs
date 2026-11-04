@@ -178,3 +178,39 @@ fn several_graphs_are_each_drawn_in_a_box() {
     // A node named `end` doesn't end the box.
     assert!(mermaid.contains("\tg2_end(\"end\")\n"), "{mermaid}");
 }
+
+#[test]
+fn the_workflow_tier_groups_nodes_into_parts_and_lists_what_they_use() {
+    let dir = TempDir::new();
+    triage_project(&dir);
+
+    let results = results(&dir);
+    let mermaid = views::render(&results, Tier::Workflow, Format::Mermaid);
+    let json = views::render(&results, Tier::Workflow, Format::Json);
+
+    assert!(
+        mermaid.contains(
+            "\ttriage(\"Triage agent<hr/><small><em>triage<br>model: us.anthropic.claude-sonnet-5-5<br>uses: protocol</em></small>\"):::agent\n"
+        ),
+        "{mermaid}"
+    );
+    assert!(
+        mermaid.contains("\ttriage -. &nbsp;EMERGENCY&nbsp; .-> escalate;\n"),
+        "{mermaid}"
+    );
+    assert!(
+        mermaid.contains("\tclassDef agent fill:#e3f4ec,stroke:#2e9d6a\n"),
+        "{mermaid}"
+    );
+    assert!(
+        json.starts_with("{\"schema\":1,\"tier\":\"workflow\",\"graphs\":[{\"id\":\"graph:app.flow.workflow\""),
+        "{json}"
+    );
+    assert!(
+        json.contains(
+            "{\"source\":\"part:app.flow.workflow.triage\",\"target\":\"part:app.flow.workflow.escalate\",\
+             \"conditional\":true,\"retry\":false,\"when\":[\"EMERGENCY\"],\"edges\":[\"triage -> escalate\"]}"
+        ),
+        "{json}"
+    );
+}

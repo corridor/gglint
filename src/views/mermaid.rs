@@ -27,17 +27,50 @@ use crate::flow::{END, START};
 
 pub(crate) struct Flowchart {
     out: String,
+    /// `classDef` lines added to LangGraph's.
+    classes: String,
+}
+
+/// How a node is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shape {
+    Round,
+    Rect,
+    Hexagon,
+    Subroutine,
+    Trapezoid,
+    Stadium,
+}
+
+impl Shape {
+    fn delimiters(self) -> (&'static str, &'static str) {
+        match self {
+            Shape::Round => ("(", ")"),
+            Shape::Rect => ("[", "]"),
+            Shape::Hexagon => ("{{", "}}"),
+            Shape::Subroutine => ("[[", "]]"),
+            Shape::Trapezoid => ("[/", "\\]"),
+            Shape::Stadium => ("([", "])"),
+        }
+    }
 }
 
 impl Flowchart {
     pub(crate) fn new() -> Self {
         Self {
             out: String::from("---\nconfig:\n  flowchart:\n    curve: linear\n---\ngraph TD;\n"),
+            classes: String::new(),
         }
     }
 
-    /// A node. `id` must come from [`id`]. `details` are shown under the name.
+    /// A node, drawn as LangGraph draws one. `id` must come from [`id`]. `details` are
+    /// shown under the name.
     pub(crate) fn node(&mut self, id: &str, name: &str, details: &[String]) {
+        self.shaped_node(id, name, details, Shape::Round, None);
+    }
+
+    /// A node of the given shape, styled by `class`, from [`Self::class`].
+    pub(crate) fn shaped_node(&mut self, id: &str, name: &str, details: &[String], shape: Shape, class: Option<&str>) {
         if name == START {
             let _ = writeln!(self.out, "\t{id}([<p>{START}</p>]):::first");
             return;
@@ -46,7 +79,8 @@ impl Flowchart {
             let _ = writeln!(self.out, "\t{id}([<p>{END}</p>]):::last");
             return;
         }
-        let _ = write!(self.out, "\t{id}(\"{}", escape(name));
+        let (open, close) = shape.delimiters();
+        let _ = write!(self.out, "\t{id}{open}\"{}", escape(name));
         if !details.is_empty() {
             self.out.push_str("<hr/><small><em>");
             for (index, detail) in details.iter().enumerate() {
@@ -57,7 +91,18 @@ impl Flowchart {
             }
             self.out.push_str("</em></small>");
         }
-        self.out.push_str("\")\n");
+        self.out.push('"');
+        self.out.push_str(close);
+        if let Some(class) = class {
+            self.out.push_str(":::");
+            self.out.push_str(class);
+        }
+        self.out.push('\n');
+    }
+
+    /// A style for nodes, as a `classDef`: `class("router", "fill:#fdf1d6")`.
+    pub(crate) fn class(&mut self, name: &str, style: &str) {
+        let _ = writeln!(self.classes, "\tclassDef {name} {style}");
     }
 
     /// An edge between two ids from [`id`], dotted when it's conditional.
@@ -85,6 +130,7 @@ impl Flowchart {
              \tclassDef first fill-opacity:0\n\
              \tclassDef last fill:#bfb6fc\n",
         );
+        self.out.push_str(&self.classes);
         self.out
     }
 }
