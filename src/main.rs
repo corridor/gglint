@@ -5,7 +5,8 @@
 //! gglint [--all] [PATH ...]           list agents and prompts
 //! gglint --graph [PATH ...]           print the lineage graph as JSON
 //! gglint diagram [TIER] [--json] [PATH ...]
-//!                                     draw the agent graphs; TIER is `code` or `workflow`
+//!                                     draw the agent graphs; TIER is `code`, `workflow`
+//!                                     or `business`
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses

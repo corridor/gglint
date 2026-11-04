@@ -10,9 +10,10 @@ gglint statically analyses AI agents. It reads a Python codebase and reports:
 - **Lineage**: a graph of which text reaches which agent: the constants, functions, files
   and config entries prompt text comes from, the prompts built from them, and the agents
   they are given to.
-- **Diagrams**: the LangGraph graphs the code builds, at two levels of detail: drawn as
-  LangGraph draws them, with what each node does, and as the parts they're made of, such
-  as a router, an agent with its tools and a guardrail, and how work moves between them.
+- **Diagrams**: the LangGraph graphs the code builds, at three levels of detail: drawn as
+  LangGraph draws them, with what each node does; as the parts they're made of, such as a
+  router, an agent with its tools and a guardrail; and as what the system does for the
+  business: who asks, who reviews, what it decides and what it relies on.
 
 gglint never runs the code it reads. Nothing is imported, no dependency is installed and
 no environment is built, so it is safe to point at any repository, including untrusted
@@ -207,7 +208,8 @@ $ gglint diagram [TIER] [--json] [PATH ...]
 ```
 
 - Prints the [diagram](#diagrams) of the LangGraph graphs under the paths as Mermaid, or as
-  JSON with `--json`. `TIER` is the level of detail, `code` (the default) or `workflow`.
+  JSON with `--json`. `TIER` is the level of detail: `code` (the default), `workflow` or
+  `business`.
 - It exits with status 1 when no graph is found.
 
 ## Asking questions
@@ -477,12 +479,14 @@ cargo run --release --example visualize -- path/to/repo graph.html
 ## Diagrams
 
 `gglint diagram` draws the LangGraph graphs a codebase builds, from the code that builds
-them, without running it, at two levels of detail. Each is built from the one below it,
+them, without running it, at three levels of detail. Each is built from the one below it,
 so every box of a higher level lists what it's made of in the lower one:
 
 - **code**: each graph as LangGraph draws it, with what each node does.
 - **workflow**: the parts of each graph, such as a router, an agent with its tools or a
   guardrail, and how work moves between them.
+- **business**: what the system is for, who asks and who reviews, what each part decides,
+  what it relies on and what keeps it in check, for people who don't read the code.
 
 ```console
 $ gglint diagram code path/to/repo > graph.mmd    # Mermaid
@@ -572,8 +576,9 @@ The JSON has one entry per graph, with its `nodes` (`name`, `kind`, `function`, 
 `conditions`, `reachable`). Prompt steps have the same ids as the
 [lineage graph](#lineage-graph)'s prompt nodes.
 
-Only files that mention `StateGraph` are read for graphs, so drawing adds nothing to the
-scan of other files, and under a millisecond to the scan of a graph's.
+Only files that mention `StateGraph` are read for graphs, so the other files cost nothing
+more. Reading the graph of the triage pipeline, a file of 3,500 lines, adds 0.8 ms to the
+2.8 ms it takes to parse and walk it, and drawing any tier takes under a millisecond.
 
 ### Workflow
 
@@ -639,6 +644,63 @@ returned are left out.
 The JSON has one entry per graph, with its `parts` (`name`, `role`, `members`, `models`,
 `tools`, `tool_loop`, `uses`, `parallel`) and `handoffs` (`source`, `target`,
 `conditional`, `retry`, `when`, and the `edges` of the `code` tier they stand for).
+
+### Business
+
+The `business` tier draws what each system does for the people it serves. It is built from
+the `workflow` tier and the project's own words, by fixed rules, without a language model,
+so it says only what the code says: every element in the JSON has the `evidence` it comes
+from, a file, a line and the rule that read it, and what the code doesn't say is left out.
+On the triage pipeline it draws this, without the box of the resources it relies on:
+
+```mermaid
+graph LR;
+	patient(["Patient"]):::actor
+	subgraph system["Triage + Async Diagnosis Pipeline (Multiple Agent) · Question Answering · External Facing"]
+	classify{{"Classify message intent<hr/><small><em>decides message intent: Ongoing triage, Ongoing general QA, New case, Followup case, …<br>relies on: Epic</em></small>"}}:::capability
+	template("Template response"):::capability
+	triage("Triage<hr/><small><em>decides disposition: 911 symptoms, Emergency, Specialty consult, Virtual visit, …<br>relies on: Read Schmitt-Thompson Protocol Document, Validate and Rectify SMAG Name, Web search, Epic</em></small>"):::capability
+	general("General medical<hr/><small><em>decides review tier: No review, Async review, Approval required, Takeover required<br>Human review by review tier<br>relies on: Web search, Epic</em></small>"):::capability
+	input[/"Ask Hoag Prompt Injection Input Guardrail"\]:::control
+	output[/"ASK HOAG : Rule Based Output Guardrail<hr/><small><em>Retry with feedback, gives up after 3 attempts</em></small>"\]:::control
+	end
+	reply(["Patient"]):::actor
+	nurse(["Nurse"]):::actor
+	patient -- &nbsp;request&nbsp; --> classify;
+	classify -- &nbsp;Non clinical, Out of context, Human agent, …&nbsp; --> template;
+	classify -- &nbsp;Followup case, Ongoing triage, New case&nbsp; --> triage;
+	classify -- &nbsp;Non clinical, Clinical non triage, General Health, …&nbsp; --> general;
+	input -.-> classify;
+	triage --> output;
+	general --> output;
+	template -- &nbsp;reply&nbsp; --> reply;
+	output -- &nbsp;reply&nbsp; --> reply;
+	triage -- &nbsp;for review: description, resolution&nbsp; --> nurse;
+	general -- &nbsp;for review: review reason, description, resolution&nbsp; --> nurse;
+	classDef actor fill:#fff,stroke:#1d1d1f,stroke-width:2px
+	classDef capability fill:#e3f4ec,stroke:#2e9d6a
+	classDef control fill:#fde4ec,stroke:#c2416b
+```
+
+| Element      | Where it comes from                                                                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| System       | The GGX declaration of the function the graph is built in (`# @ggx.Pipeline.declare(name=..., usecase_type=..., impact=..., data_usage=...)`), else the graph                                           |
+| Actors       | Role words (patient, nurse or NP, physician, specialist, customer, applicant, ...) in the prompts, and in the schema fields written for someone: `"the patient-facing message"`, `"written for the reviewing nurse"`, but not `"not for the patient"`. Who asks is the role the prompts name most |
+| Capabilities | The workflow's parts that do something for someone, with the values the router sends to each, in the words of the enum: `MessageIntent.FOLLOWUP_CASE` → `Followup case`                              |
+| Decisions    | An enum named like a state key the part writes (`Disposition` → `disposition`), and a schema field listing its values (`"One of: NO_REVIEW, ASYNC_REVIEW"`). A router writing the key makes the decision |
+| Resources    | The models called, with who serves them; functions declared `@ggx.Rag.declare` or named as a lookup; search tools; systems a state key names (`epic_patient_summary` → Epic)                          |
+| Controls     | Guardrails, functions declared as a guardrail model, retries and when they give up (`failures >= 3`), and decisions whose values put a person in the loop (`APPROVAL_REQUIRED`)                       |
+
+The person who asks is drawn on the left for the request and again on the right for the
+reply; reviewers get the fields written for them. Resources are one box the system relies
+on, and each capability lists the ones it uses. The JSON has one entry per system, with
+its `profile`, `actors`, `capabilities` (with their `decisions`), `resources`, `controls`
+and `flows`, every element with its `evidence`. The words gglint knows are `ACTORS` and
+`SYSTEMS` in [`src/views/business.rs`](src/views/business.rs); a domain's words go there.
+
+The enums and schemas are read from the file that builds the graph, and the declarations
+and docstrings from it and from the modules its nodes call, so a scan without graphs
+reads nothing more.
 
 ## How it works
 
@@ -737,7 +799,9 @@ says, not what it does:
   in the registry is not found; see [Development](#development) to add one.
 - **Diagrams** read a graph from the builder's calls in the file that creates it. The
   `workflow` tier's parts follow from the rules above, not from what the code is for: two
-  agents that do different jobs but share a narrow helper become one part. A node or
+  agents that do different jobs but share a narrow helper become one part. The `business`
+  tier knows only the role and system words it lists, and reads enums and schemas only
+  from the file that builds the graph. A node or
   edge named by a value only known at runtime is written as `{expression}`, and then no
   node is assumed to end the graph. A builder passed to another function, a router defined
   in another module, and a model made by a function in another module with more than one
@@ -767,6 +831,7 @@ directories, [`tests/graph.rs`](tests/graph.rs) builds lineage graphs from them 
 | [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
 | [`src/graph.rs`](src/graph.rs)         | The lineage graph and its JSON                                      |
 | [`src/flow.rs`](src/flow.rs)           | Reading LangGraph graphs and what their nodes do                    |
+| [`src/vocabulary.rs`](src/vocabulary.rs) | Enums, schemas, docstrings and GGX declarations around the graphs |
 | [`src/views/`](src/views/)             | `gglint diagram`: the diagrams, in Mermaid and JSON                 |
 | [`src/json.rs`](src/json.rs)           | The JSON writer the lineage graph and diagrams share                |
 | [`examples/visualize.rs`](examples/visualize.rs) | A throwaway HTML viewer for the graph                     |

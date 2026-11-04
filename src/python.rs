@@ -209,8 +209,8 @@ fn lineage_graph<'py>(py: Python<'py>, path: PathBuf) -> PyResult<Bound<'py, PyA
 }
 
 /// Returns the diagram of the agent graphs in the Python files under `path`, as Mermaid
-/// text, or as JSON text with `format="json"`. `tier` is the level of detail: `"code"` or
-/// `"workflow"`.
+/// text, or as JSON text with `format="json"`. `tier` is the level of detail: `"code"`,
+/// `"workflow"` or `"business"`.
 #[pyfunction]
 #[pyo3(signature = (path, tier = "code", format = "mermaid"))]
 fn diagram(py: Python<'_>, path: PathBuf, tier: &str, format: &str) -> PyResult<String> {

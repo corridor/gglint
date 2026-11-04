@@ -214,3 +214,162 @@ fn the_workflow_tier_groups_nodes_into_parts_and_lists_what_they_use() {
         "{json}"
     );
 }
+
+/// A small triage service with GGX declarations, as GGX exports them.
+fn business_project(dir: &TempDir) {
+    dir.write(
+        "rags/protocols.py",
+        "# @ggx.Rag.declare(\n\
+         #     name='Clinical Protocols',\n\
+         #     group='Triage',\n\
+         # )\n\
+         def read_protocol(name):\n\
+         \x20   \"\"\"Every protocol a nurse follows.\"\"\"\n\
+         \x20   return name\n",
+    );
+    dir.write(
+        "models/guard.py",
+        "# @ggx.Model.declare(\n\
+         #     name='Output Guardrail',\n\
+         #     provider='aws-bedrock',\n\
+         # )\n\
+         def check(text):\n\
+         \x20   return text\n",
+    );
+    dir.write(
+        "pipelines/triage.py",
+        "# @ggx.Pipeline.declare(\n\
+         #     name='Patient Triage',\n\
+         #     usecase_type='Question Answering',\n\
+         #     impact='External Facing',\n\
+         #     data_usage=['Customer Specific Data'],\n\
+         # )\n\
+         def triage_pipeline(message):\n\
+         \x20   from enum import Enum\n\
+         \x20   import typing as t\n\
+         \x20   from pydantic import BaseModel, Field\n\
+         \x20   from langgraph.graph import StateGraph, START, END\n\
+         \x20   from langchain_aws import ChatBedrockConverse\n\
+         \x20   from rags.protocols import read_protocol\n\
+         \x20   from models.guard import check\n\
+         \n\
+         \x20   class MessageIntent(str, Enum):\n\
+         \x20       NEW_CASE = 'NEW_CASE'\n\
+         \x20       BILLING = 'Billing questions'\n\
+         \n\
+         \x20   class Disposition(str, Enum):\n\
+         \x20       EMERGENCY = 'EMERGENCY'\n\
+         \x20       VIRTUAL_VISIT = 'VIRTUAL_VISIT'\n\
+         \n\
+         \x20   class Assessment(BaseModel):\n\
+         \x20       reply: str = Field(description='The patient-facing message.')\n\
+         \x20       summary: str = Field(description='Written for the reviewing nurse, not for the patient.')\n\
+         \x20       review_tier: t.Optional[str] = Field(description='One of: NO_REVIEW, APPROVAL_REQUIRED')\n\
+         \n\
+         \x20   llm = ChatBedrockConverse(model_id='claude')\n\
+         \n\
+         \x20   def classify(state):\n\
+         \x20       return {'message_intent': llm.invoke('Classify the patient message for the patient.')}\n\
+         \n\
+         \x20   def route(state):\n\
+         \x20       if state['message_intent'] == MessageIntent.NEW_CASE:\n\
+         \x20           return 'triage'\n\
+         \x20       return 'billing'\n\
+         \n\
+         \x20   def triage(state):\n\
+         \x20       answer = llm.with_structured_output(Assessment).invoke(read_protocol(state['epic_record']))\n\
+         \x20       return {'disposition': answer, 'summary': answer, 'review_tier': answer}\n\
+         \n\
+         \x20   def billing(state):\n\
+         \x20       return {'messages': ['See the billing page.']}\n\
+         \n\
+         \x20   def guard(state):\n\
+         \x20       return {'feedback': check(state['messages'])}\n\
+         \n\
+         \x20   def retry(state):\n\
+         \x20       if state['feedback'] and state['failures'] < 2:\n\
+         \x20           return 'triage'\n\
+         \x20       return END\n\
+         \n\
+         \x20   g = StateGraph(dict)\n\
+         \x20   g.add_node('classify', classify)\n\
+         \x20   g.add_node('triage', triage)\n\
+         \x20   g.add_node('billing', billing)\n\
+         \x20   g.add_node('guard', guard)\n\
+         \x20   g.add_edge(START, 'classify')\n\
+         \x20   g.add_conditional_edges('classify', route, ['triage', 'billing'])\n\
+         \x20   g.add_edge('triage', 'guard')\n\
+         \x20   g.add_edge('billing', 'guard')\n\
+         \x20   g.add_conditional_edges('guard', retry, ['triage', END])\n\
+         \x20   return g.compile().invoke({'messages': [message]})\n",
+    );
+}
+
+#[test]
+fn the_business_tier_says_who_asks_what_is_decided_and_what_it_relies_on() {
+    let dir = TempDir::new();
+    business_project(&dir);
+
+    let json = views::render(&results(&dir), Tier::Business, Format::Json);
+    let mermaid = views::render(&results(&dir), Tier::Business, Format::Mermaid);
+
+    let has = |needle: &str| assert!(json.contains(needle), "{needle}\n{json}");
+    has(
+        "\"name\":\"Patient Triage\",\"profile\":[{\"label\":\"Use case\",\"value\":\"Question Answering\"},{\"label\":\"Impact\",\"value\":\"External Facing\"},{\"label\":\"Data\",\"value\":\"Customer Specific Data\"}]",
+    );
+    has(
+        "{\"path\":\"pipelines/triage.py\",\"line\":7,\"rule\":\"ggx-declaration\",\"text\":\"@ggx.Pipeline.declare on triage_pipeline\"}",
+    );
+    // The patient asks: the prompts name them. The nurse reviews: a field is written for
+    // them, and the field written "not for the patient" doesn't make the patient one.
+    has("{\"id\":\"actor:Patient\",\"name\":\"Patient\",\"asks\":true,\"reviews\":false,");
+    has("{\"id\":\"actor:Nurse\",\"name\":\"Nurse\",\"asks\":false,\"reviews\":true,");
+    has(
+        "\"name\":\"Classify message intent\",\"part\":\"Router\",\"handles\":[],\"decisions\":[{\"name\":\"Message intent\",\"values\":[\"New case\",\"Billing questions\"]",
+    );
+    has(
+        "\"name\":\"Triage\",\"part\":\"Triage agent\",\"handles\":[\"New case\"],\"decisions\":[{\"name\":\"Disposition\",\"values\":[\"Emergency\",\"Virtual visit\"]",
+    );
+    has("{\"name\":\"Review tier\",\"values\":[\"No review\",\"Approval required\"]");
+    has(
+        "{\"id\":\"resource:Clinical Protocols\",\"name\":\"Clinical Protocols\",\"kind\":\"knowledge\",\"evidence\":[{\"path\":\"rags/protocols.py\",\"line\":5,\"rule\":\"ggx-rag\",\"text\":\"Every protocol a nurse follows.\"}]}",
+    );
+    has("{\"id\":\"resource:Epic\",\"name\":\"Epic\",\"kind\":\"system\"");
+    has("{\"id\":\"resource:claude on AWS Bedrock\",\"name\":\"claude on AWS Bedrock\",\"kind\":\"model\"");
+    has("{\"id\":\"control:Output Guardrail\",\"name\":\"Output Guardrail\",\"kind\":\"guardrail\"");
+    has(
+        "{\"id\":\"control:Retry with feedback, gives up after 2 attempts\",\"name\":\"Retry with feedback, gives up after 2 attempts\",\"kind\":\"retry\"",
+    );
+    has(
+        "{\"id\":\"control:Human review by review tier\",\"name\":\"Human review by review tier\",\"kind\":\"human_review\"",
+    );
+    has(
+        "{\"source\":\"actor:Patient\",\"target\":\"part:pipelines.triage.triage_pipeline.classify\",\"label\":\"request\",\"kind\":\"hands_on\"}",
+    );
+    has(
+        "{\"source\":\"control:Output Guardrail\",\"target\":\"actor:Patient\",\"label\":\"reply\",\"kind\":\"hands_on\"}",
+    );
+    has(
+        "{\"source\":\"part:pipelines.triage.triage_pipeline.triage\",\"target\":\"actor:Nurse\",\"label\":\"for review: summary\",\"kind\":\"hands_on\"}",
+    );
+
+    assert!(mermaid.contains("graph LR;\n\tactor_0([\"Patient\"]):::actor\n\tsubgraph system[\"Patient Triage · Question Answering · External Facing\"]\n"), "{mermaid}");
+    assert!(
+        mermaid.contains(
+            "\tcapability_1(\"Triage<hr/><small><em>decides disposition: Emergency, Virtual visit<br>\
+             decides review tier: No review, Approval required<br>Human review by review tier<br>\
+             relies on: Clinical Protocols, Epic</em></small>\"):::capability\n"
+        ),
+        "{mermaid}"
+    );
+    assert!(mermaid.contains("\tcontrol_0[/\"Output Guardrail<hr/><small><em>Retry with feedback, gives up after 2 attempts</em></small>\"\\]:::control\n"), "{mermaid}");
+    assert!(
+        mermaid.contains("\tcapability_2(\"Billing\"):::capability\n"),
+        "{mermaid}"
+    );
+    assert!(
+        mermaid.contains("\tcontrol_0 -- &nbsp;reply&nbsp; --> actor_0_reply;\n"),
+        "{mermaid}"
+    );
+    assert!(mermaid.contains("\tresources -.-> system;\n"), "{mermaid}");
+}

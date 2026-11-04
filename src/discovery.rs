@@ -15,6 +15,7 @@ use crate::checker::{CandidateKind, Checker, check_module, check_module_with_ref
 use crate::flow::{self, ModelFactory, StateGraph};
 use crate::project::{self, FileContext, Part};
 use crate::prompts::{self, AgentTarget, Link, PromptSink, Role};
+use crate::vocabulary::{self, Vocabulary};
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -550,6 +551,8 @@ pub struct FileResult {
     pub graphs: Vec<StateGraph>,
     /// The functions in the file that return a chat model, for [`flow::link`].
     pub(crate) model_factories: Vec<ModelFactory>,
+    /// The enums, schemas and declarations of a file that builds a graph.
+    pub vocabulary: Vocabulary,
 }
 
 /// Reads, parses and checks one file.
@@ -571,6 +574,7 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
         prompts: Vec::new(),
         graphs: Vec::new(),
         model_factories: Vec::new(),
+        vocabulary: Vocabulary::default(),
     };
     if !parse_all && !prefilter.may_contain_agents(&source) {
         return Some(result);
@@ -611,6 +615,11 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
     if !agents.is_empty() || !prompts.is_empty() || checker.references.is_some() {
         let lines = LineIndex::new(&source);
         result.graphs = flow::extract(&checker, &source, &lines);
+        if !result.graphs.is_empty() {
+            let path = crate::graph::slash_path(&result.relative_path);
+            let graphs: Vec<usize> = result.graphs.iter().map(|graph| graph.location.line).collect();
+            result.vocabulary = vocabulary::extract(&checker, &parsed.syntax().body, &source, &lines, &path, &graphs);
+        }
         result.agents = agents
             .into_iter()
             .map(|agent| (lines.location(agent.offset), agent))
@@ -686,6 +695,13 @@ impl LineIndex {
         let mut line_starts = vec![0];
         line_starts.extend(memchr::memchr_iter(b'\n', source.as_bytes()).map(|index| index + 1));
         Self { line_starts }
+    }
+
+    /// The text of the 1-based line `line`, without its line break.
+    pub(crate) fn line<'s>(&self, source: &'s str, line: usize) -> &'s str {
+        let start = self.line_starts[line - 1];
+        let end = self.line_starts.get(line).map_or(source.len(), |&next| next);
+        source[start..end].trim_end_matches(['\n', '\r'])
     }
 
     /// Converts a byte offset to a 1-based line and column.

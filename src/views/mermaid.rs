@@ -40,6 +40,7 @@ pub(crate) enum Shape {
     Subroutine,
     Trapezoid,
     Stadium,
+    Cylinder,
 }
 
 impl Shape {
@@ -51,14 +52,24 @@ impl Shape {
             Shape::Subroutine => ("[[", "]]"),
             Shape::Trapezoid => ("[/", "\\]"),
             Shape::Stadium => ("([", "])"),
+            Shape::Cylinder => ("[(", ")]"),
         }
     }
 }
 
 impl Flowchart {
     pub(crate) fn new() -> Self {
+        Self::with_direction("TD")
+    }
+
+    /// A flowchart drawn from left to right.
+    pub(crate) fn new_left_to_right() -> Self {
+        Self::with_direction("LR")
+    }
+
+    fn with_direction(direction: &str) -> Self {
         Self {
-            out: String::from("---\nconfig:\n  flowchart:\n    curve: linear\n---\ngraph TD;\n"),
+            out: format!("---\nconfig:\n  flowchart:\n    curve: linear\n---\ngraph {direction};\n"),
             classes: String::new(),
         }
     }

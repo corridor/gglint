@@ -891,6 +891,29 @@ impl<'a> Checker<'a> {
         let segments = collect_dotted_name(expr)?;
         self.semantic.resolve_qualified_name(&segments)
     }
+
+    /// Resolves `a.b.c` where it's written, once the walk is done, from the binding the
+    /// walk recorded for `a`. Only for a checker run with [`References`].
+    pub fn resolve_recorded(&self, expr: &'a Expr) -> Option<QualifiedName<'a>> {
+        let segments = collect_dotted_name(expr)?;
+        self.semantic.resolve_through(self.recorded_binding_of_root(expr)?, &segments)
+    }
+
+    /// The binding the walk recorded for a name read.
+    pub fn recorded_binding(&self, expr: &Expr) -> Option<BindingId> {
+        match expr {
+            Expr::Name(name) => self.references.as_ref()?.names.get(&name.range.start()).copied(),
+            _ => None,
+        }
+    }
+
+    /// The binding the walk recorded for the first name of `a.b.c`.
+    pub fn recorded_binding_of_root(&self, expr: &Expr) -> Option<BindingId> {
+        match expr {
+            Expr::Attribute(attribute) => self.recorded_binding_of_root(&attribute.value),
+            _ => self.recorded_binding(expr),
+        }
+    }
 }
 
 /// `x = call(...)` or `x: T = call(...)` → `x`. The value is visited before the target,

@@ -6,10 +6,14 @@
 //! 2. **workflow** ([`workflow`]): the parts of each graph, such as a router, an agent
 //!    with its tools or a guardrail, and how work moves between them. Each part is a group
 //!    of nodes from the code tier.
+//! 3. **business** ([`business`]): what each system is for, who asks and who reviews,
+//!    what each part decides, what the system relies on and what keeps it in check. Each
+//!    capability is a part of the workflow tier, and every element cites the code.
 //!
 //! Every diagram is printed as Mermaid, in the style LangGraph's `draw_mermaid()` uses,
 //! or as JSON for other tools to draw.
 
+pub mod business;
 pub mod code;
 mod mermaid;
 pub mod workflow;
@@ -23,15 +27,18 @@ pub enum Tier {
     Code,
     /// The parts of each graph and the handoffs between them.
     Workflow,
+    /// What each system does for whom, and what it relies on.
+    Business,
 }
 
 impl Tier {
-    pub const ALL: [Tier; 2] = [Tier::Code, Tier::Workflow];
+    pub const ALL: [Tier; 3] = [Tier::Code, Tier::Workflow, Tier::Business];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Tier::Code => "code",
             Tier::Workflow => "workflow",
+            Tier::Business => "business",
         }
     }
 
@@ -53,6 +60,8 @@ pub fn render(results: &[FileResult], tier: Tier, format: Format) -> String {
         (Tier::Code, Format::Json) => code::json(results),
         (Tier::Workflow, Format::Mermaid) => workflow::mermaid(results),
         (Tier::Workflow, Format::Json) => workflow::json(results),
+        (Tier::Business, Format::Mermaid) => business::mermaid(results),
+        (Tier::Business, Format::Json) => business::json(results),
     }
 }
 

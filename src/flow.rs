@@ -34,7 +34,7 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::checker::{CandidateKind, Checker, References, collect_dotted_name};
+use crate::checker::{CandidateKind, Checker, References};
 use crate::discovery::{FileResult, LineIndex, Location};
 use crate::prompts;
 use crate::semantic::{BindingId, BindingKind, QualifiedName, ScopeId};
@@ -265,10 +265,17 @@ const CONFIGURES: &[&str] = &[
 /// How many variables and functions to follow to find what a value is.
 const MAX_DEPTH: usize = 6;
 
-fn matches(name: &QualifiedName<'_>, dotted: &[&str]) -> bool {
+pub(crate) fn matches(name: &QualifiedName<'_>, dotted: &[&str]) -> bool {
+    let segments = name.segments();
+    let Some(last) = segments.last() else {
+        return false;
+    };
+    // Most names don't end like any of `dotted`, and that's one comparison to see.
     dotted.iter().any(|dotted| {
-        let mut parts = dotted.split('.');
-        name.segments().iter().all(|segment| parts.next() == Some(segment)) && parts.next().is_none()
+        dotted.ends_with(last) && {
+            let mut parts = dotted.split('.');
+            segments.iter().all(|segment| parts.next() == Some(segment)) && parts.next().is_none()
+        }
     })
 }
 
@@ -1432,25 +1439,17 @@ impl<'c, 'a> Extractor<'c, 'a> {
 
     /// The binding a name read refers to.
     fn binding(&self, expr: &Expr) -> Option<BindingId> {
-        match expr {
-            Expr::Name(name) => self.references.names.get(&name.range.start()).copied(),
-            _ => None,
-        }
+        self.checker.recorded_binding(expr)
     }
 
     /// The binding the first name of `a.b.c` refers to.
     fn binding_of_root(&self, expr: &Expr) -> Option<BindingId> {
-        match expr {
-            Expr::Attribute(attribute) => self.binding_of_root(&attribute.value),
-            _ => self.binding(expr),
-        }
+        self.checker.recorded_binding_of_root(expr)
     }
 
     /// What `a.b.c` resolves to, where it's written.
     fn resolve(&self, expr: &'a Expr) -> Option<QualifiedName<'a>> {
-        let segments = collect_dotted_name(expr)?;
-        let binding = self.binding_of_root(expr)?;
-        self.checker.semantic.resolve_through(binding, &segments)
+        self.checker.resolve_recorded(expr)
     }
 
     /// The function defined in this file that `expr` names.
@@ -1772,7 +1771,7 @@ pub(crate) fn link(results: &mut [FileResult]) {
 }
 
 /// `a.b.c`, `b.c`, `c`.
-fn suffixes(name: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn suffixes(name: &str) -> impl Iterator<Item = &str> {
     std::iter::once(name).chain(name.match_indices('.').map(|(index, _)| &name[index + 1..]))
 }
 
