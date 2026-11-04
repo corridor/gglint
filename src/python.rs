@@ -12,12 +12,13 @@
 
 use std::path::{Path, PathBuf};
 
-use pyo3::exceptions::PyFileNotFoundError;
+use pyo3::exceptions::{PyFileNotFoundError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::ask;
 use crate::discovery::{FileResult, scan};
 use crate::graph;
+use crate::views::{self, Format, Tier};
 
 /// An agent found in the source code.
 #[pyclass(frozen, get_all, module = "gglint")]
@@ -207,6 +208,26 @@ fn lineage_graph<'py>(py: Python<'py>, path: PathBuf) -> PyResult<Bound<'py, PyA
     py.import("json")?.call_method1("loads", (json,))
 }
 
+/// Returns the diagram of the agent graphs in the Python files under `path`, as Mermaid
+/// text, or as JSON text with `format="json"`. `tier` is the level of detail: `"code"`.
+#[pyfunction]
+#[pyo3(signature = (path, tier = "code", format = "mermaid"))]
+fn diagram(py: Python<'_>, path: PathBuf, tier: &str, format: &str) -> PyResult<String> {
+    if !path.exists() {
+        return Err(PyFileNotFoundError::new_err(path.display().to_string()));
+    }
+    let Some(tier) = Tier::parse(tier) else {
+        let tiers: Vec<_> = Tier::ALL.iter().map(|tier| tier.as_str()).collect();
+        return Err(PyValueError::new_err(format!("tier must be one of {}", tiers.join(", "))));
+    };
+    let format = match format {
+        "mermaid" => Format::Mermaid,
+        "json" => Format::Json,
+        _ => return Err(PyValueError::new_err("format must be \"mermaid\" or \"json\"")),
+    };
+    Ok(py.detach(|| views::render(&scan(std::slice::from_ref(&path), false), tier, format)))
+}
+
 /// One thing an answer rests on, and where it is in the code.
 #[pyclass(frozen, get_all, module = "gglint")]
 struct Fact {
@@ -336,6 +357,7 @@ fn gglint(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(find_prompts, module)?)?;
     module.add_function(wrap_pyfunction!(lineage_graph, module)?)?;
     module.add_function(wrap_pyfunction!(lineage_json, module)?)?;
+    module.add_function(wrap_pyfunction!(diagram, module)?)?;
     #[cfg(feature = "embed")]
     module.add_function(wrap_pyfunction!(pull_models, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;

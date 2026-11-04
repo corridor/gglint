@@ -11,7 +11,8 @@ use ruff_python_ast::{Expr, ExprCall, PySourceType};
 use ruff_python_parser::parse_unchecked_source;
 use ruff_text_size::{Ranged, TextSize};
 
-use crate::checker::{CandidateKind, Checker, check_module};
+use crate::checker::{CandidateKind, Checker, check_module, check_module_with_references};
+use crate::flow::{self, ModelFactory, StateGraph};
 use crate::project::{self, FileContext, Part};
 use crate::prompts::{self, AgentTarget, Link, PromptSink, Role};
 
@@ -478,6 +479,7 @@ pub fn scan(roots: &[PathBuf], parse_all: bool) -> Vec<FileResult> {
     // may have been skipped by the prefilter, so this opens them as needed.
     project::resolve(&mut results, &files);
     link_imported_agents(&mut results);
+    flow::link(&mut results);
     // A prompt is text someone wrote. One made only of values known at runtime, such
     // as `HumanMessage(content=m.content)` relaying a message, has nothing to read.
     for result in &mut results {
@@ -544,6 +546,10 @@ pub struct FileResult {
     pub warning: Option<String>,
     pub agents: Vec<(Location, DiscoveredAgent)>,
     pub prompts: Vec<(Location, DiscoveredPrompt)>,
+    /// The LangGraph graphs built in the file.
+    pub graphs: Vec<StateGraph>,
+    /// The functions in the file that return a chat model, for [`flow::link`].
+    pub(crate) model_factories: Vec<ModelFactory>,
 }
 
 /// Reads, parses and checks one file.
@@ -563,6 +569,8 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
         warning: None,
         agents: Vec::new(),
         prompts: Vec::new(),
+        graphs: Vec::new(),
+        model_factories: Vec::new(),
     };
     if !parse_all && !prefilter.may_contain_agents(&source) {
         return Some(result);
@@ -582,7 +590,12 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
     }
 
     let module_path: Vec<&str> = module_path.iter().map(String::as_str).collect();
-    let checker = check_module(parsed.syntax(), module_path.clone());
+    // Only files that can build a graph pay for the references the graph is read from.
+    let checker = if flow::may_build_graph(&source) {
+        check_module_with_references(parsed.syntax(), module_path.clone())
+    } else {
+        check_module(parsed.syntax(), module_path.clone())
+    };
     let agents = discover(&checker);
     let context = FileContext {
         path,
@@ -592,8 +605,12 @@ fn check_file(root: &Path, path: &Path, prefilter: &Prefilter, parse_all: bool) 
         source: &source,
     };
     let prompts = discover_prompts(&checker, &agents, &context);
-    if !agents.is_empty() || !prompts.is_empty() {
+    if flow::may_create_model(&source) {
+        result.model_factories = flow::model_factories(&checker);
+    }
+    if !agents.is_empty() || !prompts.is_empty() || checker.references.is_some() {
         let lines = LineIndex::new(&source);
+        result.graphs = flow::extract(&checker, &source, &lines);
         result.agents = agents
             .into_iter()
             .map(|agent| (lines.location(agent.offset), agent))

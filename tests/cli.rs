@@ -188,3 +188,39 @@ fn ask_fails_on_a_path_that_does_not_exist() {
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr).unwrap().contains("no/such/dir"));
 }
+
+#[test]
+fn draws_the_code_diagram_of_langgraph_graphs() {
+    let dir = TempDir::new();
+    dir.write(
+        "flow.py",
+        "from langgraph.graph import StateGraph, START\n\
+         def answer(state): return {}\n\
+         g = StateGraph(dict)\n\
+         g.add_node('answer', answer)\n\
+         g.add_edge(START, 'answer')\n",
+    );
+
+    let output = gglint(&["diagram".as_ref(), "code".as_ref(), dir.path().as_os_str()]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with("---\nconfig:"), "{stdout}");
+    assert!(stdout.contains("\t__start__ --> answer;\n"), "{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("code diagram of 1 graph(s) from 1 file(s)"), "{stderr}");
+
+    let json = gglint(&["diagram".as_ref(), "--json".as_ref(), dir.path().as_os_str()]);
+    assert!(String::from_utf8(json.stdout).unwrap().starts_with("{\"schema\":1,\"tier\":\"code\""));
+}
+
+#[test]
+fn a_diagram_without_graphs_fails() {
+    let dir = TempDir::new();
+    dir.write("bot.py", LANGCHAIN_AGENT);
+
+    let output = gglint(&["diagram".as_ref(), dir.path().as_os_str()]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr).unwrap().contains("No LangGraph graphs found."));
+}

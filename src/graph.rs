@@ -41,6 +41,7 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discovery::{AgentLink, DiscoveredAgent, DiscoveredPrompt, FileResult, Location};
+use crate::json::Json;
 use crate::project::{Part, SourceKind, SourceRef};
 use crate::prompts::Link;
 
@@ -423,9 +424,6 @@ impl Graph {
     ///  "edges": [{"source": "prompt:app/bot.py:7:19", "target": "agent:app.bot.agent",
     ///             "kind": "given_to", "link": "constructor"}]}
     /// ```
-    ///
-    /// Written by hand rather than through serde: the format is small and fixed, and
-    /// the crate has no other use for serde.
     pub fn to_json(&self) -> String {
         let text: usize = self
             .nodes
@@ -445,7 +443,7 @@ impl Graph {
             if index > 0 {
                 out.0.push(',');
             }
-            out.node(node);
+            write_node(&mut out, node);
         }
         out.0.push_str("],\"edges\":[");
         for (index, edge) in self.edges.iter().enumerate() {
@@ -472,116 +470,47 @@ impl Graph {
     }
 }
 
-struct Json(String);
-
-impl Json {
-    fn node(&mut self, node: &Node) {
-        self.0.push('{');
-        self.string("id", &node.id);
-        self.string("kind", node.kind());
-        self.string("label", node.label());
-        self.string("path", &node.path);
-        self.string("module", &node.module);
-        match node.location {
-            Some(location) => {
-                self.number("line", location.line);
-                self.number("column", location.column);
-            }
-            None => {
-                self.null("line");
-                self.null("column");
-            }
+fn write_node(out: &mut Json, node: &Node) {
+    out.0.push('{');
+    out.string("id", &node.id);
+    out.string("kind", node.kind());
+    out.string("label", node.label());
+    out.string("path", &node.path);
+    out.string("module", &node.module);
+    match node.location {
+        Some(location) => {
+            out.number("line", location.line);
+            out.number("column", location.column);
         }
-        match &node.data {
-            NodeData::Agent(agent) => {
-                self.string("framework", agent.framework);
-                self.string("agent_kind", agent.kind.as_str());
-                self.string("via", &agent.via);
-                self.optional("name", agent.name.as_deref());
-                self.optional("model", agent.model.as_deref());
-                self.optional("variable", agent.variable.as_deref());
-                self.optional("factory", agent.factory.as_deref());
-            }
-            NodeData::Prompt(prompt) => {
-                self.string("framework", prompt.framework);
-                self.string("role", prompt.role.as_str());
-                self.optional("via", prompt.via.as_deref());
-                self.string("argument", prompt.argument);
-                self.string("text", &prompt.text);
-                self.number("dynamic_parts", prompt.dynamic_parts);
-            }
-            NodeData::Source(source) => {
-                self.string("source_kind", source.kind.as_str());
-                self.string("name", &source.name);
-                self.string("text", &source.text);
-                self.number("dynamic_parts", source.dynamic_parts);
-            }
-        }
-        self.end_object();
-    }
-
-    fn key(&mut self, key: &str) {
-        // Keys are written here, never taken from the code, so they need no escaping.
-        self.0.push('"');
-        self.0.push_str(key);
-        self.0.push_str("\":");
-    }
-
-    fn string(&mut self, key: &str, value: &str) {
-        self.key(key);
-        self.0.push('"');
-        let bytes = value.as_bytes();
-        // Almost all text needs no escaping, and this check compiles to a fast loop.
-        if !bytes.iter().any(|&byte| byte < 0x20 || byte == b'"' || byte == b'\\') {
-            self.0.push_str(value);
-            self.0.push_str("\",");
-            return;
-        }
-        let mut start = 0;
-        for (index, &byte) in bytes.iter().enumerate() {
-            let escape = match byte {
-                b'"' => "\\\"",
-                b'\\' => "\\\\",
-                b'\n' => "\\n",
-                b'\r' => "\\r",
-                b'\t' => "\\t",
-                0..=0x1f => "",
-                _ => continue,
-            };
-            self.0.push_str(&value[start..index]);
-            if escape.is_empty() {
-                let _ = write!(self.0, "\\u{byte:04x}");
-            } else {
-                self.0.push_str(escape);
-            }
-            start = index + 1;
-        }
-        self.0.push_str(&value[start..]);
-        self.0.push_str("\",");
-    }
-
-    fn optional(&mut self, key: &str, value: Option<&str>) {
-        match value {
-            Some(value) => self.string(key, value),
-            None => self.null(key),
+        None => {
+            out.null("line");
+            out.null("column");
         }
     }
-
-    fn number(&mut self, key: &str, value: usize) {
-        self.key(key);
-        let _ = write!(self.0, "{value},");
-    }
-
-    fn null(&mut self, key: &str) {
-        self.key(key);
-        self.0.push_str("null,");
-    }
-
-    /// Replaces the trailing comma every value is written with.
-    fn end_object(&mut self) {
-        if self.0.ends_with(',') {
-            self.0.pop();
+    match &node.data {
+        NodeData::Agent(agent) => {
+            out.string("framework", agent.framework);
+            out.string("agent_kind", agent.kind.as_str());
+            out.string("via", &agent.via);
+            out.optional("name", agent.name.as_deref());
+            out.optional("model", agent.model.as_deref());
+            out.optional("variable", agent.variable.as_deref());
+            out.optional("factory", agent.factory.as_deref());
         }
-        self.0.push('}');
+        NodeData::Prompt(prompt) => {
+            out.string("framework", prompt.framework);
+            out.string("role", prompt.role.as_str());
+            out.optional("via", prompt.via.as_deref());
+            out.string("argument", prompt.argument);
+            out.string("text", &prompt.text);
+            out.number("dynamic_parts", prompt.dynamic_parts);
+        }
+        NodeData::Source(source) => {
+            out.string("source_kind", source.kind.as_str());
+            out.string("name", &source.name);
+            out.string("text", &source.text);
+            out.number("dynamic_parts", source.dynamic_parts);
+        }
     }
+    out.end_object();
 }

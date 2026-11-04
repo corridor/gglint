@@ -481,8 +481,15 @@ impl<'a> SemanticModel<'a> {
     /// Returns `None` for names that aren't imports or definitions, such as local
     /// variables and parameters, because their value isn't known without running code.
     pub fn resolve_qualified_name(&self, name: &[&'a str]) -> Option<QualifiedName<'a>> {
-        let (head, tail) = name.split_first()?;
-        let binding = self.binding(self.lookup_symbol(head)?);
+        self.resolve_through(self.lookup_symbol(name.first()?)?, name)
+    }
+
+    /// [`Self::resolve_qualified_name`], given the binding `name`'s first segment
+    /// refers to. Lets a name be resolved after the walk, from a binding recorded during
+    /// it.
+    pub fn resolve_through(&self, binding: BindingId, name: &[&'a str]) -> Option<QualifiedName<'a>> {
+        let tail = name.get(1..)?;
+        let binding = self.binding(binding);
 
         match &binding.kind {
             BindingKind::Import(qualified_name) | BindingKind::FromImport(qualified_name) => {

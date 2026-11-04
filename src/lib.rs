@@ -14,6 +14,8 @@
 //! Tokenizing and parsing are done by Ruff's parser, used as a library. `checker.rs` is
 //! Python-specific. `semantic.rs` doesn't know about any language.
 //!
+//! `flow.rs` reads the LangGraph graphs a file builds, and `views` draws them.
+//!
 //! The same code is used by the `gglint` command (`main.rs`) and, with the `python`
 //! feature, by the `gglint` Python package (`python.rs`).
 
@@ -23,10 +25,13 @@
 pub mod ask;
 pub mod checker;
 pub mod discovery;
+pub mod flow;
 pub mod graph;
+mod json;
 pub mod project;
 pub mod prompts;
 pub mod semantic;
+pub mod views;
 
 #[cfg(feature = "python")]
 mod python;

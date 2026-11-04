@@ -10,6 +10,9 @@ gglint statically analyses AI agents. It reads a Python codebase and reports:
 - **Lineage**: a graph of which text reaches which agent: the constants, functions, files
   and config entries prompt text comes from, the prompts built from them, and the agents
   they are given to.
+- **Diagrams**: the LangGraph graphs the code builds, drawn as LangGraph draws them, with
+  what each node does: the models it calls, the prompts, tools and project functions it
+  uses, and when each branch is taken.
 
 gglint never runs the code it reads. Nothing is imported, no dependency is installed and
 no environment is built, so it is safe to point at any repository, including untrusted
@@ -29,6 +32,7 @@ command.
 - [Agents](#agents)
 - [Prompts](#prompts)
 - [Lineage graph](#lineage-graph)
+- [Diagrams](#diagrams)
 - [How it works](#how-it-works)
 - [Performance](#performance)
 - [Limitations](#limitations)
@@ -197,6 +201,14 @@ $ gglint [--all] [--graph] [PATH ...]
   It is only useful for measuring the parser.
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
+
+```console
+$ gglint diagram [TIER] [--json] [PATH ...]
+```
+
+- Prints the [diagram](#diagrams) of the LangGraph graphs under the paths as Mermaid, or as
+  JSON with `--json`. `TIER` is the level of detail, `code` by default.
+- It exits with status 1 when no graph is found.
 
 ## Asking questions
 
@@ -462,6 +474,102 @@ writes one HTML page that draws it with Cytoscape.js:
 cargo run --release --example visualize -- path/to/repo graph.html
 ```
 
+## Diagrams
+
+`gglint diagram` draws the LangGraph graphs a codebase builds, from the code that builds
+them, without running it.
+
+```console
+$ gglint diagram code path/to/repo > graph.mmd    # Mermaid
+$ gglint diagram code --json path/to/repo         # the same as JSON
+```
+
+```python
+mermaid = gglint.diagram("path/to/repo", tier="code")
+data = json.loads(gglint.diagram("path/to/repo", tier="code", format="json"))
+```
+
+### Code
+
+The `code` tier draws each graph as LangGraph's `graph.get_graph().draw_mermaid()` does at
+runtime, in the same Mermaid style, and adds what the runtime drawing can't show. Given:
+
+```python
+# app/flow.py
+from langgraph.graph import StateGraph, START, END
+from app.models import claude          # returns ChatBedrockConverse(model_id="...")
+from app.rag import protocol
+
+def triage(state):
+    llm = claude().with_structured_output(Decision)
+    return {"disposition": llm.invoke(protocol(state["protocol"]))}
+
+def route(state):
+    if state["disposition"] == "EMERGENCY":
+        return "escalate"
+    return END
+
+workflow = StateGraph(State)
+workflow.add_node("triage", triage)
+workflow.add_node("escalate", escalate)
+workflow.add_edge(START, "triage")
+workflow.add_conditional_edges("triage", route, {"escalate": "escalate", "done": END})
+workflow.add_edge("escalate", END)
+```
+
+gglint draws:
+
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	triage("triage<hr/><small><em>model: us.anthropic.claude-sonnet-5-5 → Decision<br>calls: protocol</em></small>")
+	escalate("escalate")
+	__end__([<p>__end__</p>]):::last
+	__start__ --> triage;
+	triage -.-> escalate;
+	triage -. &nbsp;done (never returned)&nbsp; .-> __end__;
+	escalate --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
+```
+
+- **The graph** is read from the builder's calls: `add_node` (named, or named after the
+  function), `add_edge` (including a list of sources, which waits for all of them),
+  `add_sequence`, `set_entry_point`, `set_finish_point`, `add_conditional_edges` and
+  `set_conditional_entry_point`. A conditional edge's targets come from the `path_map`, the
+  router's `Literal[...]` return annotation or the values it returns, including
+  `Send("node", ...)`. A node routes by itself with `Command[Literal[...]]`, the
+  `Command(goto=...)` it returns, or `destinations=`. `ToolNode([...])` shows its tools,
+  `tools_condition` routes to `tools` or the end, and a graph compiled in the same file, or
+  a prebuilt agent, can be a node. A node with nowhere to go ends the graph, as LangGraph
+  draws it. The edges are checked against LangGraph 1.2's own drawing.
+- **When each branch is taken**: the conditions of the `if`s, `elif`s, `match` cases and
+  conditional expressions around each `return` of the router, as written. A router that
+  returns `state["last_node"]` goes wherever the nodes set `last_node` to.
+- **Branches the router never returns**: a `path_map` entry that no `return` produces is
+  drawn with `(never returned)`, and has `"reachable": false` in the JSON.
+- **What each node does**, in its function and the functions in the same file it calls or
+  runs: the chat models it calls, with their model, structured output and bound tools,
+  followed through variables, `bind_tools`, `with_structured_output`, `prompt | llm` and
+  functions that return a model, in the same file or another; the prompts it uses; the
+  project's functions it calls; other nodes' functions it runs; the functions it starts
+  together with `executor.submit` or `asyncio.gather`; and the state keys it reads
+  (`state["k"]`, `state.get("k")`) and writes (the keys of the dicts it returns).
+
+The JSON has one entry per graph, with its `nodes` (`name`, `kind`, `function`, `steps`,
+`reads`, `writes`) and `edges` (`source`, `target`, `conditional`, `label`, `router`,
+`conditions`, `reachable`). Prompt steps have the same ids as the
+[lineage graph](#lineage-graph)'s prompt nodes.
+
+Only files that mention `StateGraph` are read for graphs, so drawing adds nothing to the
+scan of other files, and under a millisecond to the scan of a graph's.
+
 ## How it works
 
 ```text
@@ -537,7 +645,8 @@ says, not what it does:
 
 - **Agents** re-exported through another module (an `__init__.py` that imports and passes
   them on), compiled LangGraph `StateGraph`s, and agents returned by the project's own
-  undecorated factory functions are not linked yet. An agent is found only in a file that
+  undecorated factory functions are not linked yet. `StateGraph`s are drawn by
+  `gglint diagram`, but are not agents in the lineage graph. An agent is found only in a file that
   imports its framework, and a prompt only in a file that imports a framework or SDK, so a
   file that runs an imported agent without importing any framework is not read.
 - **Prompts passed on in messages**, such as `agent.invoke({"messages": [HumanMessage(...)]})`,
@@ -556,6 +665,11 @@ says, not what it does:
   `HumanMessage(content="hello")`, are reported.
 - **Only the registered sinks are seen.** A prompt passed to an SDK or argument that is not
   in the registry is not found; see [Development](#development) to add one.
+- **Diagrams** read a graph from the builder's calls in the file that creates it. A node or
+  edge named by a value only known at runtime is written as `{expression}`, and then no
+  node is assumed to end the graph. A builder passed to another function, a router defined
+  in another module, and a model made by a function in another module with more than one
+  `return` are not followed.
 - Files that are not UTF-8 are skipped.
 
 ## Development
@@ -580,6 +694,9 @@ directories, [`tests/graph.rs`](tests/graph.rs) builds lineage graphs from them 
 | [`src/prompts.rs`](src/prompts.rs)     | The prompt sink registry and how prompt text is worked out          |
 | [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
 | [`src/graph.rs`](src/graph.rs)         | The lineage graph and its JSON                                      |
+| [`src/flow.rs`](src/flow.rs)           | Reading LangGraph graphs and what their nodes do                    |
+| [`src/views/`](src/views/)             | `gglint diagram`: the diagrams, in Mermaid and JSON                 |
+| [`src/json.rs`](src/json.rs)           | The JSON writer the lineage graph and diagrams share                |
 | [`examples/visualize.rs`](examples/visualize.rs) | A throwaway HTML viewer for the graph                     |
 | [`src/ask/`](src/ask/)                 | `gglint ask`: the graph, queries, understanding and its model       |
 | [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                    |

@@ -4,6 +4,8 @@
 //! ```text
 //! gglint [--all] [PATH ...]           list agents and prompts
 //! gglint --graph [PATH ...]           print the lineage graph as JSON
+//! gglint diagram [TIER] [--json] [PATH ...]
+//!                                     draw the agent graphs; TIER is `code`
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
@@ -19,6 +21,7 @@ use std::time::Instant;
 
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
+use gglint::views::{self, Format, Tier};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -26,6 +29,7 @@ fn main() -> ExitCode {
         Some("ask") => ask(&args[1..]),
         Some("chat") => chat(&args[1..]),
         Some("models") => models(&args[1..]),
+        Some("diagram") => diagram(&args[1..]),
         _ => list(&args),
     }
 }
@@ -219,6 +223,46 @@ fn list(args: &[String]) -> ExitCode {
 
     if results.is_empty() {
         eprintln!("No Python files found.");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn diagram(args: &[String]) -> ExitCode {
+    let mut tier = Tier::Code;
+    let mut format = Format::Mermaid;
+    let mut roots = Vec::new();
+    for (index, arg) in args.iter().enumerate() {
+        match arg.as_str() {
+            "--json" => format = Format::Json,
+            _ if index == 0 && Tier::parse(arg).is_some() => tier = Tier::parse(arg).expect("checked"),
+            _ => roots.push(PathBuf::from(arg)),
+        }
+    }
+    if roots.is_empty() {
+        roots.push(PathBuf::from("."));
+    }
+    if let Some(missing) = roots.iter().find(|root| !root.exists()) {
+        eprintln!("error: {} doesn't exist", missing.display());
+        return ExitCode::FAILURE;
+    }
+
+    let start = Instant::now();
+    let results = scan(&roots, false);
+    let scanned = start.elapsed();
+    let diagram = views::render(&results, tier, format);
+    let elapsed = start.elapsed();
+    let graphs: usize = results.iter().map(|result| result.graphs.len()).sum();
+    println!("{diagram}");
+    eprintln!(
+        "\n{} diagram of {graphs} graph(s) from {} file(s); {:.2} ms, of which {:.2} ms drawing it",
+        tier.as_str(),
+        results.len(),
+        elapsed.as_secs_f64() * 1000.0,
+        (elapsed - scanned).as_secs_f64() * 1000.0,
+    );
+    if graphs == 0 {
+        eprintln!("No LangGraph graphs found.");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS

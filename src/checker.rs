@@ -98,6 +98,27 @@ struct Visit<'a> {
     lambdas: Vec<(Snapshot, &'a ast::ExprLambda)>,
 }
 
+/// What the LangGraph extractor (`flow.rs`) needs from a file once the walk is done.
+/// Only kept for files that build a graph, since recording every name read costs a
+/// hash insert per name.
+///
+/// The semantic model only answers "what does this name refer to?" at the walker's
+/// current position. `names` keeps the answer for every name read, as Ruff's resolved
+/// references do, so any expression can be resolved after the walk.
+#[derive(Default)]
+pub struct References<'a> {
+    /// The binding each name read refers to, by the start of the name.
+    pub names: FxHashMap<TextSize, BindingId>,
+    /// Each function, by the binding of its name.
+    pub functions: FxHashMap<BindingId, &'a ast::StmtFunctionDef>,
+    /// The function each function scope belongs to.
+    pub scopes: FxHashMap<ScopeId, BindingId>,
+    /// Every value each function returns, in order.
+    pub returns: FxHashMap<BindingId, Vec<&'a Expr>>,
+    /// The value each variable is assigned: `x = value`.
+    pub values: FxHashMap<BindingId, &'a Expr>,
+}
+
 pub struct Checker<'a> {
     pub semantic: SemanticModel<'a>,
     pub candidates: Vec<Candidate<'a>>,
@@ -136,12 +157,23 @@ pub struct Checker<'a> {
     returned_calls: FxHashMap<TextSize, Option<TextSize>>,
     /// The function whose body is being visited, and its scope.
     function: Option<(ScopeId, BindingId)>,
+    /// See [`References`]. `None` unless asked for.
+    pub references: Option<References<'a>>,
 }
 
 /// Builds the semantic model for a module and collects agent candidates.
 ///
 /// `module_path` is the module's dotted path, such as `["myapp", "agents"]`.
 pub fn check_module<'a>(module: &'a ModModule, module_path: Vec<&'a str>) -> Checker<'a> {
+    check(module, module_path, None)
+}
+
+/// [`check_module`], also keeping the [`References`] the LangGraph extractor needs.
+pub fn check_module_with_references<'a>(module: &'a ModModule, module_path: Vec<&'a str>) -> Checker<'a> {
+    check(module, module_path, Some(References::default()))
+}
+
+fn check<'a>(module: &'a ModModule, module_path: Vec<&'a str>, references: Option<References<'a>>) -> Checker<'a> {
     let mut checker = Checker {
         semantic: SemanticModel::new(module_path),
         candidates: Vec::new(),
@@ -158,6 +190,7 @@ pub fn check_module<'a>(module: &'a ModModule, module_path: Vec<&'a str>) -> Che
         function_returns: FxHashMap::default(),
         returned_calls: FxHashMap::default(),
         function: None,
+        references,
     };
     checker.visit_body(&module.body);
     checker.visit_deferred();
@@ -238,6 +271,9 @@ impl<'a> Visitor<'a> for Checker<'a> {
                     function.name.range,
                     BindingKind::FunctionDefinition,
                 );
+                if let Some(references) = &mut self.references {
+                    references.functions.insert(binding, function);
+                }
                 self.visit.functions.push((self.semantic.snapshot(), function, binding));
             }
             Stmt::ClassDef(class) => {
@@ -342,6 +378,18 @@ impl<'a> Visitor<'a> for Checker<'a> {
                 ..
             }) => {
                 self.add_binding(id.as_str(), *range, BindingKind::Assignment);
+            }
+            Expr::Name(ast::ExprName {
+                id,
+                ctx: ExprContext::Load,
+                range,
+                ..
+            }) => {
+                if let Some(references) = &mut self.references {
+                    if let Some(binding) = self.semantic.lookup_symbol(id.as_str()) {
+                        references.names.insert(range.start(), binding);
+                    }
+                }
             }
             Expr::Dict(dict) => {
                 if let Some(prompt) = prompts::prompt_of_message_dict(self, dict) {
@@ -505,6 +553,9 @@ impl<'a> Checker<'a> {
                 self.semantic.restore(snapshot);
                 let scope = self.semantic.push_scope(ScopeKind::Function);
                 self.function = Some((scope, binding));
+                if let Some(references) = &mut self.references {
+                    references.scopes.insert(scope, binding);
+                }
                 self.prompt_function = self
                     .prompt_functions
                     .get(&function.name.range.start())
@@ -585,6 +636,11 @@ impl<'a> Checker<'a> {
         let Some(binding) = self.semantic.current_scope().get(target.id.as_str()) else {
             return;
         };
+        if let Some(references) = &mut self.references {
+            if !append {
+                references.values.insert(binding, value);
+            }
+        }
         if let Some(text) = text {
             self.binding_texts.insert(binding, text);
         }
@@ -624,6 +680,9 @@ impl<'a> Checker<'a> {
     fn visit_return(&mut self, value: Option<&'a Expr>) {
         if let Some((scope, function)) = self.function {
             if scope == self.semantic.scope_id {
+                if let (Some(references), Some(value)) = (&mut self.references, value) {
+                    references.returns.entry(function).or_default().push(value);
+                }
                 let text = value.and_then(|value| prompts::text_of(self, value));
                 self.function_returns
                     .entry(function)
@@ -856,7 +915,7 @@ fn assignment_of_call(stmt: &Stmt) -> Option<&str> {
 /// plain chain of names, such as `make()()` or `agents[0]`.
 ///
 /// This is the only bridge from Python syntax to the language-independent model.
-fn collect_dotted_name(expr: &Expr) -> Option<Vec<&str>> {
+pub(crate) fn collect_dotted_name(expr: &Expr) -> Option<Vec<&str>> {
     match expr {
         Expr::Name(name) => Some(vec![name.id.as_str()]),
         Expr::Attribute(attribute) => {

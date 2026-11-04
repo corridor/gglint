@@ -139,6 +139,19 @@ def lineage_graph(path: str | os.PathLike[str]) -> LineageGraph:
 def lineage_json(path: str | os.PathLike[str]) -> str:
     """Return ``lineage_graph(path)`` as JSON text, to pass on without parsing it."""
 
+def diagram(
+    path: str | os.PathLike[str],
+    tier: t.Literal["code"] = "code",
+    format: t.Literal["mermaid", "json"] = "mermaid",
+) -> str:
+    """Return the diagram of the LangGraph graphs in the Python files under ``path``, as Mermaid text.
+
+    ``tier`` is the level of detail. ``"code"`` draws each graph as LangGraph's ``draw_mermaid()`` does, with the
+    models, prompts, tools and project functions each node uses under its name, and the branches a router never returns
+    marked. ``format="json"`` returns the same as JSON text. Raises ``FileNotFoundError`` if ``path`` doesn't exist,
+    and ``ValueError`` for an unknown tier or format.
+    """
+
 @t.final
 class Fact:
     """One thing an answer rests on, and where it is in the code."""
