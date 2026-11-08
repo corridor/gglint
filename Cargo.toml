@@ -28,7 +28,7 @@ rustc-hash = "2"
 ruff_python_ast = "=0.0.19"
 ruff_python_parser = "=0.0.19"
 ruff_text_size = "=0.0.19"
-# The coding harnesses' config files (`harness.rs`): JSON with comments, and TOML. Both
+# The coding harnesses' config files (`harness/mcp.rs`): JSON with comments, and TOML. Both
 # keep each key's position, for reporting lines. MIT, and MIT or Apache-2.0.
 jsonc-parser = "=0.34.0"
 toml = { version = "=1.1.8", default-features = false, features = ["parse", "std"] }
