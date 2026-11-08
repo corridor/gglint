@@ -190,7 +190,7 @@ fn ask_fails_on_a_path_that_does_not_exist() {
 }
 
 #[test]
-fn mcp_lists_each_harness_server_without_setting_values() {
+fn mcp_servers_lists_each_harness_server_without_setting_values() {
     let dir = TempDir::new();
     dir.write(
         ".mcp.json",
@@ -210,7 +210,7 @@ fn mcp_lists_each_harness_server_without_setting_values() {
         "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\nenabled = false\n",
     );
 
-    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&["mcp".as_ref(), "--servers".as_ref(), dir.path().as_os_str()]);
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -239,4 +239,57 @@ fn mcp_fails_when_there_are_no_config_files() {
 
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr).unwrap().contains("No MCP config files found"));
+}
+
+#[test]
+fn mcp_reports_how_the_harnesses_differ() {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        "{\n  \"mcpServers\": {\n    \"angular-cli\": { \"command\": \"npx\", \"args\": [\"-y\", \"@angular/cli\", \"mcp\"] }\n  }\n}\n",
+    );
+
+    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines.len(), 4, "{stdout}");
+    assert!(
+        lines[0].ends_with(
+            "config.toml:1:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)"
+        ),
+        "{stdout}"
+    );
+    assert!(lines[1].starts_with("    also at ") && lines[1].ends_with(".cursor/mcp.json:3:5"), "{stdout}");
+    assert!(
+        lines[2].ends_with(
+            "config.toml:1:14  different-server `angular-cli` is started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor"
+        ),
+        "{stdout}"
+    );
+    assert!(lines[3].starts_with("    also at ") && lines[3].ends_with(".cursor/mcp.json:3:5"), "{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("Checked 2 MCP server(s) in 2 file(s) for Claude Code, Codex and Cursor: 2 problem(s)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn mcp_passes_when_the_harnesses_agree() {
+    let dir = TempDir::new();
+    dir.write(".codex/config.toml", "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n");
+    dir.write(".cursor/mcp.json", "{ \"mcpServers\": { \"docs\": { \"url\": \"https://docs.example.com/mcp\" } } }\n");
+
+    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr).unwrap().contains(": no problems"));
 }

@@ -1,6 +1,6 @@
 //! The `gglint` command: prints the agents found under the given directories, or the
-//! lineage graph as JSON, and answers questions about them. It also lists the MCP servers
-//! each coding harness is set up to use in a repository.
+//! lineage graph as JSON, and answers questions about them. It also checks that the coding
+//! harnesses a repository is set up for get the same MCP servers.
 //!
 //! ```text
 //! gglint [--all] [PATH ...]           list agents and prompts
@@ -8,7 +8,7 @@
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
-//! gglint mcp [PATH]                   list each harness's MCP servers
+//! gglint mcp [--servers] [PATH]       compare, or list, each harness's MCP servers
 //! ```
 //!
 //! Flags for `ask` and `chat`: `--offline` (never download), `--no-embed` (no
@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
-use gglint::harness::{McpConfig, McpServer, Setting, Transport, read_mcp};
+use gglint::harness::{Finding, McpConfig, McpServer, Setting, Transport, compare_mcp, read_mcp, used_harnesses};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -167,13 +167,23 @@ fn models(_: &[String]) -> ExitCode {
 }
 
 fn mcp(args: &[String]) -> ExitCode {
-    let path = args.first().map_or(".", String::as_str);
-    if !Path::new(path).exists() {
+    let mut servers_only = false;
+    let mut path = ".";
+    for arg in args {
+        match arg.as_str() {
+            "--servers" => servers_only = true,
+            other => path = other,
+        }
+    }
+    let root = Path::new(path);
+    if !root.exists() {
         eprintln!("error: {path} doesn't exist");
         return ExitCode::FAILURE;
     }
     let start = Instant::now();
-    let configs = read_mcp(Path::new(path));
+    let configs = read_mcp(root);
+    let harnesses = used_harnesses(root);
+    let findings = if servers_only { Vec::new() } else { compare_mcp(&configs, &harnesses) };
     let elapsed = start.elapsed();
 
     let mut servers = 0;
@@ -181,24 +191,60 @@ fn mcp(args: &[String]) -> ExitCode {
         for warning in &config.warnings {
             eprintln!("warning: {}: {warning}", config.path.display());
         }
-        for server in &config.servers {
-            servers += 1;
-            print_mcp_server(config, server);
+        servers += config.servers.len();
+        if servers_only {
+            for server in &config.servers {
+                print_mcp_server(config, server);
+            }
         }
     }
-    let mut harnesses: Vec<_> = configs.iter().map(|config| config.harness).collect();
-    harnesses.dedup();
-    eprintln!(
-        "\nFound {servers} MCP server(s) in {} file(s) for {} harness(es); {:.2} ms",
-        configs.len(),
-        harnesses.len(),
-        elapsed.as_secs_f64() * 1000.0,
-    );
+    for finding in &findings {
+        print_finding(finding);
+    }
+
+    let milliseconds = elapsed.as_secs_f64() * 1000.0;
+    if servers_only {
+        let mut with_servers: Vec<_> = configs.iter().map(|config| config.harness).collect();
+        with_servers.dedup();
+        eprintln!(
+            "\nFound {servers} MCP server(s) in {} file(s) for {} harness(es); {milliseconds:.2} ms",
+            configs.len(),
+            with_servers.len(),
+        );
+    } else {
+        let names: Vec<&str> = harnesses.iter().map(|harness| harness.display_name()).collect();
+        let names = match names.as_slice() {
+            [] => "no harness".to_string(),
+            [only] => only.to_string(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        };
+        let problems = match findings.len() {
+            0 => "no problems".to_string(),
+            count => format!("{count} problem(s)"),
+        };
+        eprintln!(
+            "\nChecked {servers} MCP server(s) in {} file(s) for {names}: {problems}; {milliseconds:.2} ms",
+            configs.len(),
+        );
+    }
     if configs.is_empty() {
         eprintln!("No MCP config files found.");
         return ExitCode::FAILURE;
     }
-    ExitCode::SUCCESS
+    if findings.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+fn print_finding(finding: &Finding) {
+    println!(
+        "{}:{}  {:<16} {}",
+        finding.site.path.display(),
+        finding.site.location,
+        finding.rule.as_str(),
+        finding.message
+    );
+    for site in &finding.related {
+        println!("    also at {}:{}", site.path.display(), site.location);
+    }
 }
 
 fn print_mcp_server(config: &McpConfig, server: &McpServer) {

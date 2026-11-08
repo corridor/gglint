@@ -6,7 +6,7 @@ use std::path::Path;
 
 use common::TempDir;
 use gglint::discovery::Location;
-use gglint::harness::{Harness, McpConfig, McpServer, Setting, Transport, read_mcp};
+use gglint::harness::{Harness, McpConfig, McpServer, Setting, Transport, compare_mcp, read_mcp, used_harnesses};
 
 fn setting(name: &str, value: Option<&str>) -> Setting {
     Setting {
@@ -310,4 +310,225 @@ fn a_server_without_a_command_or_url_gives_a_warning() {
 
     assert_eq!(names(&configs[0]), ["docs"]);
     assert_eq!(configs[0].warnings, ["`broken` has neither a `command` nor a `url`"]);
+}
+
+// ---------------------------------------------------------------------------
+// Comparing harnesses
+// ---------------------------------------------------------------------------
+
+/// Each finding as `path:line  rule  message`.
+fn findings(dir: &TempDir) -> Vec<String> {
+    let configs = read_mcp(dir.path());
+    compare_mcp(&configs, &used_harnesses(dir.path()))
+        .iter()
+        .map(|finding| {
+            format!(
+                "{}:{}  {}  {}",
+                finding.site.relative_path.display(),
+                finding.site.location.line,
+                finding.rule.as_str(),
+                finding.message
+            )
+        })
+        .collect()
+}
+
+fn mcp_servers(servers: &str) -> String {
+    format!("{{ \"mcpServers\": {{ {servers} }} }}\n")
+}
+
+/// GGX's Codex and Cursor configs, with a `.claude` directory and no `.mcp.json`.
+fn ggx_like() -> TempDir {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.code-review-graph]\ncommand = \"uvx\"\nargs = [\"code-review-graph@latest\", \"serve\"]\n\n\
+         [mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""angular-cli": { "command": "npx", "args": ["-y", "@angular/cli", "mcp"] }"#),
+    );
+    dir
+}
+
+#[test]
+fn finds_the_harnesses_a_repository_is_set_up_for() {
+    let dir = TempDir::new();
+    dir.write("AGENTS.md", "# Shared by several harnesses\n");
+    assert!(used_harnesses(dir.path()).is_empty());
+
+    dir.write(".codex/config.toml", "");
+    dir.write("CLAUDE.md", "@AGENTS.md\n");
+    assert_eq!(used_harnesses(dir.path()), [Harness::ClaudeCode, Harness::Codex]);
+}
+
+#[test]
+fn reports_servers_missing_from_a_harness_the_repository_uses() {
+    let dir = ggx_like();
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".codex/config.toml:1  missing-server  `code-review-graph` is set up for Codex but not for Claude Code \
+             (.mcp.json) or Cursor (.cursor/mcp.json)",
+            ".codex/config.toml:5  missing-server  `angular-cli` is set up for Codex and Cursor but not for Claude \
+             Code (.mcp.json)",
+            ".codex/config.toml:5  different-server  `angular-cli` is started with different arguments: \
+             `mcp --read-only` in Codex; `mcp` in Cursor",
+        ]
+    );
+}
+
+#[test]
+fn harnesses_the_repository_is_not_set_up_for_are_left_out() {
+    let dir = TempDir::new();
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn the_same_package_started_another_way_is_the_same_server() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""angular-cli": { "command": "npx", "args": ["-y", "@angular/cli@latest", "mcp"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""angular-cli": { "command": "bunx", "args": ["@angular/cli", "mcp"] }"#),
+    );
+    dir.write(
+        "opencode.json",
+        r#"{ "mcp": { "angular-cli": { "type": "local", "command": ["npx", "--yes", "@angular/cli", "mcp"] } } }"#,
+    );
+
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn reports_different_versions_of_a_package() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp@1.2.0"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"docs-mcp@1.3.0\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp"] }"#),
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `docs` runs different versions of the npm package `docs-mcp`: 1.2.0 \
+          in Claude Code; 1.3.0 in Codex; the newest in Cursor"
+        ]
+    );
+}
+
+#[test]
+fn reports_a_different_server_under_the_same_name() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "type": "http", "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"uvx\"\nargs = [\"docs-mcp==2.0\"]\n",
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `docs` is a different server in each harness: \
+          https://docs.example.com/mcp in Claude Code; the PyPI package `docs-mcp` in Codex"
+        ]
+    );
+}
+
+#[test]
+fn reports_different_environment_variables_and_headers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(
+            r#""angular-cli": { "command": "npx", "args": ["@angular/cli", "mcp"], "env": { "NG_TOKEN": "${NG_TOKEN}" } },
+               "docs": { "url": "https://docs.example.com/mcp", "headers": { "Authorization": "Bearer ${KEY}" } }"#,
+        ),
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(
+            r#""angular-cli": { "command": "npx", "args": ["@angular/cli", "mcp"] },
+               "docs": { "url": "https://docs.example.com/mcp" }"#,
+        ),
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `angular-cli` is given different environment variables: NG_TOKEN in \
+             Claude Code; none in Cursor",
+            ".mcp.json:2  different-server  `docs` is sent different HTTP headers: Authorization in Claude Code; \
+             none in Cursor",
+        ]
+    );
+}
+
+#[test]
+fn reports_a_server_turned_off_in_one_harness() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\nenabled = false\n",
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [".codex/config.toml:1  different-server  `docs` is turned off in Codex but not in Claude Code"]
+    );
+}
+
+#[test]
+fn matches_a_renamed_server_by_what_it_runs() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""angular": { "command": "npx", "args": ["-y", "@angular/cli", "mcp"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\"]\n",
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  renamed-server  One server has different names: `angular` in Claude Code; `angular-cli` \
+          in Codex"
+        ]
+    );
 }

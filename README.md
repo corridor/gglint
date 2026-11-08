@@ -14,7 +14,8 @@ gglint statically analyses AI agents. It reads a Python codebase and reports:
 It also reads a repository's coding-harness config files:
 
 - **MCP servers**: the MCP servers Claude Code, Codex, Cursor and OpenCode are each set up
-  to use, so the setups can be compared.
+  to use, and where they differ: a server one harness gets and another doesn't, or gets
+  set up differently.
 
 gglint never runs the code it reads. Nothing is imported, no dependency is installed and
 no environment is built, so it is safe to point at any repository, including untrusted
@@ -189,7 +190,7 @@ The crate is also a library. `gglint::discovery::scan(&[root], false)` returns a
 
 ```console
 $ gglint [--all] [--graph] [PATH ...]
-$ gglint mcp [PATH]
+$ gglint mcp [--servers] [PATH]
 ```
 
 - With no path it scans the current directory. Several paths are scanned together.
@@ -204,8 +205,8 @@ $ gglint mcp [PATH]
   It is only useful for measuring the parser.
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
-- `gglint mcp` lists the [MCP servers](#mcp-servers) in a repository's harness config
-  files instead. It exits with status 1 when there are none.
+- `gglint mcp` compares the [MCP servers](#mcp-servers) in a repository's harness config
+  files instead, and `gglint mcp --servers` lists them.
 
 ## Asking questions
 
@@ -474,43 +475,97 @@ cargo run --release --example visualize -- path/to/repo graph.html
 ## MCP servers
 
 Each coding harness keeps the MCP servers it starts for a repository in its own file, in
-its own format. They drift apart: a server added for one harness is missing from the
-others, or set up differently. `gglint mcp` reads them all:
+its own format:
 
-| Harness     | File                                | Format                                                  |
-| ----------- | ----------------------------------- | ------------------------------------------------------- |
-| Claude Code | `.mcp.json`                         | JSON, `mcpServers`                                      |
-| Codex       | `.codex/config.toml`                | TOML, `[mcp_servers.<name>]`                            |
-| Cursor      | `.cursor/mcp.json`                  | JSON, `mcpServers`                                      |
-| OpenCode    | `opencode.json`, `opencode.jsonc`   | JSON with comments, `mcp`; the command is one list      |
+| Harness     | File                              | Format                                             |
+| ----------- | --------------------------------- | -------------------------------------------------- |
+| Claude Code | `.mcp.json`                       | JSON, `mcpServers`                                 |
+| Codex       | `.codex/config.toml`              | TOML, `[mcp_servers.<name>]`                       |
+| Cursor      | `.cursor/mcp.json`                | JSON, `mcpServers`                                 |
+| OpenCode    | `opencode.json`, `opencode.jsonc` | JSON with comments, `mcp`; the command is one list |
+
+The copies drift apart: a server is added for one harness and not the others, or set up
+differently in each. `gglint mcp` reads them all and reports where they differ:
 
 ```console
 $ gglint mcp path/to/repo
+path/to/repo/.codex/config.toml:3:14  missing-server   `code-review-graph` is set up for Codex but not for Claude Code (.mcp.json) or Cursor (.cursor/mcp.json)
+path/to/repo/.codex/config.toml:12:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)
+    also at path/to/repo/.cursor/mcp.json:3:5
+path/to/repo/.codex/config.toml:12:14  different-server `angular-cli` is started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor
+    also at path/to/repo/.cursor/mcp.json:3:5
+
+Checked 3 MCP server(s) in 2 file(s) for Claude Code, Codex and Cursor: 3 problem(s); 0.48 ms
+```
+
+It exits with status 1 when it finds a problem or no config files, and 0 otherwise.
+
+### Which harnesses are compared
+
+Only the harnesses the repository is set up for: those with their own files in it.
+
+| Harness     | Its files                                       |
+| ----------- | ----------------------------------------------- |
+| Claude Code | `.claude/`, `CLAUDE.md`, `.mcp.json`            |
+| Codex       | `.codex/`                                       |
+| Cursor      | `.cursor/`, `.cursorrules`                      |
+| OpenCode    | `.opencode/`, `opencode.json`, `opencode.jsonc` |
+
+`AGENTS.md` is read by several harnesses, so it doesn't count for any of them. A
+repository with a `.claude/` directory and no `.mcp.json` is set up for Claude Code, so
+every server the other harnesses get is missing from it.
+
+### What is reported
+
+Servers are matched by name, and then by what they run, so a server renamed in one
+harness is still the same server.
+
+| Rule               | Reported when                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `missing-server`   | A harness the repository is set up for doesn't get a server the others do. The message names its file.                          |
+| `different-server` | The same server runs another program, URL or version, with other arguments, environment variables or headers, or is turned off. |
+| `renamed-server`   | The same server has another name in some harnesses.                                                                             |
+
+How a package is started isn't a difference. `npx -y pkg`, `npx --yes pkg@latest`,
+`pnpm dlx pkg`, `yarn dlx pkg`, `bunx pkg` and `bun x pkg` all run the npm package `pkg`,
+and `uvx pkg`, `uvx --from pkg pkg`, `uv tool run pkg` and `pipx run pkg` the PyPI package
+`pkg`. No version and `latest` both mean the newest version. Environment variables and
+headers are compared by name, since each harness writes references to the user's
+environment differently (`${KEY}`, `{env:KEY}`, Codex's `env_vars`).
+
+### Listing the servers
+
+`gglint mcp --servers` lists every server instead, one line each: where its name is
+written, the harness, the name, and the command it's started with or the URL it's reached
+at. Then, in brackets: the names of its environment variables and HTTP headers, the tools
+it's limited to or kept from (Codex's `enabled_tools` and `disabled_tools`), and `disabled`
+when the config turns it off.
+
+```console
+$ gglint mcp --servers path/to/repo
 path/to/repo/.codex/config.toml:3:14  codex        code-review-graph  uvx code-review-graph@latest serve
 path/to/repo/.codex/config.toml:12:14  codex        angular-cli  pnpm dlx @angular/cli mcp --read-only
 path/to/repo/.cursor/mcp.json:3:5  cursor       angular-cli  npx -y @angular/cli mcp
-
-Found 3 MCP server(s) in 2 file(s) for 2 harness(es); 0.32 ms
 ```
 
-Each server is printed on one line: where its name is written, the harness, the name, and
-the command it's started with or the URL it's reached at. Then, in brackets: the names of
-its environment variables and HTTP headers, the tools it's limited to or kept from
-(Codex's `enabled_tools` and `disabled_tools`), and `disabled` when the config turns it
-off.
+### What it doesn't do
 
-- Only names are printed for environment variables and headers. Their values are kept as
-  written, `${KEY}` references included, and a config can hold a secret in full.
-- Nothing is started, downloaded or expanded. A server's package isn't looked up and
-  `${KEY}`, `{env:KEY}` and Codex's `env_vars` are left as references.
-- A file that doesn't parse, or a server with neither a command nor a URL, is reported
-  as a warning on standard error.
-- Only the files at the repository's root are read. Servers set up for one user (Claude
-  Code's `~/.claude.json`, `~/.codex/config.toml`) and servers that come from Claude Code
-  plugins aren't in the repository, so they aren't listed. Codex only reads
-  `.codex/config.toml` in projects the user has trusted.
+- Print values. Environment variables and headers are listed by name: a config can hold a
+  secret in full.
+- Start, download or expand anything. A server's package isn't looked up, and references
+  to the user's environment are left as they are.
+- Read anything outside the repository's root. Servers set up for one user (Claude Code's
+  `~/.claude.json`, `~/.codex/config.toml`) aren't in the repository, and neither are the
+  servers Claude Code plugins add. A server a plugin gives Claude Code is reported as
+  missing from it.
+- Take into account that Codex only reads `.codex/config.toml` in projects the user has
+  trusted.
 
-From Rust, `gglint::harness::read_mcp(path)` returns each file's servers.
+A file that doesn't parse, or a server with neither a command nor a URL, is reported as a
+warning on standard error.
+
+From Rust, `gglint::harness::read_mcp(path)` returns each file's servers, and
+`compare_mcp(&configs, &used_harnesses(path))` the findings.
 
 ## How it works
 
@@ -580,9 +635,10 @@ Building the lineage graph and writing its JSON adds, on the same machine:
 Its cost grows with the number of agents, prompts and sources, not with the size of the
 codebase.
 
-`gglint mcp` opens five files at fixed paths and searches for nothing, so its time
-doesn't depend on the size of the repository. Reading four harnesses' configs with 83
-servers between them takes under 0.4 ms, much less than starting the program.
+`gglint mcp` opens a few files at fixed paths and searches for nothing, so its time
+doesn't depend on the size of the repository. Reading and comparing four harnesses'
+configs with 83 servers between them takes under 0.6 ms, much less than starting the
+program.
 
 ## Limitations
 
@@ -634,7 +690,7 @@ directories, [`tests/graph.rs`](tests/graph.rs) builds lineage graphs from them 
 | [`src/prompts.rs`](src/prompts.rs)     | The prompt sink registry and how prompt text is worked out          |
 | [`src/project.rs`](src/project.rs)     | The cross-file pass: imports, files read at runtime, crewAI configs |
 | [`src/graph.rs`](src/graph.rs)         | The lineage graph and its JSON                                      |
-| [`src/harness.rs`](src/harness.rs)     | The coding harnesses' MCP config files                              |
+| [`src/harness/`](src/harness/)         | The coding harnesses' MCP config files, and comparing them          |
 | [`examples/visualize.rs`](examples/visualize.rs) | A throwaway HTML viewer for the graph                     |
 | [`src/ask/`](src/ask/)                 | `gglint ask`: the graph, queries, understanding and its model       |
 | [`src/python.rs`](src/python.rs)       | The Python bindings, behind the `python` feature                    |

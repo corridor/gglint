@@ -20,7 +20,7 @@ use gglint::ask::understand::Understanding;
 #[cfg(feature = "embed")]
 use gglint::ask::{Options, Repo};
 use gglint::discovery::scan;
-use gglint::harness::read_mcp;
+use gglint::harness::{compare_mcp, read_mcp, used_harnesses};
 
 const QUESTIONS: &[&str] = &[
     "what's in this repo",
@@ -145,7 +145,7 @@ fn mcp_repo() -> TempDir {
 
 #[test]
 #[ignore = "timing; run with --release"]
-fn reads_mcp_configs_within_budget() {
+fn reads_and_compares_mcp_configs_within_budget() {
     let dir = mcp_repo();
     assert_eq!(read_mcp(dir.path()).len(), 4);
 
@@ -153,12 +153,15 @@ fn reads_mcp_configs_within_budget() {
         .map(|_| {
             let start = Instant::now();
             let configs = read_mcp(dir.path());
+            let findings = compare_mcp(&configs, &used_harnesses(dir.path()));
             let elapsed = start.elapsed();
             assert_eq!(configs.iter().map(|config| config.servers.len()).sum::<usize>(), 83);
+            // Codex is the only one without `docs`.
+            assert_eq!(findings.len(), 1, "{findings:?}");
             elapsed
         })
         .collect();
     let slowest = slowest(times);
-    eprintln!("slowest read of 4 files, 83 servers: {slowest:?}");
-    assert!(slowest < Duration::from_millis(1), "slowest read: {slowest:?}");
+    eprintln!("slowest read and comparison of 4 files, 83 servers: {slowest:?}");
+    assert!(slowest < Duration::from_millis(1), "slowest: {slowest:?}");
 }

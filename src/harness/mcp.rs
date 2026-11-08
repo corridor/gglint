@@ -1,5 +1,4 @@
-//! The coding harnesses' config files in a repository: the MCP servers that Claude Code,
-//! Codex, Cursor and OpenCode are each set up to use.
+//! The MCP servers each harness is set up to use, read from its config file.
 //!
 //! Each harness reads its servers from its own file, in its own format, at a fixed path
 //! under the repository's root. So nothing is searched for: each path is opened once,
@@ -13,27 +12,8 @@ use jsonc_parser::ast::{Array, Object, Value};
 use jsonc_parser::{CollectOptions, ParseOptions};
 use toml::de::{DeTable, DeValue};
 
+use super::Harness;
 use crate::discovery::Location;
-
-/// A program that runs a model as a coding agent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Harness {
-    ClaudeCode,
-    Codex,
-    Cursor,
-    OpenCode,
-}
-
-impl Harness {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => "claude-code",
-            Harness::Codex => "codex",
-            Harness::Cursor => "cursor",
-            Harness::OpenCode => "opencode",
-        }
-    }
-}
 
 /// How a file lists its MCP servers.
 #[derive(Clone, Copy)]
@@ -56,6 +36,14 @@ const MCP_FILES: &[(Harness, &str, Format)] = &[
     (Harness::OpenCode, "opencode.json", Format::OpenCode),
     (Harness::OpenCode, "opencode.jsonc", Format::OpenCode),
 ];
+
+/// The file `harness` reads a repository's MCP servers from.
+pub(super) fn mcp_file(harness: Harness) -> &'static str {
+    MCP_FILES
+        .iter()
+        .find(|(candidate, _, _)| *candidate == harness)
+        .map_or("", |(_, path, _)| path)
+}
 
 /// One harness's MCP config file.
 pub struct McpConfig {
