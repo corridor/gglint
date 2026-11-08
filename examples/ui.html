@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gglint diagrams</title>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<style>
+  :root {
+    --bg:#f6f6f4; --panel:#ffffff; --text:#1d1d1f; --muted:#6e6e73; --line:#e2e2e6; --accent:#5b4bd6;
+    --code:#7c6cf0; --workflow:#2e9d6a; --business:#d08a1e; --warn:#c2416b; --chip:#f0eff8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141416; --panel:#1d1d20; --text:#ececef; --muted:#9a9aa1; --line:#33333a; --chip:#2a2a33; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.5 -apple-system, system-ui, "Segoe UI", sans-serif; background:var(--bg); color:var(--text);
+         display:grid; grid-template-rows:auto auto 1fr; height:100vh; }
+  header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:var(--panel);
+           border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  header h1 span { color:var(--muted); font-weight:400; }
+  form { display:flex; gap:8px; flex:1; min-width:280px; }
+  input { flex:1; padding:7px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text);
+          font:12px ui-monospace, Menlo, monospace; }
+  button { padding:7px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  .stats { display:flex; gap:6px; flex-wrap:wrap; }
+  select { padding:6px 8px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text);
+           font:12px ui-monospace, Menlo, monospace; max-width:420px; }
+  .stat { background:var(--chip); border-radius:999px; padding:3px 10px; font-size:12px; white-space:nowrap; }
+  .stat b { font-variant-numeric:tabular-nums; }
+  nav { display:flex; gap:0; padding:0 16px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav button { background:none; color:var(--muted); border-radius:0; padding:10px 16px 8px; border-bottom:3px solid transparent;
+               font-weight:600; text-align:left; }
+  nav button small { display:block; font-weight:400; font-size:11px; }
+  nav button.on { color:var(--text); border-bottom-color:var(--tier); }
+  nav .arrow { align-self:center; color:var(--muted); padding:0 2px; }
+  main { display:grid; grid-template-columns:260px 1fr 380px; min-height:0; }
+  main.single { grid-template-columns:1fr 380px; }
+  main.single #graphs { display:none; }
+  #graphs { border-right:1px solid var(--line); background:var(--panel); overflow:auto; padding:10px 0; }
+  #graphs h3 { margin:0 14px 8px; }
+  #graphs .file { font-size:11px; color:var(--muted); padding:8px 14px 2px; word-break:break-all; }
+  #graphs button { display:block; width:100%; text-align:left; background:none; color:var(--text); border-radius:0;
+                   padding:5px 14px 5px 20px; font-weight:500; border-left:3px solid transparent; }
+  #graphs button:hover { background:var(--chip); }
+  #graphs button.on { background:var(--chip); border-left-color:var(--accent); font-weight:700; }
+  #graphs button small { color:var(--muted); font-weight:400; }
+  /* The diagrams are drawn in Mermaid's light theme, so they sit on paper in both themes. */
+  #canvas { position:relative; min-height:0; overflow:hidden; background:#fbfbf9; }
+  #canvas svg { width:100%; height:100%; }
+  #canvas .hint { position:absolute; left:12px; bottom:10px; color:var(--muted); font-size:11px; background:var(--panel);
+                  border:1px solid var(--line); border-radius:6px; padding:2px 8px; }
+  #status { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); pointer-events:none; }
+  .node { cursor:pointer; }
+  .node.sel > rect, .node.sel > polygon, .node.sel > path, .node.sel > circle { stroke:#ff6a00 !important; stroke-width:3px !important; }
+  aside { border-left:1px solid var(--line); background:var(--panel); padding:14px 16px; overflow:auto; }
+  aside h2 { font-size:15px; margin:0 0 2px; word-break:break-word; }
+  aside h3 { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:16px 0 6px; }
+  .kind { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--tier); }
+  .muted { color:var(--muted); }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { background:var(--chip); border-radius:6px; padding:1px 7px; font:12px ui-monospace, Menlo, monospace; overflow-wrap:anywhere; }
+  a.chip, .go { cursor:pointer; color:var(--accent); text-decoration:none; }
+  a.chip:hover, .go:hover { text-decoration:underline; }
+  ul { padding-left:16px; margin:4px 0; } li { margin:2px 0; }
+  .ev { font:11.5px/1.4 ui-monospace, Menlo, monospace; border-left:3px solid var(--tier); padding:4px 8px; margin:6px 0;
+        background:var(--bg); border-radius:0 6px 6px 0; word-break:break-word; }
+  .ev .where { color:var(--muted); }
+  .cond { font:11.5px/1.4 ui-monospace, Menlo, monospace; background:var(--bg); padding:2px 6px; border-radius:4px; display:block; margin:2px 0; word-break:break-word; }
+  .warn { color:var(--warn); font-weight:600; }
+  .layers { margin-top:4px; font-size:12px; }
+  @media (max-width: 860px) {
+    main, main.single { grid-template-columns:1fr; grid-template-rows:auto 60vh auto; }
+    #graphs { max-height:30vh; border-right:0; border-bottom:1px solid var(--line); }
+    aside { border-left:0; border-top:1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>gglint <span>diagrams</span></h1>
+  <form id="form">
+    <input id="path" value="__DEFAULT_PATH__" spellcheck="false" aria-label="Path to scan">
+    <button id="scan">Scan</button>
+  </form>
+  <div class="stats" id="stats"></div>
+</header>
+<nav id="tabs">
+  <button data-tier="business" style="--tier:var(--business)">Business<small>who it serves, what it decides</small></button>
+  <span class="arrow">←</span>
+  <button data-tier="workflow" style="--tier:var(--workflow)">Workflow<small>the parts and their handoffs</small></button>
+  <span class="arrow">←</span>
+  <button data-tier="code" style="--tier:var(--code)">Code<small>the graph as LangGraph draws it</small></button>
+</nav>
+<main id="main">
+  <div id="graphs" aria-label="Graphs found"></div>
+  <div id="canvas"><div id="status">Scanning…</div><div class="hint">drag to pan · scroll to zoom · click a box</div></div>
+  <aside id="panel"></aside>
+</main>
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad:false, securityLevel:"loose", maxTextSize:500000, flowchart:{ htmlLabels:true, useMaxWidth:false } });
+
+const $ = (id) => document.getElementById(id);
+const esc = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" })[c]);
+const COLORS = { code:"var(--code)", workflow:"var(--workflow)", business:"var(--business)" };
+let data = null, tier = "business", panZoom = null, renders = 0;
+const svgs = {};
+
+// Mermaid ids as `views::mermaid::id` makes them.
+const mermaidId = (prefix, name) => prefix + [...name].map((c) => /[A-Za-z0-9_]/.test(c) ? c : `_${c.codePointAt(0).toString(16)}_`).join("")
+  .replace(/^end$/i, (m) => m + "_");
+
+let scanned = null;
+
+async function getJson(url) {
+  const response = await fetch(url);
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error);
+  return body;
+}
+
+async function runScan(event) {
+  event?.preventDefault();
+  const path = $("path").value.trim();
+  $("scan").disabled = true;
+  $("status").textContent = "Scanning…";
+  $("status").style.display = "grid";
+  try {
+    scanned = await getJson(`/api/scan?path=${encodeURIComponent(path)}`);
+    const graphs = scanned.graphs;
+    // Every graph found, by file, so all of them can be opened.
+    $("main").classList.toggle("single", graphs.length < 2);
+    let file = null;
+    $("graphs").innerHTML = `<h3>${graphs.length} graphs</h3>` + graphs.map((g, i) => {
+      const heading = g.path !== file ? `<div class="file">${esc(g.path)}</div>` : "";
+      file = g.path;
+      return `${heading}<button data-graph="${i}">${esc(g.name)} <small>· line ${g.line} · ${g.nodes} nodes</small></button>`;
+    }).join("");
+    $("graphs").querySelectorAll("[data-graph]").forEach((button) =>
+      button.addEventListener("click", () => loadGraph(Number(button.dataset.graph))));
+    if (graphs.length === 0) {
+      data = null;
+      stats();
+      $("status").textContent = "No LangGraph graphs found under this path.";
+      $("canvas").querySelector("svg")?.remove();
+      $("panel").innerHTML = "";
+      return;
+    }
+    // The largest graph first: it shows the most.
+    const largest = graphs.reduce((best, g, i) => g.nodes + g.edges > graphs[best].nodes + graphs[best].edges ? i : best, 0);
+    await loadGraph(largest);
+  } catch (error) {
+    $("status").textContent = `Couldn't scan: ${error.message}`;
+  } finally {
+    $("scan").disabled = false;
+  }
+}
+
+async function loadGraph(index) {
+  $("graphs").querySelectorAll("[data-graph]").forEach((button) => button.classList.toggle("on", Number(button.dataset.graph) === index));
+  $("status").textContent = "Drawing…";
+  $("status").style.display = "grid";
+  data = await getJson(`/api/graph?index=${index}`);
+  for (const key of Object.keys(svgs)) delete svgs[key];
+  stats();
+  await show(tier);
+}
+
+function stats() {
+  const count = scanned.graphs.length;
+  $("stats").innerHTML = [
+    `<span class="stat"><b>${scanned.files}</b> files</span>`,
+    `<span class="stat"><b>${count}</b> graph${count === 1 ? "" : "s"}</span>`,
+    `<span class="stat">scan <b>${scanned.scan_ms.toFixed(1)} ms</b></span>`,
+    ...(data ? ["code", "workflow", "business"].map((t) => `<span class="stat">${t} <b>${data.tiers[t].ms.toFixed(2)} ms</b></span>`) : []),
+  ].join("");
+}
+
+async function show(name, select) {
+  tier = name;
+  document.querySelectorAll("#tabs button").forEach((button) => button.classList.toggle("on", button.dataset.tier === name));
+  document.body.style.setProperty("--tier", COLORS[name]);
+  if (!data) return;
+  if (!svgs[name]) {
+    const { svg } = await mermaid.render(`diagram-${name}-${++renders}`, data.tiers[name].mermaid);
+    svgs[name] = svg;
+  }
+  panZoom?.destroy();
+  $("canvas").querySelector("svg")?.remove();
+  $("canvas").insertAdjacentHTML("afterbegin", svgs[name]);
+  $("status").style.display = "none";
+  const svg = $("canvas").querySelector("svg");
+  svg.removeAttribute("style");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  panZoom = svgPanZoom(svg, { zoomScaleSensitivity:0.3, minZoom:0.1, maxZoom:20, fit:true, center:true, dblClickZoomEnabled:false });
+  svg.querySelectorAll("g.node").forEach((node) => node.addEventListener("click", (event) => {
+    event.stopPropagation();
+    pick(nodeKey(node));
+  }));
+  pick(select);
+}
+
+// `flowchart-<id>-<n>`, as Mermaid names a node's group.
+function nodeKey(node) {
+  if (node.dataset.id) return node.dataset.id;
+  const match = node.id.match(/flowchart-(.*)-\d+$/);
+  return match ? match[1] : node.id;
+}
+
+function highlight(key) {
+  document.querySelectorAll("#canvas g.node").forEach((node) => node.classList.toggle("sel", key != null && nodeKey(node) === key));
+}
+
+function pick(key) {
+  highlight(key);
+  const panel = $("panel");
+  if (tier === "code") panel.innerHTML = codePanel(key);
+  if (tier === "workflow") panel.innerHTML = workflowPanel(key);
+  if (tier === "business") panel.innerHTML = businessPanel(key);
+  panel.querySelectorAll("[data-go]").forEach((link) => link.addEventListener("click", () => {
+    const [target, key] = link.dataset.go.split("|");
+    show(target, key);
+  }));
+  panel.querySelectorAll("[data-pick]").forEach((link) => link.addEventListener("click", () => pick(link.dataset.pick)));
+}
+
+const evidence = (list) => (list ?? []).map((e) =>
+  `<div class="ev"><span class="where">${esc(e.path)}:${e.line} · ${esc(e.rule)}</span><br>${esc(e.text)}</div>`).join("");
+const chips = (list, link) => list.length ? `<div class="chips">${list.map((item) => link ? link(item) : `<span class="chip">${esc(item)}</span>`).join("")}</div>` : `<span class="muted">none</span>`;
+const firstGraph = (json) => json.graphs?.[0] ?? json.systems?.[0];
+
+// ---------------------------------------------------------------- code
+function codePanel(key) {
+  const graph = firstGraph(data.tiers.code.json);
+  const node = graph.nodes.find((node) => mermaidId("", node.name) === key);
+  const header = `<span class="kind">code</span><h2>${esc(graph.name)}</h2>
+    <div class="muted">${esc(graph.path)}:${graph.line} · state ${esc(graph.state ?? "?")} · ${graph.nodes.length} nodes, ${graph.edges.length} edges</div>`;
+  if (!node) {
+    const branches = graph.edges.filter((edge) => edge.conditional);
+    return `${header}<h3>Branches</h3>${branches.map(edgeItem).join("")}
+      <p class="muted">Click a node to see what it does.</p>`;
+  }
+  const steps = node.steps.map((step) => {
+    switch (step.kind) {
+      case "model": return `<li><b>model</b> ${esc(step.model ?? step.client ?? step.factory)}${step.output ? ` → <span class="chip">${esc(step.output)}</span>` : ""}${step.tools.length ? `<br><span class="muted">tools:</span> ${esc(step.tools.join(", "))}` : ""} <span class="muted">line ${step.line}</span></li>`;
+      case "prompt": return `<li><b>prompt</b> ${esc(step.label)} <span class="muted">line ${step.line}</span></li>`;
+      case "call": return `<li><b>calls</b> <span class="chip">${esc(step.name)}</span> <span class="muted">line ${step.line}</span></li>`;
+      case "node": return `<li><b>runs node</b> <a class="go" data-pick="${esc(mermaidId("", step.name))}">${esc(step.name)}</a></li>`;
+      case "parallel": return `<li><b>in parallel</b> ${esc(step.functions.join(", "))} <span class="muted">line ${step.line}</span></li>`;
+    }
+  }).join("");
+  const out = graph.edges.filter((edge) => edge.source === node.name);
+  return `<span class="kind">code · node</span><h2>${esc(node.name)}</h2>
+    <div class="muted">${node.kind === "function" ? `${esc(node.function)}() at line ${node.function_line ?? "?"} · ` : esc(node.kind) + " · "}added at line ${node.line}</div>
+    ${node.tools ? `<h3>Tools</h3>${chips(node.tools)}` : ""}
+    <h3>What it does</h3>${steps ? `<ul>${steps}</ul>` : `<span class="muted">nothing found in its code</span>`}
+    <h3>Reads</h3>${chips(node.reads)}<h3>Writes</h3>${chips(node.writes)}
+    <h3>Goes to</h3>${out.map(edgeItem).join("") || `<span class="muted">nowhere</span>`}
+    <p><a class="go" data-pick="">← all branches</a></p>`;
+}
+
+function edgeItem(edge) {
+  const conditions = edge.conditions.map((c) => `<span class="cond">${c == null ? "otherwise" : esc(c)}</span>`).join("");
+  return `<div style="margin:8px 0"><b>${esc(edge.source)}</b> → <b>${esc(edge.target)}</b>
+    ${edge.label ? `<span class="chip">${esc(edge.label)}</span>` : ""}
+    ${edge.router ? `<span class="muted">by ${esc(edge.router)}()</span>` : ""}
+    ${edge.reachable ? "" : `<span class="warn"> never returned</span>`}${conditions}</div>`;
+}
+
+// ---------------------------------------------------------------- workflow
+function workflowPanel(key) {
+  const graph = firstGraph(data.tiers.workflow.json);
+  const part = graph.parts.find((part) => mermaidId("", part.members[0]) === key);
+  const nameOf = (id) => graph.parts.find((part) => part.id === id)?.name ?? id;
+  if (!part || part.role === "start" || part.role === "end") {
+    return `<span class="kind">workflow</span><h2>${esc(graph.name)}</h2>
+      <div class="muted">${graph.parts.length - 2} parts made of the code tier's nodes</div><h3>Parts</h3>
+      <ul>${graph.parts.filter((p) => p.role !== "start" && p.role !== "end").map((p) =>
+        `<li><a class="go" data-pick="${esc(mermaidId("", p.members[0]))}">${esc(p.name)}</a> <span class="muted">${esc(p.role)} · ${p.members.length} node${p.members.length === 1 ? "" : "s"}</span></li>`).join("")}</ul>
+      <p class="muted">Click a part to see the nodes it's made of.</p>`;
+  }
+  const handoffs = graph.handoffs.filter((h) => h.source === part.id || h.target === part.id).map((h) =>
+    `<li>${esc(nameOf(h.source))} → ${esc(nameOf(h.target))} ${h.retry ? `<span class="chip">retry</span>` : ""}
+      ${h.when.length ? `<br><span class="muted">when</span> ${esc(h.when.join(", "))}` : ""}</li>`).join("");
+  return `<span class="kind">workflow · ${esc(part.role)}</span><h2>${esc(part.name)}</h2>
+    <h3>Made of these code nodes</h3>${chips(part.members, (m) => `<a class="chip" data-go="code|${esc(mermaidId("", m))}">${esc(m)}</a>`)}
+    <h3>Models</h3>${chips(part.models)}${part.tool_loop ? `<div class="muted">loops through its tools</div>` : ""}
+    <h3>Tools</h3>${chips(part.tools)}
+    <h3>Uses</h3>${chips(part.uses.map((u) => u.split(".").pop()))}
+    ${part.parallel.length ? `<h3>In parallel</h3>${chips(part.parallel)}` : ""}
+    <h3>Handoffs</h3><ul>${handoffs}</ul>
+    <p><a class="go" data-pick="">← all parts</a></p>`;
+}
+
+// ---------------------------------------------------------------- business
+function businessPanel(key) {
+  const system = firstGraph(data.tiers.business.json);
+  const match = key?.match(/^(actor|capability|control|resource)_(\d+)/);
+  const workflowKey = (partId) => mermaidId("", partId.split(".").pop());
+  if (!match) {
+    return `<span class="kind">business</span><h2>${esc(system.name)}</h2>
+      <div class="layers">${system.profile.map((p) => `<div><span class="muted">${esc(p.label)}:</span> ${esc(p.value)}</div>`).join("")}</div>
+      ${evidence(system.evidence)}
+      <h3>Who</h3><ul>${system.actors.map((a, i) => `<li><a class="go" data-pick="actor_${i}">${esc(a.name)}</a> <span class="muted">${a.asks ? "asks" : ""}${a.reviews ? "reviews" : ""}</span></li>`).join("")}</ul>
+      <h3>Capabilities</h3><ul>${system.capabilities.map((c, i) => `<li><a class="go" data-pick="capability_${i}">${esc(c.name)}</a></li>`).join("")}</ul>
+      <h3>Controls</h3><ul>${system.controls.map((c, i) => `<li><a class="go" data-pick="control_${i}">${esc(c.name)}</a></li>`).join("")}</ul>
+      <h3>Relies on</h3><ul>${system.resources.map((r, i) => `<li><a class="go" data-pick="resource_${i}">${esc(r.name)}</a> <span class="muted">${esc(r.kind)}</span></li>`).join("")}</ul>
+      <p class="muted">Every element comes from the code: click one to see where.</p>`;
+  }
+  const [, kind, index] = match;
+  const back = `<p><a class="go" data-pick="">← the whole system</a></p>`;
+  if (kind === "actor") {
+    const actor = system.actors[index];
+    return `<span class="kind">business · actor</span><h2>${esc(actor.name)}</h2>
+      <div class="muted">${actor.asks ? "asks, and gets the reply" : ""}${actor.reviews ? "reviews what the system decides" : ""}</div>
+      <h3>Evidence</h3>${evidence(actor.evidence)}${back}`;
+  }
+  if (kind === "capability") {
+    const capability = system.capabilities[index];
+    const decisions = capability.decisions.map((d) => `<div style="margin:8px 0"><b>${esc(d.name)}</b>${chips(d.values)}${evidence(d.evidence)}</div>`).join("");
+    return `<span class="kind">business · capability</span><h2>${esc(capability.name)}</h2>
+      <div>is the workflow part <a class="chip" data-go="workflow|${esc(workflowKey(capability.id))}">${esc(capability.part)}</a></div>
+      ${capability.handles.length ? `<h3>Handles</h3>${chips(capability.handles)}` : ""}
+      <h3>Decides</h3>${decisions || `<span class="muted">nothing the code names</span>`}
+      <h3>Relies on</h3>${chips(capability.uses.map((u) => u.replace(/^resource:/, "")))}
+      <h3>Evidence</h3>${evidence(capability.evidence)}${back}`;
+  }
+  if (kind === "control") {
+    const control = system.controls[index];
+    return `<span class="kind">business · control</span><h2>${esc(control.name)}</h2>
+      <div class="muted">${esc(control.kind.replace("_", " "))}</div>
+      ${control.part ? `<div>on the workflow part <a class="chip" data-go="workflow|${esc(workflowKey(control.part))}">${esc(control.part.split(".").pop())}</a></div>` : ""}
+      <h3>Evidence</h3>${evidence(control.evidence)}${back}`;
+  }
+  const resource = system.resources[index];
+  return `<span class="kind">business · ${esc(resource.kind)}</span><h2>${esc(resource.name)}</h2>
+    <h3>Evidence</h3>${evidence(resource.evidence)}${back}`;
+}
+
+$("form").addEventListener("submit", runScan);
+document.querySelectorAll("#tabs button").forEach((button) => button.addEventListener("click", () => show(button.dataset.tier)));
+$("canvas").addEventListener("click", (event) => { if (event.target.closest("g.node") == null) pick(null); });
+runScan();
+</script>
+</body>
+</html>

@@ -119,9 +119,10 @@ pub struct Handoff {
     pub edges: Vec<usize>,
 }
 
-/// The workflow of every graph in `results`, with the file each is built in.
-pub(crate) fn workflows(results: &[FileResult]) -> Vec<(&FileResult, Workflow<'_>)> {
-    graphs(results).map(|(result, graph)| (result, build(graph))).collect()
+/// The workflow of every graph in `results`, or of the one at index `only`, with the file
+/// each is built in.
+pub(crate) fn workflows(results: &[FileResult], only: Option<usize>) -> Vec<(&FileResult, Workflow<'_>)> {
+    graphs(results, only).map(|(result, graph)| (result, build(graph))).collect()
 }
 
 /// Groups a graph's nodes into parts.
@@ -635,9 +636,9 @@ const MAX_LABEL_VALUES: usize = 4;
 /// How many functions a part lists under `uses:` before it's cut short.
 const MAX_USES: usize = 4;
 
-/// The workflows as one Mermaid flowchart.
-pub fn mermaid(results: &[FileResult]) -> String {
-    let workflows = workflows(results);
+/// The workflows as one Mermaid flowchart, or only the one of the graph at index `only`.
+pub fn mermaid(results: &[FileResult], only: Option<usize>) -> String {
+    let workflows = workflows(results, only);
     let boxed = workflows.len() > 1;
     let mut chart = Flowchart::new();
     for (role, style) in [
@@ -768,11 +769,11 @@ fn details(part: &Part) -> Vec<String> {
 ///   "handoffs": [{"source": "part:...", "target": "part:...", "conditional": true,
 ///                 "retry": false, "when": ["NEW_CASE"], "edges": ["router -> triage_decision"]}]}]}
 /// ```
-pub fn json(results: &[FileResult]) -> String {
+pub fn json(results: &[FileResult], only: Option<usize>) -> String {
     let mut out = Json::with_capacity(4096);
     out.0.push_str("{\"schema\":1,\"tier\":\"workflow\",");
     out.begin_array("graphs");
-    for (result, workflow) in workflows(results) {
+    for (result, workflow) in workflows(results, only) {
         write_workflow(&mut out, result, &workflow);
     }
     out.end_array();

@@ -1141,8 +1141,8 @@ const MAX_VALUES: usize = 4;
 
 /// The business views as one Mermaid flowchart, left to right: who asks, the system's
 /// capabilities and controls, who gets the outcome, and what the system relies on.
-pub fn mermaid(results: &[FileResult]) -> String {
-    let workflows = workflows(results);
+pub fn mermaid(results: &[FileResult], only: Option<usize>) -> String {
+    let workflows = workflows(results, only);
     let called = vocabulary::called_declarations(results);
     let businesses = businesses(results, &workflows, &called);
     let mut chart = Flowchart::new_left_to_right();
@@ -1300,8 +1300,8 @@ fn draw(chart: &mut Flowchart, business: &Business<'_>, prefix: &str) {
 // ---------------------------------------------------------------------------
 
 /// The business views as JSON, one per graph, every element with its `evidence`.
-pub fn json(results: &[FileResult]) -> String {
-    let workflows = workflows(results);
+pub fn json(results: &[FileResult], only: Option<usize>) -> String {
+    let workflows = workflows(results, only);
     let called = vocabulary::called_declarations(results);
     let businesses = businesses(results, &workflows, &called);
     let mut out = Json::with_capacity(4096);

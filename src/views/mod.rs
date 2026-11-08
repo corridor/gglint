@@ -55,13 +55,23 @@ pub enum Format {
 
 /// The diagram of `results`, from [`crate::discovery::scan`], at `tier`.
 pub fn render(results: &[FileResult], tier: Tier, format: Format) -> String {
+    draw(results, tier, format, None)
+}
+
+/// The diagram of one graph of `results`: the one at index `graph`, counting the graphs of
+/// every file in order.
+pub fn render_graph(results: &[FileResult], tier: Tier, format: Format, graph: usize) -> String {
+    draw(results, tier, format, Some(graph))
+}
+
+fn draw(results: &[FileResult], tier: Tier, format: Format, only: Option<usize>) -> String {
     match (tier, format) {
-        (Tier::Code, Format::Mermaid) => code::mermaid(results),
-        (Tier::Code, Format::Json) => code::json(results),
-        (Tier::Workflow, Format::Mermaid) => workflow::mermaid(results),
-        (Tier::Workflow, Format::Json) => workflow::json(results),
-        (Tier::Business, Format::Mermaid) => business::mermaid(results),
-        (Tier::Business, Format::Json) => business::json(results),
+        (Tier::Code, Format::Mermaid) => code::mermaid(results, only),
+        (Tier::Code, Format::Json) => code::json(results, only),
+        (Tier::Workflow, Format::Mermaid) => workflow::mermaid(results, only),
+        (Tier::Workflow, Format::Json) => workflow::json(results, only),
+        (Tier::Business, Format::Mermaid) => business::mermaid(results, only),
+        (Tier::Business, Format::Json) => business::json(results, only),
     }
 }
 

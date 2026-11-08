@@ -10,16 +10,21 @@ use crate::project::{Part, SourceKind};
 use super::mermaid::{Flowchart, id};
 use super::{last_segment, prompt_at, prompt_id, qualify, relative_path};
 
-/// Every graph, with the file it's built in, in file order.
-pub(crate) fn graphs(results: &[FileResult]) -> impl Iterator<Item = (&FileResult, &StateGraph)> {
+/// Every graph, with the file it's built in, in file order; or only the graph at index
+/// `only` of that order.
+pub(crate) fn graphs(results: &[FileResult], only: Option<usize>) -> impl Iterator<Item = (&FileResult, &StateGraph)> {
     results
         .iter()
         .flat_map(|result| result.graphs.iter().map(move |graph| (result, graph)))
+        .enumerate()
+        .filter(move |(index, _)| only.is_none_or(|only| only == *index))
+        .map(|(_, graph)| graph)
 }
 
-/// The graphs as one Mermaid flowchart. Several graphs are each drawn in a box.
-pub fn mermaid(results: &[FileResult]) -> String {
-    let graphs: Vec<_> = graphs(results).collect();
+/// The graphs as one Mermaid flowchart, or only the graph at index `only`. Several graphs
+/// are each drawn in a box.
+pub fn mermaid(results: &[FileResult], only: Option<usize>) -> String {
+    let graphs: Vec<_> = graphs(results, only).collect();
     let boxed = graphs.len() > 1;
     let mut chart = Flowchart::new();
     for (index, (result, graph)) in graphs.into_iter().enumerate() {
@@ -176,11 +181,11 @@ pub(crate) fn prompt_label(prompt: &DiscoveredPrompt) -> String {
 ///   "edges": [{"source": "triage", "target": "__end__", "conditional": true,
 ///              "label": null, "router": "route", "conditions": ["done"], "reachable": true}]}]}
 /// ```
-pub fn json(results: &[FileResult]) -> String {
+pub fn json(results: &[FileResult], only: Option<usize>) -> String {
     let mut out = Json::with_capacity(4096);
     out.0.push_str("{\"schema\":1,\"tier\":\"code\",");
     out.begin_array("graphs");
-    for (result, graph) in graphs(results) {
+    for (result, graph) in graphs(results, only) {
         write_graph(&mut out, result, graph);
     }
     out.end_array();
