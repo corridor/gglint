@@ -1348,13 +1348,18 @@ impl<'c, 'a> Extractor<'c, 'a> {
                 let value = self.references.values.get(&self.binding(receiver)?)?;
                 self.trace(value, depth + 1)
             }
-            // `prompt | llm | parser`
+            // `prompt | llm | parser`: the operand known to be a model, wherever it is in
+            // the chain, rather than the first that might be one.
             Expr::BinOp(ast::ExprBinOp {
                 left,
                 op: ast::Operator::BitOr,
                 right,
                 ..
-            }) => self.trace(left, depth + 1).or_else(|| self.trace(right, depth + 1)),
+            }) => match (self.trace(left, depth + 1), self.trace(right, depth + 1)) {
+                (Some(left), _) if left.certain => Some(left),
+                (_, Some(right)) if right.certain => Some(right),
+                (left, right) => left.or(right),
+            },
             _ => None,
         }
     }
@@ -2125,6 +2130,30 @@ mod tests {
         );
         assert_eq!(route.reads, ["text", "messages"]);
         assert_eq!(route.writes, ["intent", "answer"]);
+    }
+
+    #[test]
+    fn a_model_in_the_middle_of_a_chain() {
+        let graph = graph(
+            "from langgraph.graph import StateGraph\n\
+             from langchain_core.runnables import RunnableLambda\n\
+             from langchain_openai import ChatOpenAI\n\
+             fast_llm = ChatOpenAI(model='gpt-4o-mini')\n\
+             def ask(state):\n\
+             \x20   chain = RunnableLambda(swap).bind(name='x') | prompt.partial(p=1) | fast_llm | RunnableLambda(tag)\n\
+             \x20   return {'messages': [chain.invoke(state)]}\n\
+             g = StateGraph(dict)\n\
+             g.add_node('ask', ask)\n",
+        );
+        let models: Vec<_> = node(&graph, "ask")
+            .steps
+            .iter()
+            .filter_map(|step| match step {
+                Step::Model(call) => Some((call.model.id.as_deref(), call.certain)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(models, [(Some("gpt-4o-mini"), true)]);
     }
 
     #[test]
