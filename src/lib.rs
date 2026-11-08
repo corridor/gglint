@@ -14,6 +14,9 @@
 //! Tokenizing and parsing are done by Ruff's parser, used as a library. `checker.rs` is
 //! Python-specific. `semantic.rs` doesn't know about any language.
 //!
+//! `harness.rs` reads a different kind of file: the config files of coding harnesses such
+//! as Claude Code and Codex, for the MCP servers each one is set up to use.
+//!
 //! The same code is used by the `gglint` command (`main.rs`) and, with the `python`
 //! feature, by the `gglint` Python package (`python.rs`).
 
@@ -24,6 +27,7 @@ pub mod ask;
 pub mod checker;
 pub mod discovery;
 pub mod graph;
+pub mod harness;
 pub mod project;
 pub mod prompts;
 pub mod semantic;

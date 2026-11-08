@@ -1,5 +1,6 @@
 //! The `gglint` command: prints the agents found under the given directories, or the
-//! lineage graph as JSON, and answers questions about them.
+//! lineage graph as JSON, and answers questions about them. It also lists the MCP servers
+//! each coding harness is set up to use in a repository.
 //!
 //! ```text
 //! gglint [--all] [PATH ...]           list agents and prompts
@@ -7,6 +8,7 @@
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
+//! gglint mcp [PATH]                   list each harness's MCP servers
 //! ```
 //!
 //! Flags for `ask` and `chat`: `--offline` (never download), `--no-embed` (no
@@ -19,6 +21,7 @@ use std::time::Instant;
 
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
+use gglint::harness::{McpConfig, McpServer, Setting, Transport, read_mcp};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -26,6 +29,7 @@ fn main() -> ExitCode {
         Some("ask") => ask(&args[1..]),
         Some("chat") => chat(&args[1..]),
         Some("models") => models(&args[1..]),
+        Some("mcp") => mcp(&args[1..]),
         _ => list(&args),
     }
 }
@@ -160,6 +164,88 @@ fn models(args: &[String]) -> ExitCode {
 fn models(_: &[String]) -> ExitCode {
     eprintln!("gglint was built without the embedding model (the `embed` feature)");
     ExitCode::FAILURE
+}
+
+fn mcp(args: &[String]) -> ExitCode {
+    let path = args.first().map_or(".", String::as_str);
+    if !Path::new(path).exists() {
+        eprintln!("error: {path} doesn't exist");
+        return ExitCode::FAILURE;
+    }
+    let start = Instant::now();
+    let configs = read_mcp(Path::new(path));
+    let elapsed = start.elapsed();
+
+    let mut servers = 0;
+    for config in &configs {
+        for warning in &config.warnings {
+            eprintln!("warning: {}: {warning}", config.path.display());
+        }
+        for server in &config.servers {
+            servers += 1;
+            print_mcp_server(config, server);
+        }
+    }
+    let mut harnesses: Vec<_> = configs.iter().map(|config| config.harness).collect();
+    harnesses.dedup();
+    eprintln!(
+        "\nFound {servers} MCP server(s) in {} file(s) for {} harness(es); {:.2} ms",
+        configs.len(),
+        harnesses.len(),
+        elapsed.as_secs_f64() * 1000.0,
+    );
+    if configs.is_empty() {
+        eprintln!("No MCP config files found.");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+fn print_mcp_server(config: &McpConfig, server: &McpServer) {
+    let target = match &server.transport {
+        Transport::Command { command, args } => {
+            let mut words = vec![command.as_str()];
+            words.extend(args.iter().map(String::as_str));
+            words.join(" ")
+        }
+        Transport::Remote { url } => url.clone(),
+    };
+    // Names only: a value can be a secret written out in full.
+    let names = |settings: &[Setting]| {
+        settings
+            .iter()
+            .map(|setting| setting.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut details = Vec::new();
+    if !server.env.is_empty() {
+        details.push(format!("env=[{}]", names(&server.env)));
+    }
+    if !server.headers.is_empty() {
+        details.push(format!("headers=[{}]", names(&server.headers)));
+    }
+    if let Some(tools) = &server.enabled_tools {
+        details.push(format!("enabled_tools=[{}]", tools.join(", ")));
+    }
+    if !server.disabled_tools.is_empty() {
+        details.push(format!("disabled_tools=[{}]", server.disabled_tools.join(", ")));
+    }
+    if !server.enabled {
+        details.push("disabled".to_string());
+    }
+    println!(
+        "{}:{}  {:<12} {}  {target}{}",
+        config.path.display(),
+        server.location,
+        config.harness.as_str(),
+        server.name,
+        if details.is_empty() {
+            String::new()
+        } else {
+            format!("  ({})", details.join(", "))
+        }
+    );
 }
 
 fn list(args: &[String]) -> ExitCode {
