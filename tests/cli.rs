@@ -188,3 +188,55 @@ fn ask_fails_on_a_path_that_does_not_exist() {
     assert!(!output.status.success());
     assert!(String::from_utf8(output.stderr).unwrap().contains("no/such/dir"));
 }
+
+#[test]
+fn mcp_lists_each_harness_server_without_setting_values() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{
+  "mcpServers": {
+    "angular-cli": {
+      "command": "npx",
+      "args": ["-y", "@angular/cli", "mcp"],
+      "env": { "NG_TOKEN": "sk-live-not-for-printing" }
+    }
+  }
+}
+"#,
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\nenabled = false\n",
+    );
+
+    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<_> = stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "{stdout}");
+    assert!(
+        lines[0].ends_with(".mcp.json:3:5  claude-code  angular-cli  npx -y @angular/cli mcp  (env=[NG_TOKEN])"),
+        "{stdout}"
+    );
+    assert!(
+        lines[1].ends_with(
+            "config.toml:1:14  codex        angular-cli  pnpm dlx @angular/cli mcp --read-only  (disabled)"
+        ),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("sk-live"), "{stdout}");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Found 2 MCP server(s) in 2 file(s)"), "{stderr}");
+}
+
+#[test]
+fn mcp_fails_when_there_are_no_config_files() {
+    let dir = TempDir::new();
+
+    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8(output.stderr).unwrap().contains("No MCP config files found"));
+}
