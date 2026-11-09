@@ -6,7 +6,9 @@ use std::path::Path;
 
 use common::TempDir;
 use gglint::discovery::Location;
-use gglint::harness::{Harness, McpConfig, McpServer, Setting, Transport, compare_mcp, read_mcp, used_harnesses};
+use gglint::harness::{
+    Cell, Harness, McpConfig, McpServer, Setting, Transport, check_mcp, compare_mcp, read_mcp, used_harnesses,
+};
 
 fn setting(name: &str, value: Option<&str>) -> Setting {
     Setting {
@@ -529,6 +531,99 @@ fn matches_a_renamed_server_by_what_it_runs() {
         [
             ".mcp.json:1  renamed-server  One server has different names: `angular` in Claude Code; `angular-cli` \
           in Codex"
+        ]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Each server in each harness
+// ---------------------------------------------------------------------------
+
+/// Each server's name and its cell in each harness the repository is set up for.
+fn table(dir: &TempDir) -> Vec<(String, Vec<(Harness, Cell)>)> {
+    check_mcp(&read_mcp(dir.path()), &used_harnesses(dir.path()))
+        .into_iter()
+        .map(|check| (check.name, check.cells))
+        .collect()
+}
+
+#[test]
+fn gives_each_server_a_cell_in_each_harness() {
+    use Harness::{ClaudeCode, Codex, Cursor};
+
+    let dir = ggx_like();
+
+    assert_eq!(
+        table(&dir),
+        [
+            (
+                "code-review-graph".to_string(),
+                vec![
+                    (ClaudeCode, Cell::Missing),
+                    (Codex, Cell::Same),
+                    (Cursor, Cell::Missing)
+                ]
+            ),
+            // Compared with the first harness that has it: Codex.
+            (
+                "angular-cli".to_string(),
+                vec![
+                    (ClaudeCode, Cell::Missing),
+                    (Codex, Cell::Same),
+                    (Cursor, Cell::Different)
+                ]
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_server_turned_off_is_off_in_that_harness() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\nenabled = false\n",
+    );
+
+    assert_eq!(
+        table(&dir),
+        [(
+            "docs".to_string(),
+            vec![(Harness::ClaudeCode, Cell::Same), (Harness::Codex, Cell::Off)]
+        )]
+    );
+}
+
+#[test]
+fn describes_each_finding_and_how_to_fix_a_missing_server() {
+    let dir = ggx_like();
+
+    let checks = check_mcp(&read_mcp(dir.path()), &used_harnesses(dir.path()));
+
+    let described: Vec<(&str, Option<&str>)> = checks
+        .iter()
+        .flat_map(|check| &check.findings)
+        .map(|finding| (finding.detail.as_str(), finding.fix.as_deref()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "Missing from Claude Code and Cursor.",
+                Some("Add it to .mcp.json and .cursor/mcp.json, as set up in .codex/config.toml:1")
+            ),
+            (
+                "Missing from Claude Code.",
+                Some("Add it to .mcp.json, as set up in .codex/config.toml:5")
+            ),
+            (
+                "Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.",
+                None
+            ),
         ]
     );
 }

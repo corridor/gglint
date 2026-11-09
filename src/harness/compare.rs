@@ -48,19 +48,53 @@ pub struct Finding {
     pub rule: Rule,
     /// The first harness's setup of the server.
     pub site: Site,
+    /// What's wrong, naming the server, for reading on its own.
     pub message: String,
+    /// What's wrong, for reading under the server's name.
+    pub detail: String,
+    /// How to fix it, when there's one way to.
+    pub fix: Option<String>,
     /// The other harnesses' setups of the server.
     pub related: Vec<Site>,
 }
 
-/// Compares the servers in `configs` across `harnesses`, the harnesses the repository is
-/// set up for. A server missing from a harness that isn't one of them isn't reported.
+/// How a server is set up in one harness.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cell {
+    /// Set up the same way as in the first harness that has it.
+    Same,
+    /// Set up differently from the first harness that has it.
+    Different,
+    Missing,
+    /// Set up, and turned off.
+    Off,
+}
+
+/// One server across the harnesses a repository is set up for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerCheck {
+    /// Its name in the first harness that has it.
+    pub name: String,
+    /// Each harness, in the order given, with how the server is set up in it.
+    pub cells: Vec<(Harness, Cell)>,
+    pub findings: Vec<Finding>,
+}
+
+/// Checks each server in `configs` across `harnesses`, the harnesses the repository is set
+/// up for. A server missing from a harness that isn't one of them isn't reported.
+pub fn check_mcp(configs: &[McpConfig], harnesses: &[Harness]) -> Vec<ServerCheck> {
+    group_servers(configs)
+        .iter()
+        .map(|group| group.check(harnesses))
+        .collect()
+}
+
+/// The findings of `check_mcp`, server by server.
 pub fn compare_mcp(configs: &[McpConfig], harnesses: &[Harness]) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    for group in group_servers(configs) {
-        group.compare(harnesses, &mut findings);
-    }
-    findings
+    check_mcp(configs, harnesses)
+        .into_iter()
+        .flat_map(|check| check.findings)
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -327,25 +361,38 @@ impl Group<'_> {
         self.entries.iter().any(|entry| entry.site.harness == harness)
     }
 
-    fn finding(&self, rule: Rule, message: String) -> Finding {
-        self.finding_at(self.entries[0].site.harness, rule, message)
+    fn entry(&self, harness: Harness) -> Option<&Entry<'_>> {
+        self.entries.iter().find(|entry| entry.site.harness == harness)
+    }
+
+    /// A finding at the first harness's setup of the server, with the others as related.
+    fn finding(&self, rule: Rule, message: String, detail: String) -> Finding {
+        self.finding_at(self.entries[0].site.harness, rule, message, detail)
     }
 
     /// A finding at `harness`'s setup of the server, with the others as related.
-    fn finding_at(&self, harness: Harness, rule: Rule, message: String) -> Finding {
+    fn finding_at(&self, harness: Harness, rule: Rule, message: String, detail: String) -> Finding {
         let (here, others): (Vec<&Entry>, Vec<&Entry>) =
             self.entries.iter().partition(|entry| entry.site.harness == harness);
         Finding {
             rule,
             site: here[0].site.clone(),
             message,
+            detail,
+            fix: None,
             related: others.iter().map(|entry| entry.site.clone()).collect(),
         }
     }
 
     /// Each value of `value` with the harnesses that have it, as `a in X; b in Y and Z`,
-    /// if the harnesses don't all agree.
-    fn disagreement<T: PartialEq>(&self, value: impl Fn(&Entry) -> T, show: impl Fn(&T) -> String) -> Option<String> {
+    /// if the harnesses don't all agree. The harnesses whose value isn't the first
+    /// harness's are added to `different`.
+    fn disagreement<T: PartialEq>(
+        &self,
+        value: impl Fn(&Entry) -> T,
+        show: impl Fn(&T) -> String,
+        different: &mut Vec<Harness>,
+    ) -> Option<String> {
         let mut values: Vec<(T, Vec<Harness>)> = Vec::new();
         for entry in &self.entries {
             let this = value(entry);
@@ -354,43 +401,77 @@ impl Group<'_> {
                 None => values.push((this, vec![entry.site.harness])),
             }
         }
-        (values.len() > 1).then(|| {
+        if values.len() < 2 {
+            return None;
+        }
+        different.extend(values[1..].iter().flat_map(|(_, harnesses)| harnesses));
+        Some(
             values
                 .iter()
                 .map(|(value, harnesses)| format!("{} in {}", show(value), names(harnesses, "and")))
                 .collect::<Vec<_>>()
-                .join("; ")
-        })
+                .join("; "),
+        )
     }
 
-    fn compare(&self, harnesses: &[Harness], findings: &mut Vec<Finding>) {
+    fn check(&self, harnesses: &[Harness]) -> ServerCheck {
         let name = self.name();
+        let mut findings = Vec::new();
+        // The harnesses where the server isn't set up as in the first one.
+        let mut different = Vec::new();
 
-        if let Some(names) = self.disagreement(|entry| entry.server.name.clone(), |name| format!("`{name}`")) {
-            findings.push(self.finding(Rule::RenamedServer, format!("One server has different names: {names}")));
+        if let Some(names) = self.disagreement(
+            |entry| entry.server.name.clone(),
+            |name| format!("`{name}`"),
+            &mut different,
+        ) {
+            findings.push(self.finding(
+                Rule::RenamedServer,
+                format!("One server has different names: {names}"),
+                format!("Named differently: {names}."),
+            ));
         }
 
         let present: Vec<Harness> = self.entries.iter().map(|entry| entry.site.harness).collect();
-        let missing: Vec<String> = harnesses
+        let missing: Vec<Harness> = harnesses
             .iter()
+            .copied()
             .filter(|harness| !present.contains(harness))
-            .map(|harness| format!("{} ({})", harness.display_name(), harness.mcp_file()))
             .collect();
         if !missing.is_empty() {
-            findings.push(self.finding(
+            let with_files: Vec<String> = missing
+                .iter()
+                .map(|harness| format!("{} ({})", harness.display_name(), harness.mcp_file()))
+                .collect();
+            let files: Vec<String> = missing.iter().map(|harness| harness.mcp_file().to_string()).collect();
+            let first = &self.entries[0].site;
+            let mut finding = self.finding(
                 Rule::MissingServer,
                 format!(
                     "`{name}` is set up for {} but not for {}",
                     names(&present, "and"),
-                    join(&missing, "or")
+                    join(&with_files, "or")
                 ),
+                format!("Missing from {}.", names(&missing, "and")),
+            );
+            finding.fix = Some(format!(
+                "Add it to {}, as set up in {}:{}",
+                join(&files, "and"),
+                first.relative_path.display(),
+                first.location.line
             ));
+            findings.push(finding);
         }
 
-        let mut different = |message: String| findings.push(self.finding(Rule::DifferentServer, message));
-        if let Some(servers) = self.disagreement(|entry| entry.launch.identity(), String::clone) {
+        let mut differ = |message: String, detail: String| {
+            findings.push(self.finding(Rule::DifferentServer, message, detail));
+        };
+        if let Some(servers) = self.disagreement(|entry| entry.launch.identity(), String::clone, &mut different) {
             // Versions and arguments of different programs can't be compared.
-            different(format!("`{name}` is a different server in each harness: {servers}"));
+            differ(
+                format!("`{name}` is a different server in each harness: {servers}"),
+                format!("A different server in each harness: {servers}."),
+            );
         } else {
             if let Launch::Package {
                 registry,
@@ -403,11 +484,12 @@ impl Group<'_> {
                     _ => None,
                 };
                 let show = |version: &Option<String>| version.clone().unwrap_or_else(|| "the newest".to_string());
-                if let Some(versions) = self.disagreement(version, show) {
-                    different(format!(
-                        "`{name}` runs different versions of the {} package `{package}`: {versions}",
-                        registry.as_str()
-                    ));
+                if let Some(versions) = self.disagreement(version, show, &mut different) {
+                    let registry = registry.as_str();
+                    differ(
+                        format!("`{name}` runs different versions of the {registry} package `{package}`: {versions}"),
+                        format!("Runs different versions of the {registry} package `{package}`: {versions}."),
+                    );
                 }
             }
             let args = |entry: &Entry| entry.launch.args().map(<[String]>::to_vec);
@@ -415,8 +497,11 @@ impl Group<'_> {
                 Some(args) if !args.is_empty() => format!("`{}`", args.join(" ")),
                 _ => "no arguments".to_string(),
             };
-            if let Some(args) = self.disagreement(args, show) {
-                different(format!("`{name}` is started with different arguments: {args}"));
+            if let Some(args) = self.disagreement(args, show, &mut different) {
+                differ(
+                    format!("`{name}` is started with different arguments: {args}"),
+                    format!("Started with different arguments: {args}."),
+                );
             }
         }
 
@@ -437,8 +522,11 @@ impl Group<'_> {
                 .map(|setting| setting.name.clone())
                 .collect::<Vec<_>>()
         };
-        if let Some(env) = self.disagreement(env, show) {
-            different(format!("`{name}` is given different environment variables: {env}"));
+        if let Some(env) = self.disagreement(env, show, &mut different) {
+            differ(
+                format!("`{name}` is given different environment variables: {env}"),
+                format!("Given different environment variables: {env}."),
+            );
         }
         let headers = |entry: &Entry| {
             entry
@@ -448,25 +536,52 @@ impl Group<'_> {
                 .map(|setting| setting.name.clone())
                 .collect::<Vec<_>>()
         };
-        if let Some(headers) = self.disagreement(headers, show) {
-            different(format!("`{name}` is sent different HTTP headers: {headers}"));
+        if let Some(headers) = self.disagreement(headers, show, &mut different) {
+            differ(
+                format!("`{name}` is sent different HTTP headers: {headers}"),
+                format!("Sent different HTTP headers: {headers}."),
+            );
         }
 
         let (on, off): (Vec<&Entry>, Vec<&Entry>) = self.entries.iter().partition(|entry| entry.server.enabled);
         if !on.is_empty() && !off.is_empty() {
             let harnesses = |entries: &[&Entry]| entries.iter().map(|entry| entry.site.harness).collect::<Vec<_>>();
+            let (off, on) = (names(&harnesses(&off), "and"), names(&harnesses(&on), "or"));
             // At the first harness it's turned off in: that's the setup to look at.
             findings.push(self.finding_at(
-                off[0].site.harness,
+                off_harness(&self.entries),
                 Rule::DifferentServer,
-                format!(
-                    "`{name}` is turned off in {} but not in {}",
-                    names(&harnesses(&off), "and"),
-                    names(&harnesses(&on), "or")
-                ),
+                format!("`{name}` is turned off in {off} but not in {on}"),
+                format!("Turned off in {off} but not in {on}."),
             ));
         }
+
+        let cells = harnesses
+            .iter()
+            .map(|&harness| {
+                let cell = match self.entry(harness) {
+                    None => Cell::Missing,
+                    Some(entry) if !entry.server.enabled => Cell::Off,
+                    Some(_) if different.contains(&harness) => Cell::Different,
+                    Some(_) => Cell::Same,
+                };
+                (harness, cell)
+            })
+            .collect();
+        ServerCheck {
+            name: name.to_string(),
+            cells,
+            findings,
+        }
     }
+}
+
+/// The first harness a server is turned off in.
+fn off_harness(entries: &[Entry]) -> Harness {
+    entries
+        .iter()
+        .find(|entry| !entry.server.enabled)
+        .map_or(entries[0].site.harness, |entry| entry.site.harness)
 }
 
 fn names(harnesses: &[Harness], last: &str) -> String {
