@@ -190,7 +190,8 @@ The crate is also a library. `gglint::discovery::scan(&[root], false)` returns a
 
 ```console
 $ gglint [--all] [--graph] [PATH ...]
-$ gglint mcp [--servers] [PATH]
+$ gglint mcp [--format table|lines] [PATH]
+$ gglint mcp --servers [PATH]
 ```
 
 - With no path it scans the current directory. Several paths are scanned together.
@@ -206,7 +207,7 @@ $ gglint mcp [--servers] [PATH]
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
 - `gglint mcp` compares the [MCP servers](#mcp-servers) in a repository's harness config
-  files instead, and `gglint mcp --servers` lists them.
+  files instead, and draws them; `gglint mcp --servers` lists them.
 
 ## Asking questions
 
@@ -485,20 +486,52 @@ its own format:
 | OpenCode    | `opencode.json`, `opencode.jsonc` | JSON with comments, `mcp`; the command is one list |
 
 The copies drift apart: a server is added for one harness and not the others, or set up
-differently in each. `gglint mcp` reads them all and reports where they differ:
+differently in each. `gglint mcp` reads them all, draws each server in each harness, and
+says what to fix:
 
 ```console
 $ gglint mcp path/to/repo
-path/to/repo/.codex/config.toml:3:14  missing-server   `code-review-graph` is set up for Codex but not for Claude Code (.mcp.json) or Cursor (.cursor/mcp.json)
-path/to/repo/.codex/config.toml:12:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)
-    also at path/to/repo/.cursor/mcp.json:3:5
-path/to/repo/.codex/config.toml:12:14  different-server `angular-cli` is started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor
-    also at path/to/repo/.cursor/mcp.json:3:5
+MCP servers in repo
+
+  ╭───────────────────┬─────────────┬───────┬────────╮
+  │ Server            │ Claude Code │ Codex │ Cursor │
+  ├───────────────────┼─────────────┼───────┼────────┤
+  │ code-review-graph │      ✗      │   ✓   │   ✗    │
+  │ angular-cli       │      ✗      │   ✓   │   ≠    │
+  ╰───────────────────┴─────────────┴───────┴────────╯
+  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
+
+3 problems
+
+  code-review-graph
+    ✗ Missing from Claude Code and Cursor.
+      Add it to .mcp.json and .cursor/mcp.json, as set up in .codex/config.toml:3
+
+  angular-cli
+    ✗ Missing from Claude Code.
+      Add it to .mcp.json, as set up in .codex/config.toml:12
+    ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
+      .codex/config.toml:12, .cursor/mcp.json:3
 
 Checked 3 MCP server(s) in 2 file(s) for Claude Code, Codex and Cursor: 3 problem(s); 0.48 ms
 ```
 
-It exits with status 1 when it finds a problem or no config files, and 0 otherwise.
+- A server's row compares each harness with the first one that has it, in the order of
+  the columns: `≠` marks the harnesses where it's set up differently from that one. With a
+  `.mcp.json`, that's Claude Code's.
+- The symbols are coloured when standard output is a terminal and `NO_COLOR` isn't set.
+- The last line goes to standard error.
+- It exits with status 1 when it finds a problem or no config files, and 0 otherwise.
+
+`--format lines` prints one line per problem instead, for editors and `grep`: where the
+server is set up, the rule and a sentence naming the server, then where the other
+harnesses set it up.
+
+```console
+$ gglint mcp --format lines path/to/repo
+path/to/repo/.codex/config.toml:12:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)
+    also at path/to/repo/.cursor/mcp.json:3:5
+```
 
 ### Which harnesses are compared
 
@@ -565,7 +598,7 @@ A file that doesn't parse, or a server with neither a command nor a URL, is repo
 warning on standard error.
 
 From Rust, `gglint::harness::read_mcp(path)` returns each file's servers, and
-`compare_mcp(&configs, &used_harnesses(path))` the findings.
+`check_mcp(&configs, &used_harnesses(path))` each server's cells and findings.
 
 ## How it works
 

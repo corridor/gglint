@@ -8,7 +8,8 @@
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
-//! gglint mcp [--servers] [PATH]       compare, or list, each harness's MCP servers
+//! gglint mcp [--format F] [PATH]      compare each harness's MCP servers
+//! gglint mcp --servers [PATH]         list them
 //! ```
 //!
 //! Flags for `ask` and `chat`: `--offline` (never download), `--no-embed` (no
@@ -21,7 +22,10 @@ use std::time::Instant;
 
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
-use gglint::harness::{Finding, McpConfig, McpServer, Setting, Transport, compare_mcp, read_mcp, used_harnesses};
+use gglint::harness::{
+    Cell, Finding, Harness, McpConfig, McpServer, Rule, ServerCheck, Setting, Transport, check_mcp, read_mcp,
+    used_harnesses,
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -166,14 +170,44 @@ fn models(_: &[String]) -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// How `gglint mcp` prints what it finds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum McpView {
+    /// A table of servers and harnesses, then the problems under each server.
+    Table,
+    /// One line per problem.
+    Lines,
+    /// One line per server, without comparing them.
+    Servers,
+}
+
 fn mcp(args: &[String]) -> ExitCode {
-    let mut servers_only = false;
+    let mut view = McpView::Table;
     let mut path = ".";
-    for arg in args {
-        match arg.as_str() {
-            "--servers" => servers_only = true,
-            other => path = other,
-        }
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let format = match arg.as_str() {
+            "--servers" => {
+                view = McpView::Servers;
+                continue;
+            }
+            "--format" => args.next().map(String::as_str),
+            other => match other.strip_prefix("--format=") {
+                Some(format) => Some(format),
+                None => {
+                    path = other;
+                    continue;
+                }
+            },
+        };
+        view = match format {
+            Some("table") => McpView::Table,
+            Some("lines") => McpView::Lines,
+            other => {
+                eprintln!("error: unknown format {:?}; use `table` or `lines`", other.unwrap_or(""));
+                return ExitCode::FAILURE;
+            }
+        };
     }
     let root = Path::new(path);
     if !root.exists() {
@@ -183,7 +217,7 @@ fn mcp(args: &[String]) -> ExitCode {
     let start = Instant::now();
     let configs = read_mcp(root);
     let harnesses = used_harnesses(root);
-    let findings = if servers_only { Vec::new() } else { compare_mcp(&configs, &harnesses) };
+    let checks = if view == McpView::Servers { Vec::new() } else { check_mcp(&configs, &harnesses) };
     let elapsed = start.elapsed();
 
     let mut servers = 0;
@@ -192,18 +226,25 @@ fn mcp(args: &[String]) -> ExitCode {
             eprintln!("warning: {}: {warning}", config.path.display());
         }
         servers += config.servers.len();
-        if servers_only {
+        if view == McpView::Servers {
             for server in &config.servers {
                 print_mcp_server(config, server);
             }
         }
     }
-    for finding in &findings {
-        print_finding(finding);
+    let problems: usize = checks.iter().map(|check| check.findings.len()).sum();
+    match view {
+        McpView::Table if !configs.is_empty() => draw_mcp(root, &harnesses, &checks, problems),
+        McpView::Lines => {
+            for finding in checks.iter().flat_map(|check| &check.findings) {
+                print_finding(finding);
+            }
+        }
+        _ => {}
     }
 
     let milliseconds = elapsed.as_secs_f64() * 1000.0;
-    if servers_only {
+    if view == McpView::Servers {
         let mut with_servers: Vec<_> = configs.iter().map(|config| config.harness).collect();
         with_servers.dedup();
         eprintln!(
@@ -218,7 +259,7 @@ fn mcp(args: &[String]) -> ExitCode {
             [only] => only.to_string(),
             [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
         };
-        let problems = match findings.len() {
+        let problems = match problems {
             0 => "no problems".to_string(),
             count => format!("{count} problem(s)"),
         };
@@ -231,7 +272,135 @@ fn mcp(args: &[String]) -> ExitCode {
         eprintln!("No MCP config files found.");
         return ExitCode::FAILURE;
     }
-    if findings.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if problems == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// ANSI colours, when standard output is a terminal and `NO_COLOR` isn't set.
+struct Paint {
+    on: bool,
+}
+
+impl Paint {
+    fn new() -> Self {
+        let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
+        Self {
+            on: std::io::stdout().is_terminal() && !no_color,
+        }
+    }
+
+    fn paint(&self, code: &str, text: &str) -> String {
+        if self.on {
+            format!("\x1b[{code}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn bold(&self, text: &str) -> String {
+        self.paint("1", text)
+    }
+
+    fn dim(&self, text: &str) -> String {
+        self.paint("2", text)
+    }
+
+    fn cell(&self, cell: Cell) -> String {
+        match cell {
+            Cell::Same => self.paint("32", "✓"),
+            Cell::Different => self.paint("33", "≠"),
+            Cell::Missing => self.paint("31", "✗"),
+            Cell::Off => self.dim("○"),
+        }
+    }
+}
+
+/// Draws each server in each harness as a table, then the problems under each server.
+fn draw_mcp(root: &Path, harnesses: &[Harness], checks: &[ServerCheck], problems: usize) {
+    let paint = Paint::new();
+    let repository = std::fs::canonicalize(root)
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| root.display().to_string());
+    let mut out = paint.bold(&format!("MCP servers in {repository}"));
+    out.push_str("\n\n");
+    if checks.is_empty() {
+        out.push_str("  No MCP servers are set up.\n");
+        print!("{out}");
+        return;
+    }
+
+    let first = "Server";
+    let first_width = checks
+        .iter()
+        .map(|check| check.name.chars().count())
+        .chain([first.len()])
+        .max()
+        .unwrap_or_default();
+    let widths: Vec<usize> = harnesses.iter().map(|harness| harness.display_name().len()).collect();
+    let border = |left: &str, middle: &str, right: &str| {
+        let mut line = format!("  {left}{}", "─".repeat(first_width + 2));
+        for width in &widths {
+            line.push_str(middle);
+            line.push_str(&"─".repeat(width + 2));
+        }
+        line.push_str(right);
+        line.push('\n');
+        line
+    };
+    out.push_str(&border("╭", "┬", "╮"));
+    out.push_str(&format!("  │ {first:<first_width$} │"));
+    for harness in harnesses {
+        out.push_str(&format!(" {} │", harness.display_name()));
+    }
+    out.push('\n');
+    out.push_str(&border("├", "┼", "┤"));
+    for check in checks {
+        out.push_str(&format!("  │ {:<first_width$} │", check.name));
+        for (&(_, cell), width) in check.cells.iter().zip(&widths) {
+            // Centred: each symbol is one column wide.
+            let left = (width - 1) / 2;
+            let right = width - 1 - left;
+            out.push_str(&format!(" {}{}{} │", " ".repeat(left), paint.cell(cell), " ".repeat(right)));
+        }
+        out.push('\n');
+    }
+    out.push_str(&border("╰", "┴", "╯"));
+    out.push_str(&format!(
+        "  {} set up   {} set up differently   {} missing   {} turned off\n\n",
+        paint.cell(Cell::Same),
+        paint.cell(Cell::Different),
+        paint.cell(Cell::Missing),
+        paint.cell(Cell::Off),
+    ));
+
+    if problems == 0 {
+        out.push_str("No problems: every harness gets the same servers, set up the same way.\n");
+        print!("{out}");
+        return;
+    }
+    let count = if problems == 1 { "1 problem".to_string() } else { format!("{problems} problems") };
+    out.push_str(&paint.bold(&count));
+    out.push('\n');
+    for check in checks.iter().filter(|check| !check.findings.is_empty()) {
+        out.push_str(&format!("\n  {}\n", paint.bold(&check.name)));
+        for finding in &check.findings {
+            let symbol = match finding.rule {
+                Rule::MissingServer => paint.cell(Cell::Missing),
+                Rule::DifferentServer | Rule::RenamedServer => paint.cell(Cell::Different),
+            };
+            out.push_str(&format!("    {symbol} {}\n", finding.detail));
+            let next = match &finding.fix {
+                Some(fix) => fix.clone(),
+                None => std::iter::once(&finding.site)
+                    .chain(&finding.related)
+                    .map(|site| format!("{}:{}", site.relative_path.display(), site.location.line))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
+            out.push_str(&format!("      {}\n", paint.dim(&next)));
+        }
+    }
+    print!("{out}");
 }
 
 fn print_finding(finding: &Finding) {

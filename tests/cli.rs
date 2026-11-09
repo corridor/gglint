@@ -242,7 +242,7 @@ fn mcp_fails_when_there_are_no_config_files() {
 }
 
 #[test]
-fn mcp_reports_how_the_harnesses_differ() {
+fn mcp_format_lines_prints_one_line_per_problem() {
     let dir = TempDir::new();
     dir.write(".claude/settings.json", "{}\n");
     dir.write(
@@ -254,7 +254,7 @@ fn mcp_reports_how_the_harnesses_differ() {
         "{\n  \"mcpServers\": {\n    \"angular-cli\": { \"command\": \"npx\", \"args\": [\"-y\", \"@angular/cli\", \"mcp\"] }\n  }\n}\n",
     );
 
-    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&["mcp".as_ref(), "--format".as_ref(), "lines".as_ref(), dir.path().as_os_str()]);
 
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -290,6 +290,74 @@ fn mcp_passes_when_the_harnesses_agree() {
     let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("│ docs   │   ✓   │   ✓    │"), "{stdout}");
+    assert!(
+        stdout.ends_with("No problems: every harness gets the same servers, set up the same way.\n"),
+        "{stdout}"
+    );
     assert!(String::from_utf8(output.stderr).unwrap().contains(": no problems"));
+}
+
+/// GGX's MCP servers: two set up for Codex, one of them also for Cursor, none for Claude Code.
+fn ggx_like() -> TempDir {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.code-review-graph]\ncommand = \"uvx\"\nargs = [\"code-review-graph@latest\", \"serve\"]\n\n\
+         [mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        "{ \"mcpServers\": { \"angular-cli\": { \"command\": \"npx\", \"args\": [\"-y\", \"@angular/cli\", \"mcp\"] } } }\n",
+    );
+    dir
+}
+
+#[test]
+fn mcp_draws_each_server_in_each_harness_and_what_to_fix() {
+    let dir = ggx_like();
+
+    let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let (title, report) = stdout.split_once('\n').unwrap();
+    assert!(title.starts_with("MCP servers in gglint-test-"), "{stdout}");
+    // No colours: standard output isn't a terminal.
+    assert_eq!(
+        report,
+        "
+  ╭───────────────────┬─────────────┬───────┬────────╮
+  │ Server            │ Claude Code │ Codex │ Cursor │
+  ├───────────────────┼─────────────┼───────┼────────┤
+  │ code-review-graph │      ✗      │   ✓   │   ✗    │
+  │ angular-cli       │      ✗      │   ✓   │   ≠    │
+  ╰───────────────────┴─────────────┴───────┴────────╯
+  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
+
+3 problems
+
+  code-review-graph
+    ✗ Missing from Claude Code and Cursor.
+      Add it to .mcp.json and .cursor/mcp.json, as set up in .codex/config.toml:1
+
+  angular-cli
+    ✗ Missing from Claude Code.
+      Add it to .mcp.json, as set up in .codex/config.toml:5
+    ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
+      .codex/config.toml:5, .cursor/mcp.json:1
+"
+    );
+}
+
+#[test]
+fn mcp_rejects_an_unknown_format() {
+    let dir = ggx_like();
+
+    let output = gglint(&["mcp".as_ref(), "--format".as_ref(), "xml".as_ref(), dir.path().as_os_str()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("unknown format"));
 }

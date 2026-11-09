@@ -10,7 +10,7 @@ mod mcp;
 
 use std::path::Path;
 
-pub use compare::{Finding, Rule, Site, compare_mcp};
+pub use compare::{Cell, Finding, Rule, ServerCheck, Site, check_mcp, compare_mcp};
 pub use mcp::{McpConfig, McpServer, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
