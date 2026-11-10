@@ -102,7 +102,7 @@ pub(super) fn same_program(a: &Setup, b: &Setup) -> bool {
 pub fn check_mcp(configs: &[McpConfig], harnesses: &[Harness]) -> Vec<ServerCheck> {
     group_servers(configs)
         .iter()
-        .map(|group| group.check(harnesses))
+        .map(|group| group.check(harnesses, configs))
         .collect()
 }
 
@@ -435,7 +435,7 @@ impl Group<'_> {
         )
     }
 
-    fn check(&self, harnesses: &[Harness]) -> ServerCheck {
+    fn check(&self, harnesses: &[Harness], configs: &[McpConfig]) -> ServerCheck {
         let name = self.name();
         let mut findings = Vec::new();
         // The harnesses where the server isn't set up as in the first one.
@@ -462,9 +462,9 @@ impl Group<'_> {
         if !missing.is_empty() {
             let with_files: Vec<String> = missing
                 .iter()
-                .map(|harness| format!("{} ({})", harness.display_name(), harness.mcp_file()))
+                .map(|&harness| format!("{} ({})", harness.display_name(), config_file(harness, configs)))
                 .collect();
-            let files: Vec<String> = missing.iter().map(|harness| harness.mcp_file().to_string()).collect();
+            let files: Vec<String> = missing.iter().map(|&harness| config_file(harness, configs)).collect();
             let first = &self.entries[0].site;
             let mut finding = self.finding(
                 Rule::MissingServer,
@@ -603,6 +603,14 @@ impl Group<'_> {
                 .collect(),
         }
     }
+}
+
+/// The file `harness` reads servers from: the one the repository has, or the one to create.
+fn config_file(harness: Harness, configs: &[McpConfig]) -> String {
+    configs.iter().find(|config| config.harness == harness).map_or_else(
+        || harness.mcp_file().to_string(),
+        |config| config.relative_path.display().to_string(),
+    )
 }
 
 /// The first harness a server is turned off in.

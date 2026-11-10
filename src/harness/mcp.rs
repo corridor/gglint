@@ -275,7 +275,17 @@ fn read_json(
     let Some(Value::Object(root)) = parsed.value else {
         return;
     };
-    let Some(servers) = root.get_object(key) else { return };
+    let Some(mut servers) = root.get_object(key) else {
+        return;
+    };
+    // OpenCode's current layout keeps servers one level down, under `mcp.servers`. In the
+    // older one they're right under `mcp`, so a server there can be called `servers`.
+    if key == "mcp"
+        && let Some(nested) = servers.get_object("servers")
+        && !is_server(nested)
+    {
+        servers = nested;
+    }
     for property in &servers.properties {
         let name = property.name.as_str().to_string();
         let location = location(text, property.range.start);
@@ -288,6 +298,11 @@ fn read_json(
             Err(warning) => config.warnings.push(warning),
         }
     }
+}
+
+/// Whether `object` is a server's entry rather than a group of them.
+fn is_server(object: &Object) -> bool {
+    ["type", "command", "url"].iter().any(|key| object.get(key).is_some())
 }
 
 fn json_string(object: &Object, key: &str) -> Option<String> {
