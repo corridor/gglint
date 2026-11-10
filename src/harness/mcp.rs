@@ -171,6 +171,14 @@ pub(super) fn parse_value(text: &str, syntax: Syntax) -> Vec<Part> {
     parts
 }
 
+/// `text`, written in `from`'s syntax, rewritten in `to`'s, if it can be.
+pub(super) fn translate(text: &str, from: Syntax, to: Syntax) -> Option<String> {
+    if from == to {
+        return Some(text.to_string());
+    }
+    write_value(&parse_value(text, from), to)
+}
+
 /// `parts` written in `syntax`, if it can be: text that looks like a reference in any
 /// harness's syntax would mean something else once written for another harness.
 pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
@@ -209,7 +217,15 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                     Format::Codex => read_codex(&text, &mut config),
                     Format::OpenCode => read_json(&text, "mcp", opencode_entry, &mut config),
                 },
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+                // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    return None;
+                }
                 Err(error) => config.warnings.push(format!("couldn't read: {error}")),
             }
             Some(config)

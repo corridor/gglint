@@ -16,7 +16,7 @@ use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
 use super::compare::{Cell, ServerCheck, same_program};
-use super::mcp::{Part, Setting, Syntax, write_value};
+use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
 /// What `fix_mcp` changed, and what it left.
@@ -84,7 +84,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> Fi
                 .map_or(&reference.server.name, |target| &target.server.name)
                 .clone();
             if let Some(target) = target
-                && !same_program(&target.server.transport, &reference.server.transport)
+                && !same_program(target, reference)
             {
                 report.unfixed.push(Unfixed {
                     harness,
@@ -96,7 +96,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> Fi
                 });
                 continue;
             }
-            match fields(&reference.server, harness) {
+            match fields(&reference.server, reference.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
                     harness,
                     relative_path: target.map_or_else(
@@ -187,8 +187,51 @@ fn written_keys(harness: Harness) -> &'static [&'static str] {
     }
 }
 
+/// `transport`'s command line or URL, with references to the environment written the way
+/// `to` writes them, or why it can't be.
+fn written_transport(transport: &Transport, from: Harness, to: Harness) -> Result<Transport, String> {
+    let (from_syntax, to_syntax) = (Syntax::of(from), Syntax::of(to));
+    let write = |text: &String, what: &str| {
+        translate(text, from_syntax, to_syntax).ok_or_else(|| {
+            let variables: Vec<String> = parse_value(text, from_syntax)
+                .into_iter()
+                .filter_map(|part| match part {
+                    Part::Env(name) => Some(format!("`{name}`")),
+                    Part::Text(_) => None,
+                })
+                .collect();
+            let to = to.display_name();
+            match variables.as_slice() {
+                [] => format!("the {what} can't be written for {to}"),
+                [one] => format!("the {what} uses the environment variable {one}, which {to} can't fill in"),
+                many => format!(
+                    "the {what} uses the environment variables {}, which {to} can't fill in",
+                    many.join(", ")
+                ),
+            }
+        })
+    };
+    match transport {
+        Transport::Command { command, args } => Ok(Transport::Command {
+            command: write(command, "command line")?,
+            args: args
+                .iter()
+                .map(|arg| write(arg, "command line"))
+                .collect::<Result<_, _>>()?,
+        }),
+        Transport::Remote { url } => Ok(Transport::Remote {
+            url: write(url, "URL")?,
+        }),
+    }
+}
+
 /// `server`'s entry in `harness`'s file, as its keys and values, or why it can't be written.
-fn fields(server: &McpServer, harness: Harness) -> Result<Vec<(&'static str, Field)>, String> {
+/// `source` is the harness `server` was read from.
+fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(&'static str, Field)>, String> {
+    let server = &McpServer {
+        transport: written_transport(&server.transport, source, harness)?,
+        ..server.clone()
+    };
     let mut fields = Vec::new();
     let mut add = |key: &'static str, field: Field| {
         if !is_empty(&field) {

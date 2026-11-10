@@ -536,7 +536,8 @@ path/to/repo/.codex/config.toml:12:14  missing-server   `angular-cli` is set up 
 
 ### Which harnesses are compared
 
-Only the harnesses the repository is set up for: those with their own files in it.
+Only the harnesses the repository is set up for: those with their own files in it. A
+directory must be a directory: in some repositories `.codex` is an empty file.
 
 | Harness     | Its files                                       |
 | ----------- | ----------------------------------------------- |
@@ -589,9 +590,10 @@ MCP servers in repo
   exist. A server set up differently is changed to match.
 - Each harness's file is written in its own format: `command` and `args`, or OpenCode's
   one `command` list; `type: "http"` or `"sse"` for Claude Code's remote servers; and
-  references to the user's environment in each harness's syntax: `${KEY}` for Claude
-  Code, `${env:KEY}` for Cursor, `{env:KEY}` for OpenCode, and Codex's `env_vars`,
-  `env_http_headers` and `bearer_token_env_var`.
+  references to the user's environment, in values and command lines, in each harness's
+  syntax: `${KEY}` for Claude Code, `${env:KEY}` for Cursor, `{env:KEY}` for OpenCode, and
+  Codex's `env_vars`, `env_http_headers` and `bearer_token_env_var`. Codex can't fill in a
+  reference in a command line, so such a server is left for a person.
 - Only the keys that say how a server is started and what it's given are written. Keys
   only one harness has, such as Codex's `cwd` and `enabled_tools`, are kept, and so are
   comments and formatting: JSON is edited with jsonc-parser's CST and TOML with
