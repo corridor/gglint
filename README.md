@@ -190,7 +190,7 @@ The crate is also a library. `gglint::discovery::scan(&[root], false)` returns a
 
 ```console
 $ gglint [--all] [--graph] [PATH ...]
-$ gglint mcp [--format table|lines] [PATH]
+$ gglint mcp [--fix] [--format table|lines] [PATH]
 $ gglint mcp --servers [PATH]
 ```
 
@@ -207,7 +207,8 @@ $ gglint mcp --servers [PATH]
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
 - `gglint mcp` compares the [MCP servers](#mcp-servers) in a repository's harness config
-  files instead, and draws them; `gglint mcp --servers` lists them.
+  files instead, and draws them; `--fix` makes them the same, and `gglint mcp --servers`
+  lists them.
 
 ## Asking questions
 
@@ -566,6 +567,46 @@ and `uvx pkg`, `uvx --from pkg pkg`, `uv tool run pkg` and `pipx run pkg` the Py
 headers are compared by name, since each harness writes references to the user's
 environment differently (`${KEY}`, `{env:KEY}`, Codex's `env_vars`).
 
+### Fixing
+
+`gglint mcp --fix` changes the config files so every harness gets each server, set up as in
+the first harness that has it: Claude Code's `.mcp.json` when there is one. It then draws
+the table again, and exits with status 0 if no problem is left.
+
+```console
+$ gglint mcp --fix path/to/repo
+Fixed 2 files:
+  .mcp.json (new)    added code-review-graph, angular-cli
+  .cursor/mcp.json   added code-review-graph; updated angular-cli
+
+Review the changes with `git diff`.
+
+MCP servers in repo
+...
+```
+
+- A missing server is added to the harness's config file, which is created if it doesn't
+  exist. A server set up differently is changed to match.
+- Each harness's file is written in its own format: `command` and `args`, or OpenCode's
+  one `command` list; `type: "http"` or `"sse"` for Claude Code's remote servers; and
+  references to the user's environment in each harness's syntax: `${KEY}` for Claude
+  Code, `${env:KEY}` for Cursor, `{env:KEY}` for OpenCode, and Codex's `env_vars`,
+  `env_http_headers` and `bearer_token_env_var`.
+- Only the keys that say how a server is started and what it's given are written. Keys
+  only one harness has, such as Codex's `cwd` and `enabled_tools`, are kept, and so are
+  comments and formatting: JSON is edited with jsonc-parser's CST and TOML with
+  `toml_edit`.
+- Running it again changes nothing.
+
+Left for a person to decide, and reported under `Couldn't fix`:
+
+- A different program or URL under the same name.
+- A value that can't be written in another harness's syntax, such as Claude Code's
+  `${KEY:-default}`, or a variable passed to Codex under another name.
+
+Also left: a server turned off in one harness, which may be on purpose, and a server with
+another name, since permission rules refer to servers by name. Both stay in the table.
+
 ### Listing the servers
 
 `gglint mcp --servers` lists every server instead, one line each: where its name is
@@ -586,7 +627,8 @@ path/to/repo/.cursor/mcp.json:3:5  cursor       angular-cli  npx -y @angular/cli
 - Print values. Environment variables and headers are listed by name: a config can hold a
   secret in full.
 - Start, download or expand anything. A server's package isn't looked up, and references
-  to the user's environment are left as they are.
+  to the user's environment are left as references, even when `--fix` writes them for
+  another harness.
 - Read anything outside the repository's root. Servers set up for one user (Claude Code's
   `~/.claude.json`, `~/.codex/config.toml`) aren't in the repository, and neither are the
   servers Claude Code plugins add. A server a plugin gives Claude Code is reported as

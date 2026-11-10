@@ -7,14 +7,23 @@ use std::path::Path;
 use common::TempDir;
 use gglint::discovery::Location;
 use gglint::harness::{
-    Cell, Harness, McpConfig, McpServer, Setting, Transport, check_mcp, compare_mcp, read_mcp, used_harnesses,
+    Cell, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp, read_mcp,
+    used_harnesses,
 };
 
-fn setting(name: &str, value: Option<&str>) -> Setting {
+fn setting(name: &str, value: &[Part]) -> Setting {
     Setting {
         name: name.to_string(),
-        value: value.map(str::to_string),
+        value: value.to_vec(),
     }
+}
+
+fn text(text: &str) -> Part {
+    Part::Text(text.to_string())
+}
+
+fn env(name: &str) -> Part {
+    Part::Env(name.to_string())
 }
 
 fn command(command: &str, args: &[&str]) -> Transport {
@@ -127,7 +136,7 @@ fn reads_claude_code_servers() {
     assert_eq!(angular.transport, command("npx", &["-y", "@angular/cli", "mcp"]));
     assert_eq!(
         angular.env,
-        [setting("CI", Some("1")), setting("NG_TOKEN", Some("${NG_TOKEN}"))]
+        [setting("CI", &[text("1")]), setting("NG_TOKEN", &[env("NG_TOKEN")])]
     );
     assert!(angular.headers.is_empty());
     assert!(angular.enabled);
@@ -135,7 +144,10 @@ fn reads_claude_code_servers() {
     let docs = server(config, "docs");
     assert_eq!(docs.location, Location { line: 8, column: 5 });
     assert_eq!(docs.transport, remote("https://docs.example.com/mcp"));
-    assert_eq!(docs.headers, [setting("Authorization", Some("Bearer ${DOCS_KEY}"))]);
+    assert_eq!(
+        docs.headers,
+        [setting("Authorization", &[text("Bearer "), env("DOCS_KEY")])]
+    );
 }
 
 #[test]
@@ -156,10 +168,13 @@ fn reads_codex_servers() {
     let graph = server(config, "code-review-graph");
     assert_eq!(graph.location.line, 2);
     assert_eq!(graph.transport, command("uvx", &["code-review-graph@latest", "serve"]));
-    // `env_vars` pass a variable through from the user's environment: no value here.
+    // `env_vars` pass a variable through from the user's environment, under its own name.
     assert_eq!(
         graph.env,
-        [setting("GRAPH_DEPTH", Some("3")), setting("GRAPH_HOME", None)]
+        [
+            setting("GRAPH_DEPTH", &[text("3")]),
+            setting("GRAPH_HOME", &[env("GRAPH_HOME")])
+        ]
     );
     assert_eq!(
         graph.enabled_tools,
@@ -179,7 +194,10 @@ fn reads_codex_servers() {
     // The bearer token comes from the user's environment.
     assert_eq!(
         figma.headers,
-        [setting("Authorization", None), setting("X-Team", Some("design"))]
+        [
+            setting("Authorization", &[text("Bearer "), env("FIGMA_TOKEN")]),
+            setting("X-Team", &[text("design")])
+        ]
     );
 }
 
@@ -235,11 +253,14 @@ fn reads_opencode_servers_with_comments_and_trailing_commas() {
     assert_eq!(angular.location, Location { line: 5, column: 5 });
     // OpenCode writes the command and its arguments as one list.
     assert_eq!(angular.transport, command("npx", &["-y", "@angular/cli", "mcp"]));
-    assert_eq!(angular.env, [setting("NG_TOKEN", Some("{env:NG_TOKEN}"))]);
+    assert_eq!(angular.env, [setting("NG_TOKEN", &[env("NG_TOKEN")])]);
 
     let docs = server(config, "docs");
     assert_eq!(docs.transport, remote("https://docs.example.com/mcp"));
-    assert_eq!(docs.headers, [setting("Authorization", Some("Bearer {env:DOCS_KEY}"))]);
+    assert_eq!(
+        docs.headers,
+        [setting("Authorization", &[text("Bearer "), env("DOCS_KEY")])]
+    );
     assert!(!docs.enabled);
 }
 
@@ -626,4 +647,255 @@ fn describes_each_finding_and_how_to_fix_a_missing_server() {
             ),
         ]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Fixing
+// ---------------------------------------------------------------------------
+
+/// Fixes the MCP configs in `dir`, then checks them again.
+fn fix(dir: &TempDir) -> (gglint::harness::FixReport, Vec<String>) {
+    let configs = read_mcp(dir.path());
+    let checks = check_mcp(&configs, &used_harnesses(dir.path()));
+    let report = fix_mcp(dir.path(), &configs, &checks);
+    (report, findings(dir))
+}
+
+fn read(dir: &TempDir, relative: &str) -> String {
+    std::fs::read_to_string(dir.path().join(relative)).unwrap()
+}
+
+#[test]
+fn fix_adds_a_missing_server_in_each_harness_format() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{
+  "mcpServers": {
+    "docs": { "command": "uvx", "args": ["docs-mcp"], "env": { "DOCS_KEY": "${DOCS_KEY}", "CI": "1" } },
+    "search": {
+      "type": "http",
+      "url": "https://search.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${SEARCH_TOKEN}" }
+    }
+  }
+}
+"#,
+    );
+    dir.write(".codex/config.toml", "model = \"gpt-5\"\n");
+    dir.write(".cursor/rules/style.mdc", "Be brief.\n");
+    dir.write(
+        "opencode.json",
+        "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}\n",
+    );
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    let changed: Vec<(String, bool, Vec<String>)> = report
+        .changed
+        .iter()
+        .map(|file| {
+            (
+                file.relative_path.display().to_string(),
+                file.created,
+                file.added.clone(),
+            )
+        })
+        .collect();
+    let both = vec!["docs".to_string(), "search".to_string()];
+    assert_eq!(
+        changed,
+        [
+            (".codex/config.toml".to_string(), false, both.clone()),
+            (".cursor/mcp.json".to_string(), true, both.clone()),
+            ("opencode.json".to_string(), false, both),
+        ]
+    );
+    assert_eq!(
+        read(&dir, ".codex/config.toml"),
+        r#"model = "gpt-5"
+
+[mcp_servers.docs]
+command = "uvx"
+args = ["docs-mcp"]
+env = { CI = "1" }
+env_vars = ["DOCS_KEY"]
+
+[mcp_servers.search]
+url = "https://search.example.com/mcp"
+bearer_token_env_var = "SEARCH_TOKEN"
+"#
+    );
+    assert_eq!(
+        read(&dir, ".cursor/mcp.json"),
+        r#"{
+  "mcpServers": {
+    "docs": {
+      "command": "uvx",
+      "args": ["docs-mcp"],
+      "env": {
+        "CI": "1",
+        "DOCS_KEY": "${env:DOCS_KEY}"
+      }
+    },
+    "search": {
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:SEARCH_TOKEN}"
+      }
+    }
+  }
+}
+"#
+    );
+    assert_eq!(
+        read(&dir, "opencode.json"),
+        r#"{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "docs": {
+      "type": "local",
+      "command": ["uvx", "docs-mcp"],
+      "environment": {
+        "CI": "1",
+        "DOCS_KEY": "{env:DOCS_KEY}"
+      }
+    },
+    "search": {
+      "type": "remote",
+      "url": "https://search.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:SEARCH_TOKEN}"
+      }
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn fix_creates_a_claude_code_config_with_a_type_for_remote_servers() {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.linear]\nurl = \"https://mcp.linear.app/sse\"\n",
+    );
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed[0].created);
+    assert_eq!(
+        read(&dir, ".mcp.json"),
+        r#"{
+  "mcpServers": {
+    "linear": {
+      "type": "sse",
+      "url": "https://mcp.linear.app/sse"
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn fix_makes_a_server_match_the_first_harness_and_keeps_the_rest() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "angular-cli": { "command": "npx", "args": ["-y", "@angular/cli", "mcp", "--read-only"] } } }
+"#,
+    );
+    dir.write(
+        ".codex/config.toml",
+        "# Codex only.\n[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\"]\n\
+         cwd = \".\"\nenabled_tools = [\"list_projects\"]\n",
+    );
+    dir.write(
+        "opencode.jsonc",
+        r#"{
+  // Shared with the team.
+  "mcp": {
+    "angular-cli": { "type": "local", "command": ["npx", "-y", "@angular/cli", "mcp"], "enabled": true },
+  },
+}
+"#,
+    );
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    let updated: Vec<(String, Vec<String>)> = report
+        .changed
+        .iter()
+        .map(|file| (file.relative_path.display().to_string(), file.updated.clone()))
+        .collect();
+    assert_eq!(
+        updated,
+        [
+            (".codex/config.toml".to_string(), vec!["angular-cli".to_string()]),
+            ("opencode.jsonc".to_string(), vec!["angular-cli".to_string()]),
+        ]
+    );
+    // Keys only Codex has, and comments, are kept.
+    assert_eq!(
+        read(&dir, ".codex/config.toml"),
+        "# Codex only.\n[mcp_servers.angular-cli]\ncommand = \"npx\"\nargs = [\"-y\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n\
+         cwd = \".\"\nenabled_tools = [\"list_projects\"]\n"
+    );
+    assert_eq!(
+        read(&dir, "opencode.jsonc"),
+        r#"{
+  // Shared with the team.
+  "mcp": {
+    "angular-cli": { "type": "local", "command": ["npx", "-y", "@angular/cli", "mcp", "--read-only"], "enabled": true },
+  },
+}
+"#
+    );
+}
+
+#[test]
+fn fix_leaves_what_it_cannot_decide() {
+    let dir = TempDir::new();
+    let claude = r#"{
+  "mcpServers": {
+    "docs": { "type": "http", "url": "https://docs.example.com/mcp" },
+    "search": { "command": "uvx", "args": ["search-mcp"], "env": { "SEARCH_KEY": "${SEARCH_KEY:-dev}" } },
+    "lint": { "command": "npx", "args": ["lint-mcp"] }
+  }
+}
+"#;
+    let codex = "[mcp_servers.docs]\ncommand = \"uvx\"\nargs = [\"docs-mcp\"]\n\n\
+                 [mcp_servers.lint]\ncommand = \"npx\"\nargs = [\"lint-mcp\"]\nenabled = false\n";
+    dir.write(".mcp.json", claude);
+    dir.write(".codex/config.toml", codex);
+
+    let (report, left) = fix(&dir);
+
+    assert!(report.changed.is_empty());
+    assert_eq!(read(&dir, ".mcp.json"), claude);
+    assert_eq!(read(&dir, ".codex/config.toml"), codex);
+    assert_eq!(
+        report.unfixed,
+        [
+            Unfixed {
+                harness: Harness::Codex,
+                server: "docs".to_string(),
+                reason: "it's a different server than in Claude Code; decide which one is right".to_string(),
+            },
+            Unfixed {
+                harness: Harness::Codex,
+                server: "search".to_string(),
+                reason: "the value of `SEARCH_KEY` can't be written for Codex".to_string(),
+            },
+        ]
+    );
+    // A server turned off on purpose is left alone, and still reported.
+    assert_eq!(left.len(), 3, "{left:?}");
 }
