@@ -53,25 +53,30 @@ impl Harness {
     }
 }
 
-/// Files and directories that show a repository is set up for a harness, relative to its
-/// root. `AGENTS.md` is read by several harnesses, so it doesn't count for any of them.
+/// Directories (ending in `/`) and files that show a repository is set up for a harness,
+/// relative to its root. `AGENTS.md` is read by several harnesses, so it doesn't count for
+/// any of them.
 const MARKERS: &[(Harness, &str)] = &[
-    (Harness::ClaudeCode, ".claude"),
+    (Harness::ClaudeCode, ".claude/"),
     (Harness::ClaudeCode, "CLAUDE.md"),
     (Harness::ClaudeCode, ".mcp.json"),
-    (Harness::Codex, ".codex"),
-    (Harness::Cursor, ".cursor"),
+    (Harness::Codex, ".codex/"),
+    (Harness::Cursor, ".cursor/"),
     (Harness::Cursor, ".cursorrules"),
-    (Harness::OpenCode, ".opencode"),
+    (Harness::OpenCode, ".opencode/"),
     (Harness::OpenCode, "opencode.json"),
     (Harness::OpenCode, "opencode.jsonc"),
 ];
 
-/// The harnesses `root` is set up for: those with their own files in it.
+/// The harnesses `root` is set up for: those with their own files in it. A directory marker
+/// must be a directory: in some repositories `.codex` is an empty file.
 pub fn used_harnesses(root: &Path) -> Vec<Harness> {
     let mut harnesses: Vec<Harness> = MARKERS
         .iter()
-        .filter(|(_, marker)| root.join(marker).exists())
+        .filter(|(_, marker)| match marker.strip_suffix('/') {
+            Some(directory) => root.join(directory).is_dir(),
+            None => root.join(marker).is_file(),
+        })
         .map(|(harness, _)| *harness)
         .collect();
     harnesses.dedup();

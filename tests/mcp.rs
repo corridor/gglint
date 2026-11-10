@@ -899,3 +899,81 @@ fn fix_leaves_what_it_cannot_decide() {
     // A server turned off on purpose is left alone, and still reported.
     assert_eq!(left.len(), 3, "{left:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Found by running gglint on popular repositories
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_file_where_a_harness_directory_belongs_does_not_count() {
+    let dir = TempDir::new();
+    // In Yeachan-Heo/oh-my-claudecode, `.codex` is an empty file.
+    dir.write(".codex", "");
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+
+    assert_eq!(used_harnesses(dir.path()), [Harness::ClaudeCode]);
+    let configs = read_mcp(dir.path());
+    assert_eq!(configs.len(), 1);
+    assert!(configs[0].warnings.is_empty(), "{:?}", configs[0].warnings);
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn the_same_reference_in_two_harness_syntaxes_is_the_same_argument() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""local": { "command": "node", "args": ["${ROOT}/server.js"] }"#),
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""local": { "command": "node", "args": ["${env:ROOT}/server.js"] }"#),
+    );
+
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn fix_writes_references_in_the_command_line_in_each_harness_syntax() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(
+            r#""local": { "command": "node", "args": ["${ROOT}/server.js", "--port", "8080"] },
+               "plain": { "command": "npx", "args": ["-y", "plain-mcp"] }"#,
+        ),
+    );
+    dir.write(".cursor/rules/style.mdc", "Be brief.\n");
+    dir.write("opencode.json", "{}\n");
+    dir.write(".codex/config.toml", "");
+
+    let (report, _) = fix(&dir);
+
+    let cursor = read(&dir, ".cursor/mcp.json");
+    assert!(
+        cursor.contains(r#""args": ["${env:ROOT}/server.js", "--port", "8080"]"#),
+        "{cursor}"
+    );
+    let opencode = read(&dir, "opencode.json");
+    assert!(
+        opencode.contains(r#""command": ["node", "{env:ROOT}/server.js", "--port", "8080"]"#),
+        "{opencode}"
+    );
+    // Codex doesn't fill in references to the environment in a command line.
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::Codex,
+            server: "local".to_string(),
+            reason: "the command line uses the environment variable `ROOT`, which Codex can't fill in".to_string(),
+        }]
+    );
+    let codex = read(&dir, ".codex/config.toml");
+    assert!(
+        codex.contains("[mcp_servers.plain]") && !codex.contains("local"),
+        "{codex}"
+    );
+}

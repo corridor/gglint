@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::mcp::{Syntax, translate};
 use super::{Harness, McpConfig, McpServer, Transport};
 use crate::discovery::Location;
 
@@ -91,8 +92,9 @@ pub struct Setup {
 }
 
 /// Whether `a` and `b` run the same package, program or URL, however they're started.
-pub(super) fn same_program(a: &Transport, b: &Transport) -> bool {
-    Launch::of(a).identity() == Launch::of(b).identity()
+pub(super) fn same_program(a: &Setup, b: &Setup) -> bool {
+    Launch::of(&a.server.transport, a.site.harness).identity()
+        == Launch::of(&b.server.transport, b.site.harness).identity()
 }
 
 /// Checks each server in `configs` across `harnesses`, the harnesses the repository is set
@@ -185,13 +187,17 @@ const OPTIONS_WITH_VALUES: &[&str] = &[
 const PACKAGE_OPTIONS: &[&str] = &["--package", "-p", "--from", "--spec"];
 
 impl Launch {
-    fn of(transport: &Transport) -> Launch {
+    /// What `transport`, as `harness` writes it, runs. References to the environment are
+    /// rewritten in one syntax, so `${ROOT}` and Cursor's `${env:ROOT}` are the same argument.
+    fn of(transport: &Transport, harness: Harness) -> Launch {
+        let from = Syntax::of(harness);
+        let common = |text: &String| translate(text, from, Syntax::Dollar).unwrap_or_else(|| text.clone());
         match transport {
-            Transport::Command { command, args } => package(command, args).unwrap_or_else(|| Launch::Program {
-                command: command.clone(),
-                args: args.clone(),
-            }),
-            Transport::Remote { url } => Launch::Remote { url: url.clone() },
+            Transport::Command { command, args } => {
+                let (command, args): (String, Vec<String>) = (common(command), args.iter().map(common).collect());
+                package(&command, &args).unwrap_or(Launch::Program { command, args })
+            }
+            Transport::Remote { url } => Launch::Remote { url: common(url) },
         }
     }
 
@@ -329,7 +335,7 @@ fn group_servers(configs: &[McpConfig]) -> Vec<Group<'_>> {
                     location: server.location,
                 },
                 server,
-                launch: Launch::of(&server.transport),
+                launch: Launch::of(&server.transport, config.harness),
             };
             match groups.iter_mut().find(|group| group.name() == server.name) {
                 // A harness reading two files (OpenCode's `.json` and `.jsonc`) keeps the first.
@@ -629,10 +635,13 @@ mod tests {
     use super::*;
 
     fn launch(command: &str, args: &[&str]) -> Launch {
-        Launch::of(&Transport::Command {
-            command: command.to_string(),
-            args: args.iter().map(|arg| arg.to_string()).collect(),
-        })
+        Launch::of(
+            &Transport::Command {
+                command: command.to_string(),
+                args: args.iter().map(|arg| arg.to_string()).collect(),
+            },
+            Harness::ClaudeCode,
+        )
     }
 
     fn package(registry: Registry, name: &str, version: Option<&str>, args: &[&str]) -> Launch {
