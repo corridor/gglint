@@ -755,19 +755,21 @@ bearer_token_env_var = "SEARCH_TOKEN"
         r#"{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "docs": {
-      "type": "local",
-      "command": ["uvx", "docs-mcp"],
-      "environment": {
-        "CI": "1",
-        "DOCS_KEY": "{env:DOCS_KEY}"
-      }
-    },
-    "search": {
-      "type": "remote",
-      "url": "https://search.example.com/mcp",
-      "headers": {
-        "Authorization": "Bearer {env:SEARCH_TOKEN}"
+    "servers": {
+      "docs": {
+        "type": "local",
+        "command": ["uvx", "docs-mcp"],
+        "environment": {
+          "CI": "1",
+          "DOCS_KEY": "{env:DOCS_KEY}"
+        }
+      },
+      "search": {
+        "type": "remote",
+        "url": "https://search.example.com/mcp",
+        "headers": {
+          "Authorization": "Bearer {env:SEARCH_TOKEN}"
+        }
       }
     }
   }
@@ -975,5 +977,78 @@ fn fix_writes_references_in_the_command_line_in_each_harness_syntax() {
     assert!(
         codex.contains("[mcp_servers.plain]") && !codex.contains("local"),
         "{codex}"
+    );
+}
+
+#[test]
+fn reads_opencode_servers_in_its_current_layout() {
+    let dir = TempDir::new();
+    // OpenCode's V2 layout, as in ryan4yin/nix-config and dyoshikawa/rulesync.
+    dir.write(
+        "opencode.jsonc",
+        r#"{
+  "mcp": {
+    "servers": {
+      "grafana": { "type": "local", "command": ["mcp-grafana", "--disable-write"] },
+      "deepwiki": { "type": "remote", "url": "https://mcp.deepwiki.com/mcp" },
+    },
+  },
+}
+"#,
+    );
+
+    let configs = read_mcp(dir.path());
+
+    assert!(configs[0].warnings.is_empty(), "{:?}", configs[0].warnings);
+    assert_eq!(names(&configs[0]), ["grafana", "deepwiki"]);
+    assert_eq!(server(&configs[0], "grafana").location.line, 4);
+}
+
+#[test]
+fn a_server_named_servers_in_the_older_layout_is_still_a_server() {
+    let dir = TempDir::new();
+    dir.write(
+        "opencode.json",
+        r#"{ "mcp": { "servers": { "type": "remote", "url": "https://servers.example.com/mcp" } } }"#,
+    );
+
+    assert_eq!(names(&read_mcp(dir.path())[0]), ["servers"]);
+}
+
+#[test]
+fn fix_writes_into_the_layout_an_opencode_file_already_uses() {
+    let dir = TempDir::new();
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
+    );
+    dir.write(
+        "opencode.jsonc",
+        "{\n  \"mcp\": {\n    \"servers\": {\n      \"grafana\": { \"type\": \"local\", \"command\": [\"mcp-grafana\"] },\n    },\n  },\n}\n",
+    );
+
+    let (_, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    let opencode = read(&dir, "opencode.jsonc");
+    assert!(
+        opencode.contains("\"servers\": {\n      \"grafana\"")
+            && opencode.contains("\"docs\": {\n        \"type\": \"remote\""),
+        "{opencode}"
+    );
+}
+
+#[test]
+fn a_missing_server_names_the_file_the_harness_already_has() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write("opencode.jsonc", "{ \"mcp\": {} }\n");
+
+    assert_eq!(
+        findings(&dir),
+        [".mcp.json:1  missing-server  `docs` is set up for Claude Code but not for OpenCode (opencode.jsonc)"]
     );
 }

@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use jsonc_parser::ParseOptions;
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
+use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
 use super::compare::{Cell, ServerCheck, same_program};
@@ -408,7 +408,18 @@ fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) ->
     {
         object.append("$schema", schema.into());
     }
-    let servers = object.object_value_or_set(key);
+    let mut servers = object.object_value_or_set(key);
+    // OpenCode: write where the file keeps its servers, under `mcp.servers` in its current
+    // layout or right under `mcp` in the older one. A file with none gets the current one.
+    if key == "mcp" {
+        let is_server = |entry: &CstObject| ["type", "command", "url"].iter().any(|key| entry.get(key).is_some());
+        match servers.object_value("servers") {
+            Some(nested) if !is_server(&nested) => servers = nested,
+            Some(_) => {}
+            None if servers.properties().is_empty() => servers = servers.object_value_or_set("servers"),
+            None => {}
+        }
+    }
     for write in writes {
         match servers.get(&write.name).and_then(|property| property.object_value()) {
             Some(entry) if write.update => {

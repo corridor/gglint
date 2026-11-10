@@ -484,7 +484,7 @@ its own format:
 | Claude Code | `.mcp.json`                       | JSON, `mcpServers`                                 |
 | Codex       | `.codex/config.toml`              | TOML, `[mcp_servers.<name>]`                       |
 | Cursor      | `.cursor/mcp.json`                | JSON, `mcpServers`                                 |
-| OpenCode    | `opencode.json`, `opencode.jsonc` | JSON with comments, `mcp`; the command is one list |
+| OpenCode    | `opencode.json`, `opencode.jsonc` | JSON with comments, `mcp.servers` (or `mcp` before V2); the command is one list |
 
 The copies drift apart: a server is added for one harness and not the others, or set up
 differently in each. `gglint mcp` reads them all, draws each server in each harness, and
