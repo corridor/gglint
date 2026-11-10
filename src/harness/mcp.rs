@@ -87,14 +87,107 @@ pub enum Transport {
 
 /// An environment variable or HTTP header given to a server.
 ///
-/// Values are kept as written, references such as `${KEY}` included. A config can hold a
-/// secret written out in full, so don't print them.
+/// Its value is split into text and references to the user's environment, read from each
+/// harness's own way of writing them (`${KEY}`, `${env:KEY}`, `{env:KEY}`, Codex's
+/// `env_vars`), so it can be compared, and written for another harness. The text can be a
+/// secret written out in full, so don't print it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setting {
     pub name: String,
-    /// `None` when the value is taken from the user's environment by name, as with Codex's
-    /// `env_vars` and `bearer_token_env_var`.
-    pub value: Option<String>,
+    pub value: Vec<Part>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Part {
+    Text(String),
+    /// The value of the user's environment variable with this name.
+    Env(String),
+}
+
+/// How a harness refers to an environment variable inside a value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Syntax {
+    /// `${KEY}`: Claude Code.
+    Dollar,
+    /// `${env:KEY}`: Cursor.
+    DollarEnv,
+    /// `{env:KEY}`: OpenCode.
+    BraceEnv,
+    /// It doesn't: Codex reads a whole value from the environment with other keys.
+    Literal,
+}
+
+impl Syntax {
+    pub(super) fn of(harness: Harness) -> Syntax {
+        match harness {
+            Harness::ClaudeCode => Syntax::Dollar,
+            Harness::Codex => Syntax::Literal,
+            Harness::Cursor => Syntax::DollarEnv,
+            Harness::OpenCode => Syntax::BraceEnv,
+        }
+    }
+
+    fn prefix(self) -> Option<&'static str> {
+        match self {
+            Syntax::Dollar => Some("${"),
+            Syntax::DollarEnv => Some("${env:"),
+            Syntax::BraceEnv => Some("{env:"),
+            Syntax::Literal => None,
+        }
+    }
+}
+
+/// Splits `text` into text and references to environment variables written in `syntax`.
+/// Anything else, such as `${KEY:-default}`, stays text.
+pub(super) fn parse_value(text: &str, syntax: Syntax) -> Vec<Part> {
+    let mut parts = Vec::new();
+    let mut plain = String::new();
+    let mut rest = text;
+    if let Some(prefix) = syntax.prefix() {
+        while let Some(start) = rest.find(prefix) {
+            let after = &rest[start + prefix.len()..];
+            let length = after
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(after.len());
+            let name = &after[..length];
+            let starts_well = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+            if starts_well && after[length..].starts_with('}') {
+                plain.push_str(&rest[..start]);
+                if !plain.is_empty() {
+                    parts.push(Part::Text(std::mem::take(&mut plain)));
+                }
+                parts.push(Part::Env(name.to_string()));
+                rest = &after[length + 1..];
+            } else {
+                plain.push_str(&rest[..start + prefix.len()]);
+                rest = after;
+            }
+        }
+    }
+    plain.push_str(rest);
+    if !plain.is_empty() {
+        parts.push(Part::Text(plain));
+    }
+    parts
+}
+
+/// `parts` written in `syntax`, if it can be: text that looks like a reference in any
+/// harness's syntax would mean something else once written for another harness.
+pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
+    let mut value = String::new();
+    for part in parts {
+        match part {
+            Part::Text(text) if ["${", "{env:", "{file:"].iter().any(|marker| text.contains(marker)) => return None,
+            Part::Text(text) => value.push_str(text),
+            Part::Env(name) => match syntax {
+                Syntax::Dollar => value.push_str(&format!("${{{name}}}")),
+                Syntax::DollarEnv => value.push_str(&format!("${{env:{name}}}")),
+                Syntax::BraceEnv => value.push_str(&format!("{{env:{name}}}")),
+                Syntax::Literal => return None,
+            },
+        }
+    }
+    Some(value)
 }
 
 /// Reads every harness's MCP config file found under `root`.
@@ -151,9 +244,10 @@ fn sorted(mut settings: Vec<Setting>) -> Vec<Setting> {
 fn read_json(
     text: &str,
     key: &str,
-    entry: fn(String, Location, &Object) -> Result<McpServer, String>,
+    entry: fn(String, Location, &Object, Syntax) -> Result<McpServer, String>,
     config: &mut McpConfig,
 ) {
+    let syntax = Syntax::of(config.harness);
     // Comments and trailing commas are allowed: OpenCode's `.jsonc` files have them.
     let parsed = match jsonc_parser::parse_to_ast(text, &CollectOptions::default(), &ParseOptions::default()) {
         Ok(parsed) => parsed,
@@ -173,7 +267,7 @@ fn read_json(
             config.warnings.push(format!("`{name}` isn't an object"));
             continue;
         };
-        match entry(name, location, object) {
+        match entry(name, location, object, syntax) {
             Ok(server) => config.servers.push(server),
             Err(warning) => config.warnings.push(warning),
         }
@@ -192,7 +286,7 @@ fn json_strings(array: &Array) -> Vec<String> {
         .collect()
 }
 
-fn json_settings(object: Option<&Object>) -> Vec<Setting> {
+fn json_settings(object: Option<&Object>, syntax: Syntax) -> Vec<Setting> {
     let Some(object) = object else { return Vec::new() };
     sorted(
         object
@@ -202,7 +296,7 @@ fn json_settings(object: Option<&Object>) -> Vec<Setting> {
                 let value = property.value.as_string_lit()?;
                 Some(Setting {
                     name: property.name.as_str().to_string(),
-                    value: Some(value.value.to_string()),
+                    value: parse_value(&value.value, syntax),
                 })
             })
             .collect(),
@@ -211,7 +305,7 @@ fn json_settings(object: Option<&Object>) -> Vec<Setting> {
 
 /// Claude Code's `.mcp.json` and Cursor's `.cursor/mcp.json`. A server is started with
 /// `command` or reached at `url`, whatever its `type` says.
-fn mcp_servers_entry(name: String, location: Location, object: &Object) -> Result<McpServer, String> {
+fn mcp_servers_entry(name: String, location: Location, object: &Object, syntax: Syntax) -> Result<McpServer, String> {
     let transport = if let Some(command) = json_string(object, "command") {
         let args = object.get_array("args").map(json_strings).unwrap_or_default();
         Transport::Command { command, args }
@@ -224,8 +318,8 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object) -> Resul
         name,
         location,
         transport,
-        env: json_settings(object.get_object("env")),
-        headers: json_settings(object.get_object("headers")),
+        env: json_settings(object.get_object("env"), syntax),
+        headers: json_settings(object.get_object("headers"), syntax),
         enabled: true,
         enabled_tools: None,
         disabled_tools: Vec::new(),
@@ -233,7 +327,7 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object) -> Resul
 }
 
 /// OpenCode's `opencode.json`: `command` is one list, the program and its arguments.
-fn opencode_entry(name: String, location: Location, object: &Object) -> Result<McpServer, String> {
+fn opencode_entry(name: String, location: Location, object: &Object, syntax: Syntax) -> Result<McpServer, String> {
     let transport = if let Some(command) = object.get_array("command") {
         let mut parts = json_strings(command).into_iter();
         let Some(command) = parts.next() else {
@@ -258,8 +352,8 @@ fn opencode_entry(name: String, location: Location, object: &Object) -> Result<M
         name,
         location,
         transport,
-        env: json_settings(object.get_object("environment")),
-        headers: json_settings(object.get_object("headers")),
+        env: json_settings(object.get_object("environment"), syntax),
+        headers: json_settings(object.get_object("headers"), syntax),
         enabled,
         enabled_tools: None,
         disabled_tools: Vec::new(),
@@ -299,26 +393,33 @@ fn toml_strings(table: &DeTable<'_>, key: &str) -> Option<Vec<String>> {
     )
 }
 
-/// The string values of the table at `key`, as settings.
-fn toml_settings(table: &DeTable<'_>, key: &str) -> Vec<Setting> {
+/// The string values of the table at `key`: each setting's name and value as written.
+fn toml_pairs(table: &DeTable<'_>, key: &str) -> Vec<(String, String)> {
     let Some(DeValue::Table(settings)) = toml_get(table, key) else {
         return Vec::new();
     };
     settings
         .iter()
         .filter_map(|(name, value)| match value.get_ref() {
-            DeValue::String(value) => Some(Setting {
-                name: name.get_ref().to_string(),
-                value: Some(value.to_string()),
-            }),
+            DeValue::String(value) => Some((name.get_ref().to_string(), value.to_string())),
             _ => None,
         })
         .collect()
 }
 
-/// Settings whose values come from the user's environment by name.
-fn from_environment(names: impl IntoIterator<Item = String>) -> impl Iterator<Item = Setting> {
-    names.into_iter().map(|name| Setting { name, value: None })
+fn text_setting((name, value): (String, String)) -> Setting {
+    Setting {
+        name,
+        value: vec![Part::Text(value)],
+    }
+}
+
+/// A setting whose value is the user's environment variable `variable`.
+fn env_setting(name: String, variable: String) -> Setting {
+    Setting {
+        name,
+        value: vec![Part::Env(variable)],
+    }
 }
 
 /// Codex's `.codex/config.toml`.
@@ -349,17 +450,29 @@ fn read_codex(text: &str, config: &mut McpConfig) {
             continue;
         };
 
-        let mut env = toml_settings(table, "env");
-        env.extend(from_environment(toml_strings(table, "env_vars").unwrap_or_default()));
-        let mut headers = toml_settings(table, "http_headers");
-        // `env_http_headers` maps each header to the variable its value is read from.
-        headers.extend(from_environment(
-            toml_settings(table, "env_http_headers")
+        let mut env: Vec<Setting> = toml_pairs(table, "env").into_iter().map(text_setting).collect();
+        // `env_vars` pass variables through from the user's environment, under their names.
+        env.extend(
+            toml_strings(table, "env_vars")
+                .unwrap_or_default()
                 .into_iter()
-                .map(|setting| setting.name),
-        ));
-        if toml_string(table, "bearer_token_env_var").is_some() {
-            headers.extend(from_environment(["Authorization".to_string()]));
+                .map(|name| env_setting(name.clone(), name)),
+        );
+        let mut headers: Vec<Setting> = toml_pairs(table, "http_headers")
+            .into_iter()
+            .map(text_setting)
+            .collect();
+        // `env_http_headers` maps each header to the variable its value is read from.
+        headers.extend(
+            toml_pairs(table, "env_http_headers")
+                .into_iter()
+                .map(|(header, variable)| env_setting(header, variable)),
+        );
+        if let Some(variable) = toml_string(table, "bearer_token_env_var") {
+            headers.push(Setting {
+                name: "Authorization".to_string(),
+                value: vec![Part::Text("Bearer ".to_string()), Part::Env(variable)],
+            });
         }
         let enabled = !matches!(toml_get(table, "enabled"), Some(DeValue::Boolean(false)));
 

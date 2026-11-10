@@ -28,10 +28,12 @@ rustc-hash = "2"
 ruff_python_ast = "=0.0.19"
 ruff_python_parser = "=0.0.19"
 ruff_text_size = "=0.0.19"
-# The coding harnesses' config files (`harness/mcp.rs`): JSON with comments, and TOML. Both
-# keep each key's position, for reporting lines. MIT, and MIT or Apache-2.0.
-jsonc-parser = "=0.34.0"
+# The coding harnesses' config files (`harness/`): JSON with comments, and TOML. Both keep
+# each key's position, for reporting lines. `cst` and `toml_edit` change a file and keep
+# its comments and formatting, for `gglint mcp --fix`. MIT, and MIT or Apache-2.0.
+jsonc-parser = { version = "=0.34.0", features = ["cst"] }
 toml = { version = "=1.1.8", default-features = false, features = ["parse", "std"] }
+toml_edit = { version = "=0.25.17", default-features = false, features = ["parse", "display"] }
 # `gglint ask`. Every one of these is MIT or Apache-2.0 (see `THIRD_PARTY_LICENSES`).
 bm25 = "=2.3.2"
 gaoya = "=0.2.2"

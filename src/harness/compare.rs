@@ -78,6 +78,21 @@ pub struct ServerCheck {
     /// Each harness, in the order given, with how the server is set up in it.
     pub cells: Vec<(Harness, Cell)>,
     pub findings: Vec<Finding>,
+    /// Each harness's setup of the server, in the order harnesses are reported. The first
+    /// is the one the others are compared with.
+    pub setups: Vec<Setup>,
+}
+
+/// One harness's setup of a server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Setup {
+    pub site: Site,
+    pub server: McpServer,
+}
+
+/// Whether `a` and `b` run the same package, program or URL, however they're started.
+pub(super) fn same_program(a: &Transport, b: &Transport) -> bool {
+    Launch::of(a).identity() == Launch::of(b).identity()
 }
 
 /// Checks each server in `configs` across `harnesses`, the harnesses the repository is set
@@ -572,6 +587,14 @@ impl Group<'_> {
             name: name.to_string(),
             cells,
             findings,
+            setups: self
+                .entries
+                .iter()
+                .map(|entry| Setup {
+                    site: entry.site.clone(),
+                    server: entry.server.clone(),
+                })
+                .collect(),
         }
     }
 }

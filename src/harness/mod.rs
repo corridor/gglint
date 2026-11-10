@@ -4,14 +4,17 @@
 //!   to use.
 //! - `compare.rs` checks that every harness the repository is set up for gets the same
 //!   servers, set up the same way.
+//! - `fix.rs` writes the config files so they do.
 
 mod compare;
+mod fix;
 mod mcp;
 
 use std::path::Path;
 
-pub use compare::{Cell, Finding, Rule, ServerCheck, Site, check_mcp, compare_mcp};
-pub use mcp::{McpConfig, McpServer, Setting, Transport, read_mcp};
+pub use compare::{Cell, Finding, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp};
+pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
+pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

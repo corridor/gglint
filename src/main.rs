@@ -8,7 +8,8 @@
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
-//! gglint mcp [--format F] [PATH]      compare each harness's MCP servers
+//! gglint mcp [--fix] [--format F] [PATH]
+//!                                     compare each harness's MCP servers, and fix them
 //! gglint mcp --servers [PATH]         list them
 //! ```
 //!
@@ -23,8 +24,8 @@ use std::time::Instant;
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
 use gglint::harness::{
-    Cell, Finding, Harness, McpConfig, McpServer, Rule, ServerCheck, Setting, Transport, check_mcp, read_mcp,
-    used_harnesses,
+    Cell, Finding, FixReport, Harness, McpConfig, McpServer, Rule, ServerCheck, Setting, Transport, check_mcp,
+    fix_mcp, read_mcp, used_harnesses,
 };
 
 fn main() -> ExitCode {
@@ -183,12 +184,17 @@ enum McpView {
 
 fn mcp(args: &[String]) -> ExitCode {
     let mut view = McpView::Table;
+    let mut fix = false;
     let mut path = ".";
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let format = match arg.as_str() {
             "--servers" => {
                 view = McpView::Servers;
+                continue;
+            }
+            "--fix" => {
+                fix = true;
                 continue;
             }
             "--format" => args.next().map(String::as_str),
@@ -209,6 +215,10 @@ fn mcp(args: &[String]) -> ExitCode {
             }
         };
     }
+    if fix && view == McpView::Servers {
+        eprintln!("error: `--fix` changes what `--servers` lists; use one at a time");
+        return ExitCode::FAILURE;
+    }
     let root = Path::new(path);
     if !root.exists() {
         eprintln!("error: {path} doesn't exist");
@@ -217,8 +227,17 @@ fn mcp(args: &[String]) -> ExitCode {
     let start = Instant::now();
     let configs = read_mcp(root);
     let harnesses = used_harnesses(root);
-    let checks = if view == McpView::Servers { Vec::new() } else { check_mcp(&configs, &harnesses) };
+    let mut checks = if view == McpView::Servers { Vec::new() } else { check_mcp(&configs, &harnesses) };
     let elapsed = start.elapsed();
+    // After fixing, everything below is about the files as they are now.
+    let configs = if fix {
+        print_fixes(&fix_mcp(root, &configs, &checks));
+        let configs = read_mcp(root);
+        checks = check_mcp(&configs, &harnesses);
+        configs
+    } else {
+        configs
+    };
 
     let mut servers = 0;
     for config in &configs {
@@ -273,6 +292,54 @@ fn mcp(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     if problems == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// What `--fix` changed, file by file, and what it couldn't fix.
+fn print_fixes(report: &FixReport) {
+    let mut out = String::new();
+    if report.changed.is_empty() && report.unfixed.is_empty() {
+        out.push_str("Nothing to fix.\n\n");
+    }
+    if !report.changed.is_empty() {
+        let labels: Vec<String> = report
+            .changed
+            .iter()
+            .map(|file| {
+                let new = if file.created { " (new)" } else { "" };
+                format!("{}{new}", file.relative_path.display())
+            })
+            .collect();
+        let width = labels.iter().map(|label| label.chars().count()).max().unwrap_or_default();
+        let count = report.changed.len();
+        out.push_str(&format!("Fixed {count} file{}:\n", if count == 1 { "" } else { "s" }));
+        for (file, label) in report.changed.iter().zip(&labels) {
+            let mut what = Vec::new();
+            if !file.added.is_empty() {
+                what.push(format!("added {}", file.added.join(", ")));
+            }
+            if !file.updated.is_empty() {
+                what.push(format!("updated {}", file.updated.join(", ")));
+            }
+            out.push_str(&format!("  {label:<width$}   {}\n", what.join("; ")));
+        }
+        out.push('\n');
+    }
+    if !report.unfixed.is_empty() {
+        out.push_str("Couldn't fix:\n");
+        for unfixed in &report.unfixed {
+            out.push_str(&format!(
+                "  {} in {}: {}\n",
+                unfixed.server,
+                unfixed.harness.display_name(),
+                unfixed.reason
+            ));
+        }
+        out.push('\n');
+    }
+    if !report.changed.is_empty() {
+        out.push_str("Review the changes with `git diff`.\n\n");
+    }
+    print!("{out}");
 }
 
 /// ANSI colours, when standard output is a terminal and `NO_COLOR` isn't set.
