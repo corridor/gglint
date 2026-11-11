@@ -13,7 +13,7 @@ use jsonc_parser::{CollectOptions, ParseOptions};
 use toml::de::{DeTable, DeValue};
 
 use super::Harness;
-use crate::discovery::Location;
+use super::Location;
 
 /// How a file lists its MCP servers.
 #[derive(Clone, Copy)]

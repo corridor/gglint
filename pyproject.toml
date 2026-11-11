@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "gglint"
-description = "Finds the AI agents defined in Python source code"
+description = "Keeps the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 dynamic = ["version"]
@@ -14,9 +14,9 @@ classifiers = [
 ]
 
 [tool.maturin]
-bindings = "pyo3"
-features = ["python", "pyo3/extension-module"]
+# The wheel holds the `gglint` program itself; there is no Python module to import.
+bindings = "bin"
 
 [tool.uv]
 # Rebuild the extension whenever its Rust source changes, on the next `uv sync` or `uv run`
-cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }, { file = "src/**/*.rs" }, { file = "src/**/*.txt" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }, { file = "src/**/*.rs" }]

@@ -10,9 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
+use super::Location;
 use super::mcp::{Syntax, translate};
 use super::{Harness, McpConfig, McpServer, Transport};
-use crate::discovery::Location;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {

@@ -64,6 +64,19 @@ impl Harness {
     }
 }
 
+/// A 1-based line and column in a config file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Location {
+    pub line: usize,
+    pub column: usize,
+}
+
+impl std::fmt::Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
+    }
+}
+
 /// Directories (ending in `/`) and files that show a repository is set up for a harness,
 /// relative to its root. `AGENTS.md` is read by several harnesses, so it doesn't count for
 /// any of them.

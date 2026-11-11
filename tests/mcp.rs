@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 
 use common::TempDir;
-use gglint::discovery::Location;
+use gglint::harness::Location;
 use gglint::harness::{
     Cell, FixOptions, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp,
     fix_mcp, read_mcp, used_harnesses,

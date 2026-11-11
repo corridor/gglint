@@ -39,7 +39,3 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
-
-pub const LANGCHAIN_AGENT: &str = "from langchain.agents import create_agent\n\
-                                   \n\
-                                   agent = create_agent(model=\"openai:gpt-4o\", name=\"support\")\n";
