@@ -8,7 +8,7 @@
 //! gglint ask [FLAGS] [PATH] QUESTION  answer one question
 //! gglint chat [FLAGS] [PATH]          answer each line read from standard input
 //! gglint models [pull]                show, or download, the models `ask` uses
-//! gglint mcp [--fix] [--format F] [PATH]
+//! gglint mcp [--fix [--overwrite]] [--format F] [PATH]
 //!                                     compare each harness's MCP servers, and fix them
 //! gglint mcp --servers [PATH]         list them
 //! ```
@@ -24,8 +24,8 @@ use std::time::Instant;
 use gglint::ask::{Answer, Options, Repo};
 use gglint::discovery::{AgentKind, DiscoveredAgent, DiscoveredPrompt, FileResult, Location, scan};
 use gglint::harness::{
-    Cell, Finding, FixReport, Harness, McpConfig, McpServer, Rule, ServerCheck, Setting, Transport, check_mcp,
-    fix_mcp, read_mcp, used_harnesses,
+    Cell, Finding, FixOptions, FixReport, Harness, McpConfig, McpServer, Rule, ServerCheck, Setting, Transport,
+    check_mcp, fix_mcp, read_mcp, used_harnesses,
 };
 
 fn main() -> ExitCode {
@@ -185,6 +185,7 @@ enum McpView {
 fn mcp(args: &[String]) -> ExitCode {
     let mut view = McpView::Table;
     let mut fix = false;
+    let mut options = FixOptions::default();
     let mut path = ".";
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -195,6 +196,12 @@ fn mcp(args: &[String]) -> ExitCode {
             }
             "--fix" => {
                 fix = true;
+                continue;
+            }
+            // Overwriting is a way of fixing.
+            "--overwrite" => {
+                fix = true;
+                options.overwrite = true;
                 continue;
             }
             "--format" => args.next().map(String::as_str),
@@ -231,7 +238,7 @@ fn mcp(args: &[String]) -> ExitCode {
     let elapsed = start.elapsed();
     // After fixing, everything below is about the files as they are now.
     let configs = if fix {
-        print_fixes(&fix_mcp(root, &configs, &checks));
+        print_fixes(&fix_mcp(root, &configs, &checks, &options));
         let configs = read_mcp(root);
         checks = check_mcp(&configs, &harnesses);
         configs
@@ -294,7 +301,7 @@ fn mcp(args: &[String]) -> ExitCode {
     if problems == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-/// What `--fix` changed, file by file, and what it couldn't fix.
+/// What `--fix` changed, file by file, and what it left as it was.
 fn print_fixes(report: &FixReport) {
     let mut out = String::new();
     if report.changed.is_empty() && report.unfixed.is_empty() {
@@ -305,13 +312,20 @@ fn print_fixes(report: &FixReport) {
             .changed
             .iter()
             .map(|file| {
-                let new = if file.created { " (new)" } else { "" };
-                format!("{}{new}", file.relative_path.display())
+                let notes: Vec<&str> = [(file.created, "new"), (file.ignored, "gitignored")]
+                    .into_iter()
+                    .filter_map(|(on, note)| on.then_some(note))
+                    .collect();
+                if notes.is_empty() {
+                    file.relative_path.display().to_string()
+                } else {
+                    format!("{} ({})", file.relative_path.display(), notes.join(", "))
+                }
             })
             .collect();
         let width = labels.iter().map(|label| label.chars().count()).max().unwrap_or_default();
         let count = report.changed.len();
-        out.push_str(&format!("Fixed {count} file{}:\n", if count == 1 { "" } else { "s" }));
+        out.push_str(&format!("Changed {count} file{}:\n", if count == 1 { "" } else { "s" }));
         for (file, label) in report.changed.iter().zip(&labels) {
             let mut what = Vec::new();
             if !file.added.is_empty() {
@@ -322,10 +336,13 @@ fn print_fixes(report: &FixReport) {
             }
             out.push_str(&format!("  {label:<width$}   {}\n", what.join("; ")));
         }
+        if report.changed.iter().any(|file| file.ignored) {
+            out.push_str("  Gitignored files aren't committed, so those changes stay on this machine.\n");
+        }
         out.push('\n');
     }
     if !report.unfixed.is_empty() {
-        out.push_str("Couldn't fix:\n");
+        out.push_str("Left as they are:\n");
         for unfixed in &report.unfixed {
             out.push_str(&format!(
                 "  {} in {}: {}\n",
