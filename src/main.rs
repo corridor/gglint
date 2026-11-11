@@ -17,7 +17,7 @@ use gglint::harness::{
 };
 
 const USAGE: &str = "\
-Keeps the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
+Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
 
 Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers
