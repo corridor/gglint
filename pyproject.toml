@@ -4,19 +4,36 @@ build-backend = "maturin"
 
 [project]
 name = "gglint"
-description = "Keeps the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
-requires-python = ">=3.11"
+description = "Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
+readme = "README.md"
+# The wheels hold a compiled program, not Python code, so any Python 3 can install them.
+requires-python = ">=3.8"
 license = "Apache-2.0"
-dynamic = ["version"]
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
+keywords = ["mcp", "model-context-protocol", "claude-code", "codex", "cursor", "opencode", "linter"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
-    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Utilities",
 ]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/corridor/gglint"
+Source = "https://github.com/corridor/gglint"
+Issues = "https://github.com/corridor/gglint/issues"
+Changelog = "https://github.com/corridor/gglint/blob/main/CHANGELOG.md"
 
 [tool.maturin]
 # The wheel holds the `gglint` program itself; there is no Python module to import.
 bindings = "bin"
 
 [tool.uv]
-# Rebuild the extension whenever its Rust source changes, on the next `uv sync` or `uv run`
+# Rebuild gglint when its Rust source changes, on the next `uv sync` or `uv run`.
 cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "Cargo.lock" }, { file = "src/**/*.rs" }]

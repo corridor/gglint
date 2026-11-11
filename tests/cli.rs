@@ -312,6 +312,6 @@ fn prints_the_version_and_usage() {
     assert!(
         String::from_utf8(bare.stderr)
             .unwrap()
-            .starts_with("Keeps the MCP servers")
+            .starts_with("Keep the MCP servers")
     );
 }
