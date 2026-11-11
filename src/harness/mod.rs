@@ -1,19 +1,16 @@
-//! The coding harnesses' config files in a repository, and how their setups compare.
+//! The MCP config files of the coding agents (harnesses) in a repository.
 //!
 //! - `mcp.rs` reads the MCP servers Claude Code, Codex, Cursor and OpenCode are each set up
 //!   to use.
-//! - `compare.rs` checks that every harness the repository is set up for gets the same
-//!   servers, set up the same way.
-//! - `fix.rs` writes the config files so they do.
+//! - `compare.rs` finds the servers each config file is missing.
+//! - `fix.rs` adds them.
 
 mod compare;
 mod fix;
 mod mcp;
 
-use std::path::Path;
-
 pub use compare::{Cell, Finding, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp};
-pub use fix::{ChangedFile, FixOptions, FixReport, Unfixed, fix_mcp};
+pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
@@ -51,17 +48,6 @@ impl Harness {
     pub fn mcp_file(self) -> &'static str {
         mcp::mcp_file(self)
     }
-
-    /// Its own directory in a repository. When it's there, the repository is set up for the
-    /// harness on purpose, not just mentioned by a file such as `CLAUDE.md`.
-    pub fn directory(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => ".claude",
-            Harness::Codex => ".codex",
-            Harness::Cursor => ".cursor",
-            Harness::OpenCode => ".opencode",
-        }
-    }
 }
 
 /// A 1-based line and column in a config file.
@@ -75,34 +61,4 @@ impl std::fmt::Display for Location {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.line, self.column)
     }
-}
-
-/// Directories (ending in `/`) and files that show a repository is set up for a harness,
-/// relative to its root. `AGENTS.md` is read by several harnesses, so it doesn't count for
-/// any of them.
-const MARKERS: &[(Harness, &str)] = &[
-    (Harness::ClaudeCode, ".claude/"),
-    (Harness::ClaudeCode, "CLAUDE.md"),
-    (Harness::ClaudeCode, ".mcp.json"),
-    (Harness::Codex, ".codex/"),
-    (Harness::Cursor, ".cursor/"),
-    (Harness::Cursor, ".cursorrules"),
-    (Harness::OpenCode, ".opencode/"),
-    (Harness::OpenCode, "opencode.json"),
-    (Harness::OpenCode, "opencode.jsonc"),
-];
-
-/// The harnesses `root` is set up for: those with their own files in it. A directory marker
-/// must be a directory: in some repositories `.codex` is an empty file.
-pub fn used_harnesses(root: &Path) -> Vec<Harness> {
-    let mut harnesses: Vec<Harness> = MARKERS
-        .iter()
-        .filter(|(_, marker)| match marker.strip_suffix('/') {
-            Some(directory) => root.join(directory).is_dir(),
-            None => root.join(marker).is_file(),
-        })
-        .map(|(harness, _)| *harness)
-        .collect();
-    harnesses.dedup();
-    harnesses
 }

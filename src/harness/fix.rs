@@ -1,20 +1,12 @@
-//! `gglint mcp --fix`: gives every harness the repository is set up for each server.
+//! `gglint mcp --fix`: adds each server a config file is missing.
 //!
-//! It adds, and never changes or removes what is there. A server missing from a harness is
-//! added to its config file, copied from the first harness that has it. The file is created
-//! only when the harness has its own directory (`.claude`, `.cursor`, ...): a `CLAUDE.md`
-//! alone says people use Claude Code, not that they want MCP servers in it. Comments and
-//! formatting are kept.
+//! It only adds. A server missing from an agent's config file is added to that file,
+//! written the way that agent writes it, from the first file where the server is turned on.
+//! Nothing already in a file is changed or removed, comments and formatting are kept, and
+//! no file is created: an agent without an MCP config file is left alone.
 //!
-//! A server set up differently is left as it is: in real repositories most differences
-//! between harnesses are deliberate, such as each harness running its own runtime or
-//! setting its own environment. With `FixOptions::overwrite` it's changed to match the
-//! first harness's setup instead; only the keys that say how a server is started and what
-//! it's given are written, so keys only one harness has, such as Codex's `enabled_tools`,
-//! are kept.
-//!
-//! Left for a person either way: a different program under the same name, a server turned
-//! off, another name, and a value that can't be written in the other harness's syntax.
+//! Left for a person: a server whose setup can't be written for the other agent, such as a
+//! command line that reads an environment variable Codex can't fill in.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,22 +15,14 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
-use super::compare::{Cell, ServerCheck, same_program};
+use super::compare::{Cell, ServerCheck};
 use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
-
-/// How `fix_mcp` may change the config files.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct FixOptions {
-    /// Change a server set up differently to match the first harness's setup. Off by
-    /// default: most differences between harnesses are deliberate.
-    pub overwrite: bool,
-}
 
 /// What `fix_mcp` changed, and what it left.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FixReport {
-    /// In the order harnesses are reported.
+    /// In the order agents are reported.
     pub changed: Vec<ChangedFile>,
     pub unfixed: Vec<Unfixed>,
 }
@@ -48,17 +32,14 @@ pub struct ChangedFile {
     pub harness: Harness,
     /// Relative to the repository's root.
     pub relative_path: PathBuf,
-    /// Whether it didn't exist before.
-    pub created: bool,
-    /// The servers added to it, and the ones changed to match the first harness's.
+    /// The servers added to it.
     pub added: Vec<String>,
-    pub updated: Vec<String>,
     /// Whether the repository's `.gitignore` leaves it out, so the change stays on this
     /// machine and isn't committed.
     pub ignored: bool,
 }
 
-/// A server `fix_mcp` couldn't set up in a harness.
+/// A server `fix_mcp` couldn't add to an agent's config file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unfixed {
     pub harness: Harness,
@@ -73,99 +54,48 @@ enum Field {
     Map(Vec<(String, String)>),
 }
 
-/// One server to write into one harness's file.
+/// One server to add to one agent's file.
 struct Write {
-    harness: Harness,
     relative_path: PathBuf,
     /// Its name in that file.
     name: String,
     fields: Vec<(&'static str, Field)>,
-    /// Whether it's already in the file, to be changed rather than added.
-    update: bool,
 }
 
-/// Fixes the problems in `checks` that have one right answer, by writing config files
-/// under `root`.
-pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck], options: &FixOptions) -> FixReport {
+/// Adds the servers missing from the config files under `root`, as `checks` lists them.
+pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> FixReport {
     let mut writes: Vec<Write> = Vec::new();
     let mut report = FixReport::default();
     for check in checks {
-        let reference = &check.setups[0];
-        let from = reference.site.harness.display_name();
+        let Some(source) = &check.source else { continue };
         for &(harness, cell) in &check.cells {
-            let target = check.setups.iter().find(|setup| setup.site.harness == harness);
-            let name = target
-                .map_or(&reference.server.name, |target| &target.server.name)
-                .clone();
-            let mut leave = |reason: String| {
-                report.unfixed.push(Unfixed {
-                    harness,
-                    server: name.clone(),
-                    reason,
-                })
+            if cell != Cell::Missing {
+                continue;
+            }
+            let Some(config) = configs.iter().find(|config| config.harness == harness) else {
+                continue;
             };
-            let update = match cell {
-                Cell::Missing => {
-                    let file = config_file(harness, configs);
-                    if !root.join(&file).exists() && !root.join(harness.directory()).is_dir() {
-                        leave(format!(
-                            "{} has no {} and no {} directory; create {} if its users want MCP servers",
-                            harness.display_name(),
-                            file.display(),
-                            harness.directory(),
-                            file.display()
-                        ));
-                        continue;
-                    }
-                    false
-                }
-                Cell::Different => {
-                    if let Some(target) = target
-                        && !same_program(target, reference)
-                    {
-                        leave(format!(
-                            "it's a different server than in {from}; decide which one is right"
-                        ));
-                        continue;
-                    }
-                    if !options.overwrite {
-                        leave(format!(
-                            "set up differently from {from}; left as it is, and `--overwrite` copies {from}'s setup"
-                        ));
-                        continue;
-                    }
-                    true
-                }
-                // A server turned off may be off on purpose.
-                Cell::Same | Cell::Off => continue,
-            };
-            match fields(&reference.server, reference.site.harness, harness) {
+            match fields(&source.server, source.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
-                    harness,
-                    relative_path: target.map_or_else(
-                        || config_file(harness, configs),
-                        |target| target.site.relative_path.clone(),
-                    ),
-                    name,
+                    relative_path: config.relative_path.clone(),
+                    name: source.server.name.clone(),
                     fields,
-                    update,
                 }),
                 Err(reason) => report.unfixed.push(Unfixed {
                     harness,
-                    server: name,
+                    server: source.server.name.clone(),
                     reason,
                 }),
             }
         }
     }
 
-    // One file at a time, in the order harnesses are reported.
-    let mut files: Vec<(Harness, PathBuf)> = Vec::new();
-    for write in &writes {
-        if !files.iter().any(|(_, path)| *path == write.relative_path) {
-            files.push((write.harness, write.relative_path.clone()));
-        }
-    }
+    // One file at a time, in the order agents are reported.
+    let mut files: Vec<(Harness, PathBuf)> = configs
+        .iter()
+        .filter(|config| writes.iter().any(|write| write.relative_path == config.relative_path))
+        .map(|config| (config.harness, config.relative_path.clone()))
+        .collect();
     files.sort_by_key(|(harness, _)| HARNESSES.iter().position(|other| other == harness));
     for (harness, relative_path) in files {
         let file_writes: Vec<&Write> = writes
@@ -173,15 +103,13 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck], optio
             .filter(|write| write.relative_path == relative_path)
             .collect();
         match write_file(root, harness, &relative_path, &file_writes) {
-            Ok(Some(created)) => report.changed.push(ChangedFile {
+            Ok(true) => report.changed.push(ChangedFile {
                 harness,
                 ignored: ignored_by_git(root, &relative_path),
                 relative_path,
-                created,
-                added: names(&file_writes, false),
-                updated: names(&file_writes, true),
+                added: file_writes.iter().map(|write| write.name.clone()).collect(),
             }),
-            Ok(None) => {}
+            Ok(false) => {}
             Err(reason) => report.unfixed.extend(file_writes.iter().map(|write| Unfixed {
                 harness,
                 server: write.name.clone(),
@@ -207,44 +135,9 @@ fn ignored_by_git(root: &Path, relative_path: &Path) -> bool {
         .is_ok_and(|status| status.success())
 }
 
-fn names(writes: &[&Write], update: bool) -> Vec<String> {
-    writes
-        .iter()
-        .filter(|write| write.update == update)
-        .map(|write| write.name.clone())
-        .collect()
-}
-
-/// The file `harness` reads servers from: the one it has, or the one to create.
-fn config_file(harness: Harness, configs: &[McpConfig]) -> PathBuf {
-    configs.iter().find(|config| config.harness == harness).map_or_else(
-        || PathBuf::from(harness.mcp_file()),
-        |config| config.relative_path.clone(),
-    )
-}
-
 // ---------------------------------------------------------------------------
-// A server's entry, in each harness's words
+// A server's entry, in each agent's words
 // ---------------------------------------------------------------------------
-
-/// The keys `fields` writes in an entry that's already there. `type` isn't one: it only
-/// says whether the server is started or reached, which is the same in a server to update.
-fn written_keys(harness: Harness) -> &'static [&'static str] {
-    match harness {
-        Harness::ClaudeCode | Harness::Cursor => &["command", "args", "env", "url", "headers"],
-        Harness::OpenCode => &["command", "environment", "url", "headers"],
-        Harness::Codex => &[
-            "command",
-            "args",
-            "env",
-            "env_vars",
-            "url",
-            "http_headers",
-            "env_http_headers",
-            "bearer_token_env_var",
-        ],
-    }
-}
 
 /// `transport`'s command line or URL, with references to the environment written the way
 /// `to` writes them, or why it can't be.
@@ -421,27 +314,20 @@ fn codex_fields(server: &McpServer, cannot: impl Fn(&str) -> String) -> Result<V
 // Writing files
 // ---------------------------------------------------------------------------
 
-/// Writes `writes` into the file at `relative_path`, if that changes it: `Some(created)`.
-fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Write]) -> Result<Option<bool>, String> {
+/// Adds `writes` to the file at `relative_path`. Whether that changed it.
+fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Write]) -> Result<bool, String> {
     let path = root.join(relative_path);
-    let (text, created) = match std::fs::read_to_string(&path) {
-        Ok(text) => (text, false),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
-        Err(error) => return Err(format!("couldn't read it: {error}")),
-    };
+    let text = std::fs::read_to_string(&path).map_err(|error| format!("couldn't read it: {error}"))?;
     let new_text = match harness {
         Harness::Codex => write_toml(&text, writes)?,
-        Harness::ClaudeCode | Harness::Cursor => write_json(&text, "mcpServers", None, writes)?,
-        Harness::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), writes)?,
+        Harness::ClaudeCode | Harness::Cursor => write_json(&text, "mcpServers", writes)?,
+        Harness::OpenCode => write_json(&text, "mcp", writes)?,
     };
     if new_text == text {
-        return Ok(None);
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("couldn't create its directory: {error}"))?;
+        return Ok(false);
     }
     std::fs::write(&path, new_text).map_err(|error| format!("couldn't write it: {error}"))?;
-    Ok(Some(created))
+    Ok(true)
 }
 
 fn json_value(field: &Field) -> CstInputValue {
@@ -456,18 +342,11 @@ fn json_value(field: &Field) -> CstInputValue {
     }
 }
 
-/// Writes the servers into the object at `key`, keeping the rest of the file as it is. A
-/// new file starts with `schema`, when the harness has one.
-fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) -> Result<String, String> {
+/// Adds the servers to the object at `key`, keeping the rest of the file as it is.
+fn write_json(text: &str, key: &str, writes: &[&Write]) -> Result<String, String> {
     let root =
         CstRootNode::parse(text, &ParseOptions::default()).map_err(|error| format!("couldn't parse it: {error}"))?;
-    let object = root.object_value_or_set();
-    if let Some(schema) = schema
-        && text.trim().is_empty()
-    {
-        object.append("$schema", schema.into());
-    }
-    let mut servers = object.object_value_or_set(key);
+    let mut servers = root.object_value_or_set().object_value_or_set(key);
     // OpenCode: write where the file keeps its servers, under `mcp.servers` in its current
     // layout or right under `mcp` in the older one. A file with none gets the current one.
     if key == "mcp" {
@@ -480,28 +359,16 @@ fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) ->
         }
     }
     for write in writes {
-        match servers.get(&write.name).and_then(|property| property.object_value()) {
-            Some(entry) if write.update => {
-                for &key in written_keys(write.harness) {
-                    match (write.fields.iter().find(|(name, _)| *name == key), entry.get(key)) {
-                        (Some((_, field)), Some(property)) => property.set_value(json_value(field)),
-                        (Some((_, field)), None) => {
-                            entry.append(key, json_value(field));
-                        }
-                        (None, Some(property)) => property.remove(),
-                        (None, None) => {}
-                    }
-                }
-            }
-            _ => {
-                let entry = write
-                    .fields
-                    .iter()
-                    .map(|(key, field)| (key.to_string(), json_value(field)))
-                    .collect();
-                servers.append(&write.name, CstInputValue::Object(entry));
-            }
+        // Never over a server that's there.
+        if servers.get(&write.name).is_some() {
+            continue;
         }
+        let entry = write
+            .fields
+            .iter()
+            .map(|(key, field)| (key.to_string(), json_value(field)))
+            .collect();
+        servers.append(&write.name, CstInputValue::Object(entry));
     }
     let mut written = root.to_string();
     if !written.ends_with('\n') {
@@ -520,7 +387,7 @@ fn toml_item(field: &Field) -> Item {
     }
 }
 
-/// Writes the servers as `[mcp_servers.<name>]` tables, keeping the rest of the file as it is.
+/// Adds the servers as `[mcp_servers.<name>]` tables, keeping the rest of the file as it is.
 fn write_toml(text: &str, writes: &[&Write]) -> Result<String, String> {
     let mut document: DocumentMut = text.parse().map_err(|error| format!("couldn't parse it: {error}"))?;
     let servers = document.entry("mcp_servers").or_insert_with(|| {
@@ -532,27 +399,15 @@ fn write_toml(text: &str, writes: &[&Write]) -> Result<String, String> {
         return Err("its `mcp_servers` is written on one line".to_string());
     };
     for write in writes {
-        match servers.get_mut(&write.name).and_then(Item::as_table_like_mut) {
-            Some(entry) if write.update => {
-                for &key in written_keys(write.harness) {
-                    match write.fields.iter().find(|(name, _)| *name == key) {
-                        Some((_, field)) => {
-                            entry.insert(key, toml_item(field));
-                        }
-                        None => {
-                            entry.remove(key);
-                        }
-                    }
-                }
-            }
-            _ => {
-                let mut table = Table::new();
-                for (key, field) in &write.fields {
-                    table.insert(key, toml_item(field));
-                }
-                servers.insert(&write.name, Item::Table(table));
-            }
+        // Never over a server that's there.
+        if servers.contains_key(&write.name) {
+            continue;
         }
+        let mut table = Table::new();
+        for (key, field) in &write.fields {
+            table.insert(key, toml_item(field));
+        }
+        servers.insert(&write.name, Item::Table(table));
     }
     Ok(document.to_string())
 }

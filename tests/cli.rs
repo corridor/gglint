@@ -68,7 +68,7 @@ fn mcp_fails_when_there_are_no_config_files() {
 #[test]
 fn mcp_format_lines_prints_one_line_per_problem() {
     let dir = TempDir::new();
-    dir.write(".claude/settings.json", "{}\n");
+    dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
     dir.write(
         ".codex/config.toml",
         "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n",
@@ -83,7 +83,7 @@ fn mcp_format_lines_prints_one_line_per_problem() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4, "{stdout}");
+    assert_eq!(lines.len(), 2, "{stdout}");
     assert!(
         lines[0].ends_with(
             "config.toml:1:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)"
@@ -91,22 +91,15 @@ fn mcp_format_lines_prints_one_line_per_problem() {
         "{stdout}"
     );
     assert!(lines[1].starts_with("    also at ") && lines[1].ends_with(".cursor/mcp.json:3:5"), "{stdout}");
-    assert!(
-        lines[2].ends_with(
-            "config.toml:1:14  different-server `angular-cli` is started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor"
-        ),
-        "{stdout}"
-    );
-    assert!(lines[3].starts_with("    also at ") && lines[3].ends_with(".cursor/mcp.json:3:5"), "{stdout}");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("Checked 2 MCP server(s) in 2 file(s) for Claude Code, Codex and Cursor: 2 problem(s)"),
+        stderr.contains("Checked 2 MCP server(s) in 3 file(s) for Claude Code, Codex and Cursor: 1 problem(s)"),
         "{stderr}"
     );
 }
 
 #[test]
-fn mcp_passes_when_the_harnesses_agree() {
+fn mcp_passes_when_every_file_has_every_server() {
     let dir = TempDir::new();
     dir.write(".codex/config.toml", "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n");
     dir.write(".cursor/mcp.json", "{ \"mcpServers\": { \"docs\": { \"url\": \"https://docs.example.com/mcp\" } } }\n");
@@ -116,14 +109,12 @@ fn mcp_passes_when_the_harnesses_agree() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("│ docs   │   ✓   │   ✓    │"), "{stdout}");
-    assert!(
-        stdout.ends_with("No problems: every harness gets the same servers, set up the same way.\n"),
-        "{stdout}"
-    );
+    assert!(stdout.ends_with("No problems: every config file has every server.\n"), "{stdout}");
     assert!(String::from_utf8(output.stderr).unwrap().contains(": no problems"));
 }
 
-/// GGX's MCP servers: two set up for Codex, one of them also for Cursor, none for Claude Code.
+/// GGX's MCP servers: two set up for Codex, one of them also for Cursor, and a `.claude`
+/// directory without a `.mcp.json`.
 fn ggx_like() -> TempDir {
     let dir = TempDir::new();
     dir.write(".claude/settings.json", "{}\n");
@@ -140,7 +131,7 @@ fn ggx_like() -> TempDir {
 }
 
 #[test]
-fn mcp_draws_each_server_in_each_harness_and_what_to_fix() {
+fn mcp_draws_each_server_in_each_config_file_and_what_to_add() {
     let dir = ggx_like();
 
     let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
@@ -149,29 +140,24 @@ fn mcp_draws_each_server_in_each_harness_and_what_to_fix() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let (title, report) = stdout.split_once('\n').unwrap();
     assert!(title.starts_with("MCP servers in gglint-test-"), "{stdout}");
-    // No colours: standard output isn't a terminal.
+    // No colours: standard output isn't a terminal. Claude Code has no `.mcp.json`, so it
+    // isn't a column.
     assert_eq!(
         report,
         "
-  ╭───────────────────┬─────────────┬───────┬────────╮
-  │ Server            │ Claude Code │ Codex │ Cursor │
-  ├───────────────────┼─────────────┼───────┼────────┤
-  │ code-review-graph │      ✗      │   ✓   │   ✗    │
-  │ angular-cli       │      ✗      │   ✓   │   ≠    │
-  ╰───────────────────┴─────────────┴───────┴────────╯
-  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
+  ╭───────────────────┬───────┬────────╮
+  │ Server            │ Codex │ Cursor │
+  ├───────────────────┼───────┼────────┤
+  │ code-review-graph │   ✓   │   ✗    │
+  │ angular-cli       │   ✓   │   ✓    │
+  ╰───────────────────┴───────┴────────╯
+  ✓ set up   ✗ missing   ○ turned off
 
-3 problems
+1 problem
 
   code-review-graph
-    ✗ Missing from Claude Code and Cursor.
-      Add it to .mcp.json and .cursor/mcp.json, as set up in .codex/config.toml:1
-
-  angular-cli
-    ✗ Missing from Claude Code.
-      Add it to .mcp.json, as set up in .codex/config.toml:5
-    ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
-      .codex/config.toml:5, .cursor/mcp.json:1
+    ✗ Missing from Cursor.
+      Add it to .cursor/mcp.json, as set up in .codex/config.toml:1
 "
     );
 }
@@ -187,22 +173,29 @@ fn mcp_rejects_an_unknown_format() {
 }
 
 #[test]
-fn mcp_fix_adds_what_is_missing_and_leaves_differences() {
+fn mcp_rejects_an_unknown_option() {
     let dir = ggx_like();
+
+    let output = gglint(&["mcp".as_ref(), "--overwrite".as_ref(), dir.path().as_os_str()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("unknown option \"--overwrite\""));
+    assert!(!dir.path().join(".mcp.json").exists());
+}
+
+#[test]
+fn mcp_fix_adds_the_missing_servers_and_creates_no_file() {
+    let dir = ggx_like();
+    let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
 
     let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
 
-    // angular-cli is still set up differently in Cursor.
-    assert_eq!(output.status.code(), Some(1));
+    assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.starts_with(
-            "Changed 2 files:\n\
-             \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
+            "Changed 1 file:\n\
              \x20 .cursor/mcp.json   added code-review-graph\n\
-             \n\
-             Left as they are:\n\
-             \x20 angular-cli in Cursor: set up differently from Codex; left as it is, and `--overwrite` copies Codex's setup\n\
              \n\
              Review the changes with `git diff`.\n\
              \n\
@@ -210,20 +203,26 @@ fn mcp_fix_adds_what_is_missing_and_leaves_differences() {
         ),
         "{stdout}"
     );
-    assert!(stdout.contains("│ angular-cli       │      ✓      │   ✓   │   ≠    │"), "{stdout}");
+    assert!(stdout.ends_with("No problems: every config file has every server.\n"), "{stdout}");
+    assert!(!dir.path().join(".mcp.json").exists());
+    assert_eq!(std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(), codex);
 }
 
 #[test]
-fn mcp_fix_overwrite_makes_every_harness_match() {
-    let dir = ggx_like();
-
-    let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), "--overwrite".as_ref(), dir.path().as_os_str()]);
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        stdout.starts_with("Changed 2 files:\n\x20 .mcp.json (new)    added code-review-graph, angular-cli\n\x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n"),
-        "{stdout}"
+fn prints_the_version_and_usage() {
+    let version = gglint(&["--version".as_ref()]);
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8(version.stdout).unwrap(),
+        format!("gglint {}\n", env!("CARGO_PKG_VERSION"))
     );
-    assert!(stdout.ends_with("No problems: every harness gets the same servers, set up the same way.\n"), "{stdout}");
+
+    let help = gglint(&["--help".as_ref()]);
+    assert!(help.status.success());
+    assert!(String::from_utf8(help.stdout).unwrap().contains("gglint mcp --fix [PATH]"));
+
+    // Without a command there's nothing to do.
+    let bare = gglint(&[]);
+    assert_eq!(bare.status.code(), Some(1));
+    assert!(String::from_utf8(bare.stderr).unwrap().starts_with("Keeps the MCP servers"));
 }

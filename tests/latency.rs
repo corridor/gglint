@@ -12,7 +12,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::TempDir;
-use gglint::harness::{compare_mcp, read_mcp, used_harnesses};
+use gglint::harness::{compare_mcp, read_mcp};
 
 fn slowest(times: impl IntoIterator<Item = Duration>) -> Duration {
     times.into_iter().max().unwrap_or_default()
@@ -53,7 +53,7 @@ fn reads_and_compares_mcp_configs_within_budget() {
         .map(|_| {
             let start = Instant::now();
             let configs = read_mcp(dir.path());
-            let findings = compare_mcp(&configs, &used_harnesses(dir.path()));
+            let findings = compare_mcp(&configs);
             let elapsed = start.elapsed();
             assert_eq!(configs.iter().map(|config| config.servers.len()).sum::<usize>(), 83);
             // Codex is the only one without `docs`.
