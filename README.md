@@ -31,41 +31,44 @@ In November 2026 we checked the 258 most-starred GitHub repositories set up for 
 of these agents. Of the 179 that configure MCP servers, 128 (72%) had at least one of the
 problems gglint reports.
 
-## Installation
+## Quick start
 
-gglint is a single compiled program, published on PyPI with prebuilt wheels for Linux
-(x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and Windows (x64 and
-ARM64). Any Python 3.8 or later can install it.
+From the root of a repository, run gglint with [uv](https://docs.astral.sh/uv/). Nothing
+needs to be installed first:
 
 ```sh
-pipx install gglint
+uvx gglint mcp          # report every problem
+uvx gglint mcp --fix    # add the missing servers
+git diff                # review what changed
 ```
+
+Without uv, `pipx run gglint mcp` does the same.
+
+## Installation
+
+To install gglint and run it as `gglint`:
 
 ```sh
 uv tool install gglint
 ```
 
 ```sh
+pipx install gglint
+```
+
+```sh
 pip install gglint
 ```
 
-To run it once without installing it, use `uvx gglint mcp` or `pipx run gglint mcp`.
+gglint is a single compiled program, published on PyPI with prebuilt wheels for Linux
+(x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and Windows (x64 and
+ARM64). Any Python 3.8 or later can install it.
 
 To build it from source, install a [Rust toolchain](https://rustup.rs) (1.88 or later) and
 run:
 
 ```sh
 cargo install --git https://github.com/corridor/gglint --locked
-```
-
-## Quick start
-
-From the root of a repository:
-
-```sh
-gglint mcp          # report every problem
-gglint mcp --fix    # add the missing servers
-git diff            # review what changed
 ```
 
 ## Usage
