@@ -289,9 +289,9 @@ impl Launch {
                         name,
                         args,
                         ..
-                    }) if name == "mcp-remote" && args.first().is_some_and(|url| is_url(url)) => Launch::Remote {
-                        url: args[0].clone(),
-                    },
+                    }) if name == "mcp-remote" && args.first().is_some_and(|url| is_url(url)) => {
+                        Launch::Remote { url: args[0].clone() }
+                    }
                     Some(launch) => launch,
                     None => Launch::Program { command, args },
                 }

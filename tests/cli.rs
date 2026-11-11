@@ -7,10 +7,7 @@ use std::process::Command;
 use common::TempDir;
 
 fn gglint(args: &[&std::ffi::OsStr]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_gglint"))
-        .args(args)
-        .output()
-        .unwrap()
+    Command::new(env!("CARGO_BIN_EXE_gglint")).args(args).output().unwrap()
 }
 
 #[test]
@@ -45,9 +42,8 @@ fn mcp_servers_lists_each_harness_server_without_setting_values() {
         "{stdout}"
     );
     assert!(
-        lines[1].ends_with(
-            "config.toml:1:14  codex        angular-cli  pnpm dlx @angular/cli mcp --read-only  (disabled)"
-        ),
+        lines[1]
+            .ends_with("config.toml:1:14  codex        angular-cli  pnpm dlx @angular/cli mcp --read-only  (disabled)"),
         "{stdout}"
     );
     assert!(!stdout.contains("sk-live"), "{stdout}");
@@ -62,7 +58,11 @@ fn mcp_fails_when_there_are_no_config_files() {
     let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8(output.stderr).unwrap().contains("No MCP config files found"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("No MCP config files found")
+    );
 }
 
 #[test]
@@ -78,7 +78,12 @@ fn mcp_format_lines_prints_one_line_per_problem() {
         "{\n  \"mcpServers\": {\n    \"angular-cli\": { \"command\": \"npx\", \"args\": [\"-y\", \"@angular/cli\", \"mcp\"] }\n  }\n}\n",
     );
 
-    let output = gglint(&["mcp".as_ref(), "--format".as_ref(), "lines".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--format".as_ref(),
+        "lines".as_ref(),
+        dir.path().as_os_str(),
+    ]);
 
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -114,8 +119,14 @@ fn mcp_format_lines_prints_one_line_per_problem() {
 #[test]
 fn mcp_passes_when_every_agent_gets_the_same_servers() {
     let dir = TempDir::new();
-    dir.write(".codex/config.toml", "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n");
-    dir.write(".cursor/mcp.json", "{ \"mcpServers\": { \"docs\": { \"url\": \"https://docs.example.com/mcp\" } } }\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        "{ \"mcpServers\": { \"docs\": { \"url\": \"https://docs.example.com/mcp\" } } }\n",
+    );
 
     let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
 
@@ -189,7 +200,12 @@ fn mcp_draws_each_server_in_each_agent_and_every_problem() {
 fn mcp_rejects_an_unknown_format() {
     let dir = ggx_like();
 
-    let output = gglint(&["mcp".as_ref(), "--format".as_ref(), "xml".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--format".as_ref(),
+        "xml".as_ref(),
+        dir.path().as_os_str(),
+    ]);
 
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8(output.stderr).unwrap().contains("unknown format"));
@@ -202,7 +218,11 @@ fn mcp_rejects_an_unknown_option() {
     let output = gglint(&["mcp".as_ref(), "--overwrite".as_ref(), dir.path().as_os_str()]);
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8(output.stderr).unwrap().contains("unknown option \"--overwrite\""));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unknown option \"--overwrite\"")
+    );
     assert!(!dir.path().join(".mcp.json").exists());
 }
 
@@ -280,10 +300,18 @@ fn prints_the_version_and_usage() {
 
     let help = gglint(&["--help".as_ref()]);
     assert!(help.status.success());
-    assert!(String::from_utf8(help.stdout).unwrap().contains("gglint mcp --fix [PATH]"));
+    assert!(
+        String::from_utf8(help.stdout)
+            .unwrap()
+            .contains("gglint mcp --fix [PATH]")
+    );
 
     // Without a command there's nothing to do.
     let bare = gglint(&[]);
     assert_eq!(bare.status.code(), Some(1));
-    assert!(String::from_utf8(bare.stderr).unwrap().starts_with("Keeps the MCP servers"));
+    assert!(
+        String::from_utf8(bare.stderr)
+            .unwrap()
+            .starts_with("Keeps the MCP servers")
+    );
 }

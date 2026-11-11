@@ -31,7 +31,9 @@ fn mcp_repo() -> TempDir {
         json.push_str(&format!(
             "    \"server{n}\": {{ \"command\": \"npx\", \"args\": [\"-y\", \"server{n}@1.0.0\"], \"env\": {{ \"KEY\": \"${{KEY}}\" }} }},\n"
         ));
-        toml.push_str(&format!("[mcp_servers.server{n}]\ncommand = \"npx\"\nargs = [\"-y\", \"server{n}@1.0.0\"]\nenv_vars = [\"KEY\"]\n\n"));
+        toml.push_str(&format!(
+            "[mcp_servers.server{n}]\ncommand = \"npx\"\nargs = [\"-y\", \"server{n}@1.0.0\"]\nenv_vars = [\"KEY\"]\n\n"
+        ));
     }
     let docs = "    \"docs\": { \"url\": \"https://docs.example.com/mcp\" }\n  }\n}\n";
     json.push_str(docs);
