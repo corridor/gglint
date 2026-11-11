@@ -108,7 +108,10 @@ fn mcp(args: &[String]) -> ExitCode {
             Some("table") => McpView::Table,
             Some("lines") => McpView::Lines,
             other => {
-                eprintln!("error: unknown format {:?}; use `table` or `lines`", other.unwrap_or(""));
+                eprintln!(
+                    "error: unknown format {:?}; use `table` or `lines`",
+                    other.unwrap_or("")
+                );
                 return ExitCode::FAILURE;
             }
         };
@@ -192,7 +195,11 @@ fn mcp(args: &[String]) -> ExitCode {
         eprintln!("No MCP config files found.");
         return ExitCode::FAILURE;
     }
-    if problems == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if problems == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 /// What `--fix` changed, file by file, and what it left as it was.
@@ -217,7 +224,11 @@ fn print_fixes(report: &FixReport) {
                 }
             })
             .collect();
-        let width = labels.iter().map(|label| label.chars().count()).max().unwrap_or_default();
+        let width = labels
+            .iter()
+            .map(|label| label.chars().count())
+            .max()
+            .unwrap_or_default();
         let count = report.changed.len();
         out.push_str(&format!("Changed {count} file{}:\n", if count == 1 { "" } else { "s" }));
         for (file, label) in report.changed.iter().zip(&labels) {
@@ -333,7 +344,12 @@ fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
             // Centred: each symbol is one column wide.
             let left = (width - 1) / 2;
             let right = width - 1 - left;
-            out.push_str(&format!(" {}{}{} │", " ".repeat(left), paint.cell(cell), " ".repeat(right)));
+            out.push_str(&format!(
+                " {}{}{} │",
+                " ".repeat(left),
+                paint.cell(cell),
+                " ".repeat(right)
+            ));
         }
         out.push('\n');
     }
@@ -351,7 +367,11 @@ fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
         print!("{out}");
         return;
     }
-    let count = if problems == 1 { "1 problem".to_string() } else { format!("{problems} problems") };
+    let count = if problems == 1 {
+        "1 problem".to_string()
+    } else {
+        format!("{problems} problems")
+    };
     out.push_str(&paint.bold(&count));
     out.push('\n');
     for check in checks.iter().filter(|check| !check.findings.is_empty()) {
