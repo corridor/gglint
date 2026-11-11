@@ -3,28 +3,26 @@
 **Give every coding agent in your repository the same MCP servers.**
 
 Claude Code, Codex, Cursor and OpenCode each read their MCP servers from their own file, in
-their own format. When a repository keeps config files for more than one of them, the files
-drift: someone adds a server to `.mcp.json` and forgets `.cursor/mcp.json`. `gglint mcp`
-reads every agent's config file, shows which file has which server, and adds the servers a
-file is missing, written the way that agent expects.
-
-It only adds. Nothing already in your files is changed or removed, and no config file is
-created.
+their own format. When a team uses more than one, the files drift: someone adds a server to
+`.mcp.json` and forgets `.cursor/mcp.json`, pins a version in one file and not another, or
+never gives an agent an MCP config file at all. `gglint mcp` reads every agent's config,
+shows which agent gets which server, and reports each difference. `--fix` adds the missing
+servers, written the way each agent expects, and changes nothing else.
 
 ```console
 $ gglint mcp
 MCP servers in acme-app
 
-  ╭────────────┬─────────────┬───────┬────────╮
-  │ Server     │ Claude Code │ Codex │ Cursor │
-  ├────────────┼─────────────┼───────┼────────┤
-  │ github     │      ✓      │   ✗   │   ✗    │
-  │ playwright │      ✓      │   ✗   │   ✓    │
-  │ linear     │      ✗      │   ✗   │   ✓    │
-  ╰────────────┴─────────────┴───────┴────────╯
-  ✓ set up   ✗ missing   ○ turned off
+  ╭────────────┬─────────────┬───────┬────────┬──────────╮
+  │ Server     │ Claude Code │ Codex │ Cursor │ OpenCode │
+  ├────────────┼─────────────┼───────┼────────┼──────────┤
+  │ github     │      ✓      │   ✗   │   ✗    │    ✗     │
+  │ playwright │      ✓      │   ✗   │   ≠    │    ✗     │
+  │ linear     │      ✗      │   ✗   │   ✓    │    ✗     │
+  ╰────────────┴─────────────┴───────┴────────┴──────────╯
+  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
 
-3 problems
+6 problems
 
   github
     ✗ Missing from Codex and Cursor.
@@ -33,19 +31,28 @@ MCP servers in acme-app
   playwright
     ✗ Missing from Codex.
       Add it to .codex/config.toml, as set up in .mcp.json:8
+    ≠ Runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor.
+      .mcp.json:8, .cursor/mcp.json:3
+    ≠ Started with different arguments: `--headless` in Claude Code; no arguments in Cursor.
+      .mcp.json:8, .cursor/mcp.json:3
 
   linear
     ✗ Missing from Claude Code and Codex.
       Add it to .mcp.json and .codex/config.toml, as set up in .cursor/mcp.json:7
+
+  Missing config files
+    ✗ OpenCode has a .opencode directory but no opencode.json.
+      `gglint mcp --fix --create` creates opencode.json with the 3 MCP servers set up for Claude Code and Cursor
 ```
 
 It never runs your MCP servers, never downloads anything, never prints a secret, and reads a
 repository in under a millisecond.
 
 **Why it matters.** In November 2026 we checked the 258 most-starred GitHub repositories set
-up for two or more of these agents. 81 of them keep MCP config files for two or more agents,
-and in 25 of those (31%) a server in one agent's file was missing from another's: 48 missing
-entries in all.
+up for two or more of these agents. 179 of them configure MCP servers, and 128 of those (72%)
+had at least one of these problems: 99 had an agent with its own directory and no MCP config
+file, 25 had a server missing from another agent's config file, and 21 set up the same server
+differently in two agents.
 
 ## Contents
 
@@ -77,8 +84,9 @@ cargo install --git https://github.com/corridor/gglint --locked
 Run it from the root of a repository, or give it the path:
 
 ```sh
-gglint mcp                  # find the servers each config file is missing
-gglint mcp --fix            # add them, changing nothing else
+gglint mcp                  # report every problem, and draw each server in each agent
+gglint mcp --fix            # add the servers missing from existing config files
+gglint mcp --fix --create   # also create the config file an agent is missing
 gglint mcp --format lines   # one line per problem, for editors and CI
 gglint mcp --servers        # list every server, file by file
 gglint mcp path/to/repo
@@ -86,8 +94,8 @@ gglint mcp path/to/repo
 
 | Exit status | Meaning |
 | ----------- | ------- |
-| 0           | Every MCP config file has every server |
-| 1           | A server is missing from a config file (or still is after `--fix`), or there are no MCP config files |
+| 0           | Every agent gets the same servers, set up the same way |
+| 1           | A problem was found (or is left after `--fix`), or there are no MCP config files |
 
 Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The last line,
 with the counts and the time taken, goes to standard error.
@@ -95,7 +103,7 @@ with the counts and the time taken, goes to standard error.
 ### Fixing
 
 `--fix` adds each missing server to the config file that's missing it, then draws the table
-again:
+again with what's left:
 
 ```console
 $ gglint mcp --fix
@@ -124,20 +132,31 @@ Each server is written the way its agent expects. The same `github` server becam
 +    }
 ```
 
-`playwright` runs `@playwright/mcp@0.0.78 --headless` in Claude Code and the newest version
-in Cursor. gglint doesn't report or change that: see [What gglint reports](#what-gglint-reports).
+What's left is for you to decide: `playwright` still runs another version, with other
+arguments, in Cursor, and OpenCode still has no config file. `--fix --create` creates it:
+
+```console
+$ gglint mcp --fix --create
+Changed 1 file:
+  opencode.json (new)   added github, playwright, linear
+```
 
 ### Other formats
 
-`--format lines` prints one line per problem: where the server is set up, the rule, and a
-sentence naming the server, then where else it's set up.
+`--format lines` prints one line per problem: where it is, the rule, and a sentence naming
+the server or agent, then where else the server is set up.
 
 ```console
 $ gglint mcp --format lines
 ./.mcp.json:3:5  missing-server   `github` is set up for Claude Code but not for Codex (.codex/config.toml) or Cursor (.cursor/mcp.json)
 ./.mcp.json:8:5  missing-server   `playwright` is set up for Claude Code and Cursor but not for Codex (.codex/config.toml)
     also at ./.cursor/mcp.json:3:5
+./.mcp.json:8:5  different-server `playwright` runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor
+    also at ./.cursor/mcp.json:3:5
+./.mcp.json:8:5  different-server `playwright` is started with different arguments: `--headless` in Claude Code; no arguments in Cursor
+    also at ./.cursor/mcp.json:3:5
 ./.cursor/mcp.json:7:5  missing-server   `linear` is set up for Cursor but not for Claude Code (.mcp.json) or Codex (.codex/config.toml)
+./.mcp.json:3:5  missing-config   OpenCode has a .opencode directory but no opencode.json, so it gets none of the 3 MCP servers set up for Claude Code and Cursor
 ```
 
 `--servers` lists every server as it's written, with the names of its environment variables
@@ -153,41 +172,41 @@ $ gglint mcp --servers
 
 ## Supported agents
 
-| Agent       | MCP config file                   | Format                                                                 |
-| ----------- | --------------------------------- | ---------------------------------------------------------------------- |
-| Claude Code | `.mcp.json`                       | JSON, `mcpServers`                                                     |
-| Codex       | `.codex/config.toml`              | TOML, `[mcp_servers.<name>]`                                           |
-| Cursor      | `.cursor/mcp.json`                | JSON, `mcpServers`                                                     |
-| OpenCode    | `opencode.json`, `opencode.jsonc` | JSON with comments, `mcp.servers` (or `mcp` before V2); the command is one list |
+| Agent       | MCP config file                   | Its directory | Format                                                                 |
+| ----------- | --------------------------------- | ------------- | ---------------------------------------------------------------------- |
+| Claude Code | `.mcp.json`                       | `.claude/`    | JSON, `mcpServers`                                                     |
+| Codex       | `.codex/config.toml`              | `.codex/`     | TOML, `[mcp_servers.<name>]`                                           |
+| Cursor      | `.cursor/mcp.json`                | `.cursor/`    | JSON, `mcpServers`                                                     |
+| OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`  | JSON with comments, `mcp.servers` (or `mcp` before V2); the command is one list |
 
-Only the agents with an MCP config file at the repository's root are compared. An agent your
-team uses without one, such as a `.cursor/` directory with no `mcp.json`, is left alone: its
-users may not want MCP servers, and gglint doesn't create config files. A config file with no
-servers in it, such as a `.codex/config.toml` that only sets the model, counts.
+The agents compared are those with an MCP config file or their own directory at the
+repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` alone doesn't count: it says
+people use an agent, not that the repository sets it up.
 
 ## What gglint reports
 
-One rule:
-
-| Rule             | Reported when                                                                                   |
-| ---------------- | ----------------------------------------------------------------------------------------------- |
-| `missing-server` | A server set up in one agent's MCP config file isn't in another agent's. The message names the file to add it to. |
+| Rule               | Reported when                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------- |
+| `missing-server`   | A server set up in one agent's MCP config file isn't in another agent's. `--fix` adds it.       |
+| `missing-config`   | An agent has its own directory but no MCP config file, while other agents have servers. `--fix --create` creates the file. |
+| `different-server` | The same server runs another program, URL or version, with other arguments, environment variables or headers, or is turned off in one agent. Reported only. |
+| `renamed-server`   | The same server has another name in some agents. Reported only.                                 |
 
 **Servers are matched by name, and then by what they run**, so a server under another name
-in one file is still there. How a server is started doesn't matter: `npx -y pkg`,
-`npx --yes pkg@latest`, `pnpm dlx pkg`, `yarn dlx pkg`, `bunx pkg` and `bun x pkg` all run
-the npm package `pkg`, `uvx pkg`, `uv tool run pkg` and `pipx run pkg` the PyPI package `pkg`,
-and `npx mcp-remote <url>` reaches the server at `<url>`. References to an environment
-variable mean the same in every agent's syntax: `${KEY}` in Claude Code and `${env:KEY}` in
-Cursor are the same argument.
+in one agent is still the same server (and reported as `renamed-server`, not missing). How a
+server is started doesn't count as a difference: `npx -y pkg`, `npx --yes pkg@latest`,
+`pnpm dlx pkg`, `yarn dlx pkg`, `bunx pkg` and `bun x pkg` all run the npm package `pkg`,
+`uvx pkg`, `uv tool run pkg` and `pipx run pkg` the PyPI package `pkg`, and
+`npx mcp-remote <url>` reaches the server at `<url>`. No version and `latest` both mean the
+newest version. References to an environment variable mean the same in every agent's
+syntax: `${KEY}` in Claude Code and `${env:KEY}` in Cursor are the same argument.
 
-**How each file sets a server up isn't compared.** Another version, other arguments, other
-environment variables or headers, or another program under the same name: in real
-repositories these are usually deliberate, such as each agent running its own runtime or
-port. gglint leaves them to you.
+**Environment variables and headers** are compared by name only: their values can be secrets,
+and each agent writes references to the environment differently.
 
-**A server turned off** (`enabled = false` in Codex or OpenCode) still counts as set up in
-that file. A server turned off in every file that has it isn't missing anywhere.
+**A server turned off** (`enabled = false` in Codex or OpenCode) is reported as a difference
+from the agents where it's on, and isn't copied anywhere. A server turned off in every agent
+that has it isn't missing anywhere.
 
 ## How `--fix` works
 
@@ -195,7 +214,11 @@ that file. A server turned off in every file that has it isn't missing anywhere.
 
 - **A missing server** is added to the agent's config file, copied from the first file where
   it's turned on.
-- **No config file is created.** Only files that are already there are written.
+- **A config file is created only with `--create`**, and only for an agent with its own
+  directory. It gets every server turned on in the other agents.
+- **A server set up differently is never changed.** Those differences are reported, and are
+  often deliberate: each agent running its own runtime or port, or setting its own
+  environment. Decide which setup is right and edit it yourself.
 - **Comments and formatting are kept**: JSON is edited with
   [jsonc-parser](https://github.com/dprint/jsonc-parser)'s CST and TOML with
   [toml_edit](https://github.com/toml-rs/toml). Running `--fix` again changes nothing.
@@ -222,8 +245,7 @@ a reference to an environment variable in a command line, which Codex can't fill
 
 ## Use in CI
 
-`gglint mcp` exits with status 1 when a config file is missing a server, so it can fail a
-build:
+`gglint mcp` exits with status 1 when it finds a problem, so it can fail a build:
 
 ```yaml
 # .github/workflows/mcp.yml
@@ -253,7 +275,7 @@ jobs:
 ## Limitations
 
 - **Claude Code plugins.** Servers a plugin adds, turned on in `.claude/settings.json`, aren't
-  read, so a server another agent's file has can be reported missing from `.mcp.json`.
+  read, so a server another agent's file has can be reported missing from Claude Code.
 - **Settings outside the repository**, such as each person's `~/.claude.json` or
   `~/.codex/config.toml`, aren't read.
 - **Other agents**, such as VS Code and GitHub Copilot (`.vscode/mcp.json`) or Gemini CLI
@@ -266,15 +288,15 @@ jobs:
 ```rust
 use std::path::Path;
 
-use gglint::harness::{check_mcp, fix_mcp, read_mcp};
+use gglint::harness::{FixOptions, check_mcp, fix_mcp, read_mcp};
 
 let root = Path::new("path/to/repo");
 let configs = read_mcp(root); // each agent's MCP config file, and its servers
-let checks = check_mcp(&configs); // each server in each config file
-for finding in checks.iter().flat_map(|check| &check.findings) {
+let check = check_mcp(root, &configs); // each server in each agent, and every problem
+for finding in check.findings() {
     println!("{}: {}", finding.rule.as_str(), finding.message);
 }
-let report = fix_mcp(root, &configs, &checks); // add what's missing
+let report = fix_mcp(root, &configs, &check, &FixOptions::default()); // add what's missing
 ```
 
 ## Development
@@ -284,8 +306,9 @@ cargo test
 ```
 
 `tests/corpus.rs` checks `--fix` against real repositories. Point it at a directory of clones,
-and it fixes a copy of each and fails if anything that was there is removed or changed, if a
-config file is created or can't be read afterwards, if there are more problems after than
+and it fixes a copy of each, with and without `--create`, and fails if anything that was there
+is removed or changed, if a config file is created without `--create` or where the agent has
+no directory, if a config can't be read afterwards, if there are more problems after than
 before, or if a second run changes anything:
 
 ```sh
@@ -293,7 +316,7 @@ GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --n
 ```
 
 The code is in [`src/harness/`](src/harness/): `mcp.rs` reads each agent's file, `compare.rs`
-finds the servers each file is missing, and `fix.rs` adds them.
+finds the problems, and `fix.rs` adds the missing servers.
 
 ## License
 

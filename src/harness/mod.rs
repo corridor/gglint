@@ -2,15 +2,18 @@
 //!
 //! - `mcp.rs` reads the MCP servers Claude Code, Codex, Cursor and OpenCode are each set up
 //!   to use.
-//! - `compare.rs` finds the servers each config file is missing.
-//! - `fix.rs` adds them.
+//! - `compare.rs` finds how they differ: missing servers, missing config files, and servers
+//!   set up differently.
+//! - `fix.rs` adds the missing servers, and with `--create` the missing config files.
 
 mod compare;
 mod fix;
 mod mcp;
 
-pub use compare::{Cell, Finding, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp};
-pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
+pub use compare::{
+    Cell, Finding, McpCheck, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp, compared_harnesses,
+};
+pub use fix::{ChangedFile, FixOptions, FixReport, Unfixed, fix_mcp};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
@@ -47,6 +50,17 @@ impl Harness {
     /// The file it reads a repository's MCP servers from, relative to the root.
     pub fn mcp_file(self) -> &'static str {
         mcp::mcp_file(self)
+    }
+
+    /// Its own directory in a repository. When it's there, the repository is set up for the
+    /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
+    pub fn directory(self) -> &'static str {
+        match self {
+            Harness::ClaudeCode => ".claude",
+            Harness::Codex => ".codex",
+            Harness::Cursor => ".cursor",
+            Harness::OpenCode => ".opencode",
+        }
     }
 }
 

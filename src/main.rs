@@ -1,8 +1,8 @@
 //! The `gglint` command.
 //!
 //! ```text
-//! gglint mcp [--fix] [--format F] [PATH]
-//!                               find the servers each MCP config file is missing, and add them
+//! gglint mcp [--fix [--create]] [--format F] [PATH]
+//!                               compare each agent's MCP servers, and add the missing ones
 //! gglint mcp --servers [PATH]   list every server
 //! ```
 
@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use gglint::harness::{
-    Cell, Finding, FixReport, Harness, McpConfig, McpServer, ServerCheck, Setting, Transport, check_mcp, fix_mcp,
+    Cell, Finding, FixOptions, FixReport, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp, fix_mcp,
     read_mcp,
 };
 
@@ -20,13 +20,14 @@ const USAGE: &str = "\
 Keeps the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
 
 Usage:
-  gglint mcp [PATH]                 find the servers each MCP config file is missing
-  gglint mcp --fix [PATH]           add them, changing nothing else
+  gglint mcp [PATH]                 compare each coding agent's MCP servers
+  gglint mcp --fix [PATH]           add the servers missing from a config file
+  gglint mcp --fix --create [PATH]  also create the config file an agent is missing
   gglint mcp --servers [PATH]       list every server, file by file
   gglint mcp --format lines [PATH]  one line per problem, for scripts and CI
 
-PATH is the repository's root, the current directory by default. Only the agents with an
-MCP config file there are compared, and `--fix` never creates one.
+PATH is the repository's root, the current directory by default. `--fix` only adds: a
+server set up differently in two files is reported and never changed.
 ";
 
 fn main() -> ExitCode {
@@ -67,6 +68,7 @@ enum McpView {
 fn mcp(args: &[String]) -> ExitCode {
     let mut view = McpView::Table;
     let mut fix = false;
+    let mut options = FixOptions::default();
     let mut path = ".";
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -77,6 +79,12 @@ fn mcp(args: &[String]) -> ExitCode {
             }
             "--fix" => {
                 fix = true;
+                continue;
+            }
+            // Creating a config file is a way of fixing.
+            "--create" => {
+                fix = true;
+                options.create = true;
                 continue;
             }
             "--help" | "-h" => {
@@ -116,13 +124,17 @@ fn mcp(args: &[String]) -> ExitCode {
     }
     let start = Instant::now();
     let configs = read_mcp(root);
-    let mut checks = if view == McpView::Servers { Vec::new() } else { check_mcp(&configs) };
+    let mut check = if view == McpView::Servers {
+        McpCheck::default()
+    } else {
+        check_mcp(root, &configs)
+    };
     let elapsed = start.elapsed();
     // After fixing, everything below is about the files as they are now.
     let configs = if fix {
-        print_fixes(&fix_mcp(root, &configs, &checks));
+        print_fixes(&fix_mcp(root, &configs, &check, &options));
         let configs = read_mcp(root);
-        checks = check_mcp(&configs);
+        check = check_mcp(root, &configs);
         configs
     } else {
         configs
@@ -140,14 +152,11 @@ fn mcp(args: &[String]) -> ExitCode {
             }
         }
     }
-    let problems: usize = checks.iter().map(|check| check.findings.len()).sum();
-    // The agents compared: those with a config file.
-    let mut harnesses: Vec<Harness> = configs.iter().map(|config| config.harness).collect();
-    harnesses.dedup();
+    let problems = check.findings().count();
     match view {
-        McpView::Table if !configs.is_empty() => draw_mcp(root, &harnesses, &checks, problems),
+        McpView::Table if !configs.is_empty() => draw_mcp(root, &check, problems),
         McpView::Lines => {
-            for finding in checks.iter().flat_map(|check| &check.findings) {
+            for finding in check.findings() {
                 print_finding(finding);
             }
         }
@@ -164,7 +173,7 @@ fn mcp(args: &[String]) -> ExitCode {
             with_servers.len(),
         );
     } else {
-        let names: Vec<&str> = harnesses.iter().map(|harness| harness.display_name()).collect();
+        let names: Vec<&str> = check.harnesses.iter().map(|harness| harness.display_name()).collect();
         let names = match names.as_slice() {
             [] => "no agent".to_string(),
             [only] => only.to_string(),
@@ -197,10 +206,14 @@ fn print_fixes(report: &FixReport) {
             .changed
             .iter()
             .map(|file| {
-                if file.ignored {
-                    format!("{} (gitignored)", file.relative_path.display())
-                } else {
+                let notes: Vec<&str> = [(file.created, "new"), (file.ignored, "gitignored")]
+                    .into_iter()
+                    .filter_map(|(on, note)| on.then_some(note))
+                    .collect();
+                if notes.is_empty() {
                     file.relative_path.display().to_string()
+                } else {
+                    format!("{} ({})", file.relative_path.display(), notes.join(", "))
                 }
             })
             .collect();
@@ -264,15 +277,18 @@ impl Paint {
 
     fn cell(&self, cell: Cell) -> String {
         match cell {
-            Cell::Present => self.paint("32", "✓"),
+            Cell::Same => self.paint("32", "✓"),
+            Cell::Different => self.paint("33", "≠"),
             Cell::Missing => self.paint("31", "✗"),
             Cell::Off => self.dim("○"),
         }
     }
 }
 
-/// Draws each server in each agent's config file as a table, then what each file is missing.
-fn draw_mcp(root: &Path, harnesses: &[Harness], checks: &[ServerCheck], problems: usize) {
+/// Draws each server in each agent as a table, then the problems under each server, then the
+/// agents missing a config file.
+fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
+    let (harnesses, checks) = (&check.harnesses, &check.servers);
     let paint = Paint::new();
     let repository = std::fs::canonicalize(root)
         .ok()
@@ -323,14 +339,15 @@ fn draw_mcp(root: &Path, harnesses: &[Harness], checks: &[ServerCheck], problems
     }
     out.push_str(&border("╰", "┴", "╯"));
     out.push_str(&format!(
-        "  {} set up   {} missing   {} turned off\n\n",
-        paint.cell(Cell::Present),
+        "  {} set up   {} set up differently   {} missing   {} turned off\n\n",
+        paint.cell(Cell::Same),
+        paint.cell(Cell::Different),
         paint.cell(Cell::Missing),
         paint.cell(Cell::Off),
     ));
 
     if problems == 0 {
-        out.push_str("No problems: every config file has every server.\n");
+        out.push_str("No problems: every agent gets the same servers, set up the same way.\n");
         print!("{out}");
         return;
     }
@@ -340,11 +357,33 @@ fn draw_mcp(root: &Path, harnesses: &[Harness], checks: &[ServerCheck], problems
     for check in checks.iter().filter(|check| !check.findings.is_empty()) {
         out.push_str(&format!("\n  {}\n", paint.bold(&check.name)));
         for finding in &check.findings {
-            out.push_str(&format!("    {} {}\n", paint.cell(Cell::Missing), finding.detail));
-            out.push_str(&format!("      {}\n", paint.dim(&finding.fix)));
+            out.push_str(&describe(&paint, finding));
+        }
+    }
+    if !check.missing_configs.is_empty() {
+        out.push_str(&format!("\n  {}\n", paint.bold("Missing config files")));
+        for finding in &check.missing_configs {
+            out.push_str(&describe(&paint, finding));
         }
     }
     print!("{out}");
+}
+
+/// A finding under its heading: what's wrong, then how to fix it or where to look.
+fn describe(paint: &Paint, finding: &Finding) -> String {
+    let symbol = match finding.rule {
+        Rule::MissingServer | Rule::MissingConfig => paint.cell(Cell::Missing),
+        Rule::DifferentServer | Rule::RenamedServer => paint.cell(Cell::Different),
+    };
+    let next = match &finding.fix {
+        Some(fix) => fix.clone(),
+        None => std::iter::once(&finding.site)
+            .chain(&finding.related)
+            .map(|site| format!("{}:{}", site.relative_path.display(), site.location.line))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
+    format!("    {symbol} {}\n      {}\n", finding.detail, paint.dim(&next))
 }
 
 fn print_finding(finding: &Finding) {
