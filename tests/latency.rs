@@ -53,7 +53,7 @@ fn reads_and_compares_mcp_configs_within_budget() {
         .map(|_| {
             let start = Instant::now();
             let configs = read_mcp(dir.path());
-            let findings = compare_mcp(&configs);
+            let findings = compare_mcp(dir.path(), &configs);
             let elapsed = start.elapsed();
             assert_eq!(configs.iter().map(|config| config.servers.len()).sum::<usize>(), 83);
             // Codex is the only one without `docs`.

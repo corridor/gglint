@@ -7,7 +7,8 @@ use std::path::Path;
 use common::TempDir;
 use gglint::harness::Location;
 use gglint::harness::{
-    Cell, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp, read_mcp,
+    Cell, FixOptions, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp,
+    compare_mcp, fix_mcp, read_mcp,
 };
 
 fn setting(name: &str, value: &[Part]) -> Setting {
@@ -340,7 +341,7 @@ fn a_server_without_a_command_or_url_gives_a_warning() {
 
 /// Each finding as `path:line  rule  message`.
 fn findings(dir: &TempDir) -> Vec<String> {
-    compare_mcp(&read_mcp(dir.path()))
+    compare_mcp(dir.path(), &read_mcp(dir.path()))
         .iter()
         .map(|finding| {
             format!(
@@ -375,28 +376,58 @@ fn ggx_like() -> TempDir {
 }
 
 #[test]
-fn reports_servers_missing_from_another_config_file() {
+fn reports_each_kind_of_problem() {
     let dir = ggx_like();
 
-    // Claude Code has no `.mcp.json`, so it isn't compared. `angular-cli` is in both files,
-    // started with other arguments, which isn't reported.
     assert_eq!(
         findings(&dir),
-        [".codex/config.toml:1  missing-server  `code-review-graph` is set up for Codex but not for Cursor \
-          (.cursor/mcp.json)"]
+        [
+            ".codex/config.toml:1  missing-server  `code-review-graph` is set up for Codex but not for Cursor \
+             (.cursor/mcp.json)",
+            ".codex/config.toml:5  different-server  `angular-cli` is started with different arguments: \
+             `mcp --read-only` in Codex; `mcp` in Cursor",
+            ".codex/config.toml:1  missing-config  Claude Code has a .claude directory but no .mcp.json, so it gets \
+             none of the 2 MCP servers set up for Codex and Cursor",
+        ]
     );
 }
 
 #[test]
-fn agents_without_an_mcp_config_file_are_left_out() {
+fn an_agent_known_only_from_claude_md_or_cursorrules_is_left_out() {
     let dir = TempDir::new();
-    dir.write(".claude/settings.json", "{}\n");
     dir.write("CLAUDE.md", "@AGENTS.md\n");
+    dir.write(".cursorrules", "Be brief.\n");
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
+    );
+
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn an_agent_directory_without_a_config_file_is_missing_one() {
+    let dir = TempDir::new();
     dir.write(".cursor/rules/style.mdc", "Be brief.\n");
     dir.write(
         ".codex/config.toml",
         "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
     );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".codex/config.toml:1  missing-config  Cursor has a .cursor directory but no .cursor/mcp.json, so it gets \
+          none of the MCP server set up for Codex"
+        ]
+    );
+}
+
+#[test]
+fn no_config_file_is_missing_when_no_agent_has_servers() {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(".codex/config.toml", "model = \"gpt-5\"\n");
 
     assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
 }
@@ -425,24 +456,96 @@ fn the_same_package_started_another_way_is_the_same_server() {
 }
 
 #[test]
-fn how_a_server_is_set_up_is_not_compared() {
+fn reports_different_versions_of_a_package() {
     let dir = TempDir::new();
-    // Other versions, another program under the same name, other environment variables and
-    // headers: each is often deliberate.
     dir.write(
         ".mcp.json",
-        mcp_servers(
-            r#""lint": { "command": "npx", "args": ["-y", "lint-mcp@1.2.0"], "env": { "TOKEN": "${TOKEN}" } },
-               "docs": { "type": "http", "url": "https://docs.example.com/mcp", "headers": { "X-Key": "${KEY}" } }"#,
-        ),
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp@1.2.0"] }"#),
     );
     dir.write(
         ".codex/config.toml",
-        "[mcp_servers.lint]\ncommand = \"npx\"\nargs = [\"-y\", \"lint-mcp@1.3.0\", \"--strict\"]\n\n\
-         [mcp_servers.docs]\ncommand = \"uvx\"\nargs = [\"docs-mcp==2.0\"]\n",
+        "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"docs-mcp@1.3.0\"]\n",
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp"] }"#),
     );
 
-    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `docs` runs different versions of the npm package `docs-mcp`: 1.2.0 \
+          in Claude Code; 1.3.0 in Codex; the newest in Cursor"
+        ]
+    );
+}
+
+#[test]
+fn reports_a_different_server_under_the_same_name() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "type": "http", "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"uvx\"\nargs = [\"docs-mcp==2.0\"]\n",
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `docs` is a different server in each file: \
+          https://docs.example.com/mcp in Claude Code; the PyPI package `docs-mcp` in Codex"
+        ]
+    );
+}
+
+#[test]
+fn reports_different_environment_variables_and_headers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(
+            r#""angular-cli": { "command": "npx", "args": ["@angular/cli", "mcp"], "env": { "NG_TOKEN": "${NG_TOKEN}" } },
+               "docs": { "url": "https://docs.example.com/mcp", "headers": { "Authorization": "Bearer ${KEY}" } }"#,
+        ),
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        mcp_servers(
+            r#""angular-cli": { "command": "npx", "args": ["@angular/cli", "mcp"] },
+               "docs": { "url": "https://docs.example.com/mcp" }"#,
+        ),
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  different-server  `angular-cli` is given different environment variables: NG_TOKEN in \
+             Claude Code; none in Cursor",
+            ".mcp.json:2  different-server  `docs` is sent different HTTP headers: Authorization in Claude Code; \
+             none in Cursor",
+        ]
+    );
+}
+
+#[test]
+fn reports_a_server_turned_off_in_one_file() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\nenabled = false\n",
+    );
+
+    assert_eq!(
+        findings(&dir),
+        [".codex/config.toml:1  different-server  `docs` is turned off in Codex but not in Claude Code"]
+    );
 }
 
 #[test]
@@ -457,13 +560,20 @@ fn matches_a_renamed_server_by_what_it_runs() {
         "[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\"]\n",
     );
 
-    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  renamed-server  One server has different names: `angular` in Claude Code; `angular-cli` \
+          in Codex"
+        ]
+    );
 }
 
 #[test]
 fn a_server_reached_through_mcp_remote_is_the_server_at_its_url() {
     let dir = TempDir::new();
-    // As in zeon-studio/astroplate: the same server, named and reached differently.
+    // As in zeon-studio/astroplate: the same server, named and reached differently. It isn't
+    // missing from either file.
     dir.write(
         ".mcp.json",
         mcp_servers(r#""Astro docs": { "type": "http", "url": "https://mcp.docs.astro.build/mcp" }"#),
@@ -473,7 +583,12 @@ fn a_server_reached_through_mcp_remote_is_the_server_at_its_url() {
         "[mcp_servers.astro-docs]\ncommand = \"npx\"\nargs = [\"-y\", \"mcp-remote\", \"https://mcp.docs.astro.build/mcp\"]\n",
     );
 
-    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+    assert_eq!(
+        findings(&dir),
+        [
+            ".mcp.json:1  renamed-server  One server has different names: `Astro docs` in Claude Code; `astro-docs` in Codex"
+        ]
+    );
 }
 
 #[test]
@@ -491,8 +606,11 @@ fn a_server_is_copied_from_the_first_file_where_it_is_turned_on() {
 
     assert_eq!(
         findings(&dir),
-        ["opencode.json:1  missing-server  `docs` is set up for Codex and OpenCode but not for Cursor \
-          (.cursor/mcp.json)"]
+        [
+            "opencode.json:1  missing-server  `docs` is set up for Codex and OpenCode but not for Cursor \
+             (.cursor/mcp.json)",
+            ".codex/config.toml:1  different-server  `docs` is turned off in Codex but not in OpenCode",
+        ]
     );
 }
 
@@ -509,33 +627,44 @@ fn a_server_turned_off_everywhere_is_not_missing() {
 }
 
 // ---------------------------------------------------------------------------
-// Each server in each config file
+// Each server in each agent
 // ---------------------------------------------------------------------------
 
-/// Each server's name and its cell in each agent with a config file.
+/// Each server's name and its cell in each agent compared.
 fn table(dir: &TempDir) -> Vec<(String, Vec<(Harness, Cell)>)> {
-    check_mcp(&read_mcp(dir.path()))
+    check_mcp(dir.path(), &read_mcp(dir.path()))
+        .servers
         .into_iter()
         .map(|check| (check.name, check.cells))
         .collect()
 }
 
 #[test]
-fn gives_each_server_a_cell_in_each_config_file() {
-    use Harness::{Codex, Cursor};
+fn gives_each_server_a_cell_in_each_agent() {
+    use Harness::{ClaudeCode, Codex, Cursor};
 
     let dir = ggx_like();
 
+    // Claude Code has its directory and no config file: every server is missing from it.
     assert_eq!(
         table(&dir),
         [
             (
                 "code-review-graph".to_string(),
-                vec![(Codex, Cell::Present), (Cursor, Cell::Missing)]
+                vec![
+                    (ClaudeCode, Cell::Missing),
+                    (Codex, Cell::Same),
+                    (Cursor, Cell::Missing)
+                ]
             ),
+            // Compared with the first file that has it: Codex's.
             (
                 "angular-cli".to_string(),
-                vec![(Codex, Cell::Present), (Cursor, Cell::Present)]
+                vec![
+                    (ClaudeCode, Cell::Missing),
+                    (Codex, Cell::Same),
+                    (Cursor, Cell::Different)
+                ]
             ),
         ]
     );
@@ -557,29 +686,39 @@ fn a_server_turned_off_is_off_in_that_file() {
         table(&dir),
         [(
             "docs".to_string(),
-            vec![(Harness::ClaudeCode, Cell::Present), (Harness::Codex, Cell::Off)]
+            vec![(Harness::ClaudeCode, Cell::Same), (Harness::Codex, Cell::Off)]
         )]
     );
-    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
 }
 
 #[test]
 fn describes_each_finding_and_how_to_fix_it() {
     let dir = ggx_like();
 
-    let checks = check_mcp(&read_mcp(dir.path()));
+    let check = check_mcp(dir.path(), &read_mcp(dir.path()));
 
-    let described: Vec<(&str, &str)> = checks
-        .iter()
-        .flat_map(|check| &check.findings)
-        .map(|finding| (finding.detail.as_str(), finding.fix.as_str()))
+    let described: Vec<(&str, Option<&str>)> = check
+        .findings()
+        .map(|finding| (finding.detail.as_str(), finding.fix.as_deref()))
         .collect();
     assert_eq!(
         described,
-        [(
-            "Missing from Cursor.",
-            "Add it to .cursor/mcp.json, as set up in .codex/config.toml:1"
-        )]
+        [
+            (
+                "Missing from Cursor.",
+                Some("Add it to .cursor/mcp.json, as set up in .codex/config.toml:1")
+            ),
+            (
+                "Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.",
+                None
+            ),
+            (
+                "Claude Code has a .claude directory but no .mcp.json.",
+                Some(
+                    "`gglint mcp --fix --create` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor"
+                )
+            ),
+        ]
     );
 }
 
@@ -588,10 +727,14 @@ fn describes_each_finding_and_how_to_fix_it() {
 // ---------------------------------------------------------------------------
 
 /// Adds the servers missing from the config files in `dir`, then checks them again.
-fn fix(dir: &TempDir) -> (gglint::harness::FixReport, Vec<String>) {
+fn fix(dir: &TempDir) -> (FixReport, Vec<String>) {
+    fix_with(dir, FixOptions::default())
+}
+
+fn fix_with(dir: &TempDir, options: FixOptions) -> (FixReport, Vec<String>) {
     let configs = read_mcp(dir.path());
-    let checks = check_mcp(&configs);
-    let report = fix_mcp(dir.path(), &configs, &checks);
+    let check = check_mcp(dir.path(), &configs);
+    let report = fix_mcp(dir.path(), &configs, &check, &options);
     (report, findings(dir))
 }
 
@@ -627,18 +770,24 @@ fn fix_adds_a_missing_server_in_each_harness_format() {
 
     assert!(left.is_empty(), "{left:?}");
     assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
-    let changed: Vec<(String, Vec<String>)> = report
+    let changed: Vec<(String, bool, Vec<String>)> = report
         .changed
         .iter()
-        .map(|file| (file.relative_path.display().to_string(), file.added.clone()))
+        .map(|file| {
+            (
+                file.relative_path.display().to_string(),
+                file.created,
+                file.added.clone(),
+            )
+        })
         .collect();
     let both = vec!["docs".to_string(), "search".to_string()];
     assert_eq!(
         changed,
         [
-            (".codex/config.toml".to_string(), both.clone()),
-            (".cursor/mcp.json".to_string(), both.clone()),
-            ("opencode.json".to_string(), both),
+            (".codex/config.toml".to_string(), false, both.clone()),
+            (".cursor/mcp.json".to_string(), false, both.clone()),
+            ("opencode.json".to_string(), false, both),
         ]
     );
     assert_eq!(
@@ -732,24 +881,69 @@ fn fix_gives_claude_code_a_type_for_remote_servers() {
     );
 }
 
-#[test]
-fn fix_never_creates_a_config_file() {
+/// Codex has a server; Cursor has its directory and no config file; Claude Code is known only
+/// from `CLAUDE.md`.
+fn without_cursor_config() -> TempDir {
     let dir = TempDir::new();
     dir.write(
         ".codex/config.toml",
         "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n",
     );
-    dir.write(".claude/settings.json", "{}\n");
     dir.write(".cursor/rules/style.mdc", "Be brief.\n");
     dir.write("CLAUDE.md", "@AGENTS.md\n");
+    dir
+}
+
+#[test]
+fn fix_creates_no_config_file_without_create() {
+    let dir = without_cursor_config();
 
     let (report, left) = fix(&dir);
 
-    assert_eq!(report, gglint::harness::FixReport::default());
+    assert_eq!(report, FixReport::default());
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert!(left[0].contains("missing-config"), "{left:?}");
+    assert!(!dir.path().join(".cursor/mcp.json").exists());
+}
+
+#[test]
+fn fix_with_create_creates_the_config_file_of_an_agent_with_its_directory() {
+    let dir = without_cursor_config();
+
+    let (report, left) = fix_with(&dir, FixOptions { create: true });
+
     assert!(left.is_empty(), "{left:?}");
-    for file in [".mcp.json", ".cursor/mcp.json", "opencode.json", "opencode.jsonc"] {
-        assert!(!dir.path().join(file).exists(), "{file}");
-    }
+    let changed: Vec<(String, bool)> = report
+        .changed
+        .iter()
+        .map(|file| (file.relative_path.display().to_string(), file.created))
+        .collect();
+    assert_eq!(changed, [(".cursor/mcp.json".to_string(), true)]);
+    assert_eq!(
+        read(&dir, ".cursor/mcp.json"),
+        "{\n  \"mcpServers\": {\n    \"docs\": {\n      \"url\": \"https://docs.example.com/mcp\"\n    }\n  }\n}\n"
+    );
+    // Claude Code is known only from CLAUDE.md, so it doesn't get a `.mcp.json`.
+    assert!(!dir.path().join(".mcp.json").exists());
+}
+
+#[test]
+fn fix_creates_an_opencode_config_with_its_schema() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(".opencode/agent/review.md", "Be brief.\n");
+
+    let (_, left) = fix_with(&dir, FixOptions { create: true });
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(
+        read(&dir, "opencode.json"),
+        "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"servers\": {\n      \"docs\": {\n        \
+         \"type\": \"remote\",\n        \"url\": \"https://docs.example.com/mcp\"\n      }\n    }\n  }\n}\n"
+    );
 }
 
 #[test]
@@ -764,12 +958,17 @@ fn fix_leaves_a_server_set_up_differently_as_it_is() {
     dir.write(".mcp.json", &claude);
     dir.write(".codex/config.toml", codex);
 
-    let (report, left) = fix(&dir);
+    let (report, left) = fix_with(&dir, FixOptions { create: true });
 
-    assert_eq!(report, gglint::harness::FixReport::default());
+    assert_eq!(report, FixReport::default());
     assert_eq!(read(&dir, ".mcp.json"), claude);
     assert_eq!(read(&dir, ".codex/config.toml"), codex);
-    assert!(left.is_empty(), "{left:?}");
+    // Reported, never changed.
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(
+        left.iter().all(|finding| finding.contains("different-server")),
+        "{left:?}"
+    );
 }
 
 #[test]
@@ -813,7 +1012,7 @@ fn fix_never_removes_or_changes_what_is_there() {
     );
     let before = read_mcp(dir.path());
 
-    fix(&dir);
+    fix_with(&dir, FixOptions { create: true });
 
     let after = read_mcp(dir.path());
     for config in &before {
@@ -838,14 +1037,19 @@ fn fix_never_removes_or_changes_what_is_there() {
 fn fix_twice_changes_nothing_the_second_time() {
     let dir = ggx_like();
 
-    let (first, _) = fix(&dir);
+    let (first, _) = fix_with(&dir, FixOptions { create: true });
+    let claude = read(&dir, ".mcp.json");
     let cursor = read(&dir, ".cursor/mcp.json");
-    let (second, left) = fix(&dir);
+    let (second, left) = fix_with(&dir, FixOptions { create: true });
 
-    assert_eq!(first.changed.len(), 1);
-    assert_eq!(second, gglint::harness::FixReport::default());
-    assert_eq!(read(&dir, ".cursor/mcp.json"), cursor);
-    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(first.changed.len(), 2);
+    assert_eq!(second, FixReport::default());
+    assert_eq!(
+        (read(&dir, ".mcp.json"), read(&dir, ".cursor/mcp.json")),
+        (claude, cursor)
+    );
+    // `angular-cli` is still started with other arguments in Cursor.
+    assert_eq!(left.len(), 1, "{left:?}");
 }
 
 #[test]

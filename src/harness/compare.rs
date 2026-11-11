@@ -1,32 +1,46 @@
-//! Which MCP servers each coding agent's config file is missing.
+//! How the MCP setups of the coding agents in a repository differ.
 //!
-//! Only the agents that have an MCP config file in the repository are compared. A server
-//! set up in one of those files and missing from another is reported; an agent without a
-//! config file isn't, since its users may not want MCP servers.
+//! The agents compared are those with an MCP config file in the repository, or with their
+//! own directory (`.claude/`, `.codex/`, `.cursor/`, `.opencode/`). Three kinds of problem
+//! are reported:
+//!
+//! - a server set up in one config file and missing from another (`missing-server`);
+//! - an agent with its own directory and no MCP config file, while other agents have servers
+//!   (`missing-config`);
+//! - a server set up differently in two files: another program, version, arguments,
+//!   environment variables or headers, another name, or turned off in one
+//!   (`different-server`, `renamed-server`).
 //!
 //! Servers are matched by name, then by what they run, so a server under another name in
 //! one file is still the same server. Files can start a server differently and still run
 //! the same thing: `npx -y pkg`, `pnpm dlx pkg` and `bunx pkg` all run the npm package
-//! `pkg`, and `npx mcp-remote <url>` reaches the server at `<url>`. How each file sets a
-//! server up (its version, arguments, environment or headers) isn't compared: those
-//! differences are often deliberate.
+//! `pkg`, and `npx mcp-remote <url>` reaches the server at `<url>`, so that isn't reported.
 
 use std::path::{Path, PathBuf};
 
 use super::Location;
 use super::mcp::{Syntax, translate};
-use super::{Harness, McpConfig, McpServer, Transport};
+use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Rule {
     /// A server set up in some of the repository's MCP config files, but not all.
     MissingServer,
+    /// An agent with its own directory in the repository and no MCP config file.
+    MissingConfig,
+    /// A server set up differently in two config files.
+    DifferentServer,
+    /// A server with a different name in two config files.
+    RenamedServer,
 }
 
 impl Rule {
     pub fn as_str(self) -> &'static str {
         match self {
             Rule::MissingServer => "missing-server",
+            Rule::MissingConfig => "missing-config",
+            Rule::DifferentServer => "different-server",
+            Rule::RenamedServer => "renamed-server",
         }
     }
 }
@@ -44,38 +58,65 @@ pub struct Site {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     pub rule: Rule,
-    /// The setup the server is copied from to fix it.
+    /// Where it's found: a setup of the server, or for `missing-config` the first setup of
+    /// the servers the agent doesn't get.
     pub site: Site,
-    /// What's wrong, naming the server, for reading on its own.
+    /// What's wrong, naming the server or agent, for reading on its own.
     pub message: String,
     /// What's wrong, for reading under the server's name.
     pub detail: String,
-    /// How to fix it.
-    pub fix: String,
+    /// How to fix it, when gglint can.
+    pub fix: Option<String>,
     /// The server's other setups.
     pub related: Vec<Site>,
 }
 
-/// Whether a server is in one agent's config file.
+/// How a server is set up in one agent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cell {
-    Present,
+    /// Set up the same way as in the first file that has it.
+    Same,
+    /// Set up differently from the first file that has it.
+    Different,
     Missing,
-    /// There, and turned off.
+    /// Set up, and turned off.
     Off,
 }
 
-/// One server across the repository's MCP config files.
+/// What `check_mcp` finds in a repository.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct McpCheck {
+    /// The agents compared, in the order agents are reported: those with an MCP config file
+    /// or their own directory.
+    pub harnesses: Vec<Harness>,
+    /// Each server, in each of those agents.
+    pub servers: Vec<ServerCheck>,
+    /// One `missing-config` finding for each agent with its own directory and no MCP config
+    /// file, when other agents have servers it doesn't get.
+    pub missing_configs: Vec<Finding>,
+}
+
+impl McpCheck {
+    /// Every finding: server by server, then the missing config files.
+    pub fn findings(&self) -> impl Iterator<Item = &Finding> {
+        self.servers
+            .iter()
+            .flat_map(|check| &check.findings)
+            .chain(&self.missing_configs)
+    }
+}
+
+/// One server across the agents compared.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServerCheck {
     /// Its name in the first file that has it.
     pub name: String,
-    /// Each agent with a config file, in the order agents are reported, and whether the
-    /// server is in it.
+    /// Each agent compared, in the order agents are reported, with how the server is set
+    /// up in it.
     pub cells: Vec<(Harness, Cell)>,
     pub findings: Vec<Finding>,
     /// The setup a file missing the server gets: the first one that's turned on. `None`
-    /// when the server is turned off everywhere it's set up, which isn't a problem.
+    /// when the server is turned off everywhere it's set up, so it isn't missing anywhere.
     pub source: Option<Setup>,
 }
 
@@ -86,22 +127,78 @@ pub struct Setup {
     pub server: McpServer,
 }
 
-/// Checks each server in `configs` across the agents that have a config file.
-pub fn check_mcp(configs: &[McpConfig]) -> Vec<ServerCheck> {
-    let mut harnesses: Vec<Harness> = configs.iter().map(|config| config.harness).collect();
-    harnesses.dedup();
-    group_servers(configs)
-        .iter()
-        .map(|group| group.check(&harnesses, configs))
+/// The agents compared in the repository at `root`, in the order agents are reported: those
+/// with a config file in `configs`, or with their own directory. A `CLAUDE.md` or
+/// `.cursorrules` alone says people use the agent, not that it's set up in the repository.
+pub fn compared_harnesses(root: &Path, configs: &[McpConfig]) -> Vec<Harness> {
+    HARNESSES
+        .into_iter()
+        .filter(|&harness| {
+            configs.iter().any(|config| config.harness == harness) || root.join(harness.directory()).is_dir()
+        })
         .collect()
 }
 
-/// The findings of `check_mcp`, server by server.
-pub fn compare_mcp(configs: &[McpConfig]) -> Vec<Finding> {
-    check_mcp(configs)
+/// Checks the MCP servers in `configs`, read from the repository at `root`.
+pub fn check_mcp(root: &Path, configs: &[McpConfig]) -> McpCheck {
+    let harnesses = compared_harnesses(root, configs);
+    let servers: Vec<ServerCheck> = group_servers(configs)
+        .iter()
+        .map(|group| group.check(&harnesses, configs))
+        .collect();
+    let missing_configs = harnesses
+        .iter()
+        .filter(|&&harness| !configs.iter().any(|config| config.harness == harness))
+        .filter_map(|&harness| missing_config(harness, &servers))
+        .collect();
+    McpCheck {
+        harnesses,
+        servers,
+        missing_configs,
+    }
+}
+
+/// Every finding of `check_mcp`.
+pub fn compare_mcp(root: &Path, configs: &[McpConfig]) -> Vec<Finding> {
+    check_mcp(root, configs).findings().cloned().collect()
+}
+
+/// The `missing-config` finding for `harness`, which has its own directory and no config
+/// file, if other agents have servers turned on.
+fn missing_config(harness: Harness, servers: &[ServerCheck]) -> Option<Finding> {
+    let sources: Vec<&Setup> = servers.iter().filter_map(|check| check.source.as_ref()).collect();
+    let first = sources.first()?;
+    // The agents that have any of those servers.
+    let from: Vec<Harness> = HARNESSES
         .into_iter()
-        .flat_map(|check| check.findings)
-        .collect()
+        .filter(|&other| {
+            servers.iter().filter(|check| check.source.is_some()).any(|check| {
+                check
+                    .cells
+                    .iter()
+                    .any(|&(harness, cell)| harness == other && cell != Cell::Missing)
+            })
+        })
+        .collect();
+    let count = match sources.len() {
+        1 => "the MCP server".to_string(),
+        n => format!("the {n} MCP servers"),
+    };
+    let (name, directory, file) = (harness.display_name(), harness.directory(), harness.mcp_file());
+    Some(Finding {
+        rule: Rule::MissingConfig,
+        site: first.site.clone(),
+        message: format!(
+            "{name} has a {directory} directory but no {file}, so it gets none of {count} set up for {}",
+            names(&from, "and")
+        ),
+        detail: format!("{name} has a {directory} directory but no {file}."),
+        fix: Some(format!(
+            "`gglint mcp --fix --create` creates {file} with {count} set up for {}",
+            names(&from, "and")
+        )),
+        related: Vec::new(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +314,13 @@ impl Launch {
         match self {
             Launch::Program { command, args } => format!("`{command} {}`", args.join(" ")),
             _ => self.identity(),
+        }
+    }
+
+    fn args(&self) -> Option<&[String]> {
+        match self {
+            Launch::Package { args, .. } | Launch::Program { args, .. } => Some(args),
+            Launch::Remote { .. } => None,
         }
     }
 }
@@ -385,18 +489,83 @@ impl Group<'_> {
         self.entries.iter().find(|entry| entry.site.harness == harness)
     }
 
+    /// A finding at `harness`'s setup of the server, with the others as related.
+    fn finding_at(&self, harness: Harness, rule: Rule, message: String, detail: String) -> Finding {
+        let (here, others): (Vec<&Entry>, Vec<&Entry>) =
+            self.entries.iter().partition(|entry| entry.site.harness == harness);
+        Finding {
+            rule,
+            site: here[0].site.clone(),
+            message,
+            detail,
+            fix: None,
+            related: others.iter().map(|entry| entry.site.clone()).collect(),
+        }
+    }
+
+    /// A finding at the first file's setup of the server, with the others as related.
+    fn finding(&self, rule: Rule, message: String, detail: String) -> Finding {
+        self.finding_at(self.entries[0].site.harness, rule, message, detail)
+    }
+
+    /// Each value of `value` with the agents that have it, as `a in X; b in Y and Z`, if
+    /// the agents don't all agree. The agents whose value isn't the first file's are added
+    /// to `different`.
+    fn disagreement<T: PartialEq>(
+        &self,
+        value: impl Fn(&Entry) -> T,
+        show: impl Fn(&T) -> String,
+        different: &mut Vec<Harness>,
+    ) -> Option<String> {
+        let mut values: Vec<(T, Vec<Harness>)> = Vec::new();
+        for entry in &self.entries {
+            let this = value(entry);
+            match values.iter_mut().find(|(other, _)| *other == this) {
+                Some((_, harnesses)) => harnesses.push(entry.site.harness),
+                None => values.push((this, vec![entry.site.harness])),
+            }
+        }
+        if values.len() < 2 {
+            return None;
+        }
+        different.extend(values[1..].iter().flat_map(|(_, harnesses)| harnesses));
+        Some(
+            values
+                .iter()
+                .map(|(value, harnesses)| format!("{} in {}", show(value), names(harnesses, "and")))
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    }
+
     fn check(&self, harnesses: &[Harness], configs: &[McpConfig]) -> ServerCheck {
         let name = self.name();
-        // A server turned off may be off on purpose, so only one that's on is copied.
+        let mut findings = Vec::new();
+        // The agents where the server isn't set up as in the first file.
+        let mut different = Vec::new();
+
+        if let Some(names) = self.disagreement(
+            |entry| entry.server.name.clone(),
+            |name| format!("`{name}`"),
+            &mut different,
+        ) {
+            findings.push(self.finding(
+                Rule::RenamedServer,
+                format!("One server has different names: {names}"),
+                format!("Named differently: {names}."),
+            ));
+        }
+
+        // A server turned off may be off on purpose, so only one that's on is copied, and
+        // one turned off everywhere isn't missing anywhere. An agent without a config file
+        // gets its own `missing-config` finding instead.
         let source = self.entries.iter().find(|entry| entry.server.enabled);
         let present: Vec<Harness> = self.entries.iter().map(|entry| entry.site.harness).collect();
         let missing: Vec<Harness> = harnesses
             .iter()
             .copied()
-            .filter(|harness| !present.contains(harness))
+            .filter(|harness| !present.contains(harness) && configs.iter().any(|config| config.harness == *harness))
             .collect();
-
-        let mut findings = Vec::new();
         if let Some(source) = source
             && !missing.is_empty()
         {
@@ -406,28 +575,116 @@ impl Group<'_> {
                 .zip(&files)
                 .map(|(harness, file)| format!("{} ({file})", harness.display_name()))
                 .collect();
-            findings.push(Finding {
-                rule: Rule::MissingServer,
-                site: source.site.clone(),
-                message: format!(
+            let mut finding = self.finding_at(
+                source.site.harness,
+                Rule::MissingServer,
+                format!(
                     "`{name}` is set up for {} but not for {}",
                     names(&present, "and"),
                     join(&with_files, "or")
                 ),
-                detail: format!("Missing from {}.", names(&missing, "and")),
-                fix: format!(
-                    "Add it to {}, as set up in {}:{}",
-                    join(&files, "and"),
-                    source.site.relative_path.display(),
-                    source.site.location.line
-                ),
-                related: self
-                    .entries
-                    .iter()
-                    .filter(|entry| entry.site.harness != source.site.harness)
-                    .map(|entry| entry.site.clone())
-                    .collect(),
-            });
+                format!("Missing from {}.", names(&missing, "and")),
+            );
+            finding.fix = Some(format!(
+                "Add it to {}, as set up in {}:{}",
+                join(&files, "and"),
+                source.site.relative_path.display(),
+                source.site.location.line
+            ));
+            findings.push(finding);
+        }
+
+        let mut differ = |message: String, detail: String| {
+            findings.push(self.finding(Rule::DifferentServer, message, detail));
+        };
+        if let Some(servers) = self.disagreement(|entry| entry.launch.identity(), String::clone, &mut different) {
+            // Versions and arguments of different programs can't be compared.
+            differ(
+                format!("`{name}` is a different server in each file: {servers}"),
+                format!("A different server in each file: {servers}."),
+            );
+        } else {
+            if let Launch::Package {
+                registry,
+                name: package,
+                ..
+            } = &self.entries[0].launch
+            {
+                let version = |entry: &Entry| match &entry.launch {
+                    Launch::Package { version, .. } => version.clone(),
+                    _ => None,
+                };
+                let show = |version: &Option<String>| version.clone().unwrap_or_else(|| "the newest".to_string());
+                if let Some(versions) = self.disagreement(version, show, &mut different) {
+                    let registry = registry.as_str();
+                    differ(
+                        format!("`{name}` runs different versions of the {registry} package `{package}`: {versions}"),
+                        format!("Runs different versions of the {registry} package `{package}`: {versions}."),
+                    );
+                }
+            }
+            let args = |entry: &Entry| entry.launch.args().map(<[String]>::to_vec);
+            let show = |args: &Option<Vec<String>>| match args {
+                Some(args) if !args.is_empty() => format!("`{}`", args.join(" ")),
+                _ => "no arguments".to_string(),
+            };
+            if let Some(args) = self.disagreement(args, show, &mut different) {
+                differ(
+                    format!("`{name}` is started with different arguments: {args}"),
+                    format!("Started with different arguments: {args}."),
+                );
+            }
+        }
+
+        // Names only: values are written differently in each agent (`${KEY}`, `{env:KEY}`),
+        // and can be secrets.
+        let show = |names: &Vec<String>| {
+            if names.is_empty() {
+                "none".to_string()
+            } else {
+                names.join(", ")
+            }
+        };
+        let env = |entry: &Entry| {
+            entry
+                .server
+                .env
+                .iter()
+                .map(|setting| setting.name.clone())
+                .collect::<Vec<_>>()
+        };
+        if let Some(env) = self.disagreement(env, show, &mut different) {
+            differ(
+                format!("`{name}` is given different environment variables: {env}"),
+                format!("Given different environment variables: {env}."),
+            );
+        }
+        let headers = |entry: &Entry| {
+            entry
+                .server
+                .headers
+                .iter()
+                .map(|setting| setting.name.clone())
+                .collect::<Vec<_>>()
+        };
+        if let Some(headers) = self.disagreement(headers, show, &mut different) {
+            differ(
+                format!("`{name}` is sent different HTTP headers: {headers}"),
+                format!("Sent different HTTP headers: {headers}."),
+            );
+        }
+
+        let (on, off): (Vec<&Entry>, Vec<&Entry>) = self.entries.iter().partition(|entry| entry.server.enabled);
+        if !on.is_empty() && !off.is_empty() {
+            let harnesses = |entries: &[&Entry]| entries.iter().map(|entry| entry.site.harness).collect::<Vec<_>>();
+            let (off_names, on_names) = (names(&harnesses(&off), "and"), names(&harnesses(&on), "or"));
+            // At the first file it's turned off in: that's the setup to look at.
+            findings.push(self.finding_at(
+                off[0].site.harness,
+                Rule::DifferentServer,
+                format!("`{name}` is turned off in {off_names} but not in {on_names}"),
+                format!("Turned off in {off_names} but not in {on_names}."),
+            ));
         }
 
         let cells = harnesses
@@ -436,7 +693,8 @@ impl Group<'_> {
                 let cell = match self.entry(harness) {
                     None => Cell::Missing,
                     Some(entry) if !entry.server.enabled => Cell::Off,
-                    Some(_) => Cell::Present,
+                    Some(_) if different.contains(&harness) => Cell::Different,
+                    Some(_) => Cell::Same,
                 };
                 (harness, cell)
             })
@@ -455,10 +713,10 @@ impl Group<'_> {
 
 /// The config file `harness` has in the repository.
 fn config_file(harness: Harness, configs: &[McpConfig]) -> String {
-    configs
-        .iter()
-        .find(|config| config.harness == harness)
-        .map_or_else(String::new, |config| config.relative_path.display().to_string())
+    configs.iter().find(|config| config.harness == harness).map_or_else(
+        || harness.mcp_file().to_string(),
+        |config| config.relative_path.display().to_string(),
+    )
 }
 
 fn names(harnesses: &[Harness], last: &str) -> String {

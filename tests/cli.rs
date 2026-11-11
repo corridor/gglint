@@ -83,23 +83,36 @@ fn mcp_format_lines_prints_one_line_per_problem() {
     assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     let lines: Vec<_> = stdout.lines().collect();
-    assert_eq!(lines.len(), 2, "{stdout}");
+    assert_eq!(lines.len(), 4, "{stdout}");
     assert!(
         lines[0].ends_with(
             "config.toml:1:14  missing-server   `angular-cli` is set up for Codex and Cursor but not for Claude Code (.mcp.json)"
         ),
         "{stdout}"
     );
-    assert!(lines[1].starts_with("    also at ") && lines[1].ends_with(".cursor/mcp.json:3:5"), "{stdout}");
+    assert!(
+        lines[1].starts_with("    also at ") && lines[1].ends_with(".cursor/mcp.json:3:5"),
+        "{stdout}"
+    );
+    assert!(
+        lines[2].ends_with(
+            "config.toml:1:14  different-server `angular-cli` is started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        lines[3].starts_with("    also at ") && lines[3].ends_with(".cursor/mcp.json:3:5"),
+        "{stdout}"
+    );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("Checked 2 MCP server(s) in 3 file(s) for Claude Code, Codex and Cursor: 1 problem(s)"),
+        stderr.contains("Checked 2 MCP server(s) in 3 file(s) for Claude Code, Codex and Cursor: 2 problem(s)"),
         "{stderr}"
     );
 }
 
 #[test]
-fn mcp_passes_when_every_file_has_every_server() {
+fn mcp_passes_when_every_agent_gets_the_same_servers() {
     let dir = TempDir::new();
     dir.write(".codex/config.toml", "[mcp_servers.docs]\nurl = \"https://docs.example.com/mcp\"\n");
     dir.write(".cursor/mcp.json", "{ \"mcpServers\": { \"docs\": { \"url\": \"https://docs.example.com/mcp\" } } }\n");
@@ -109,7 +122,10 @@ fn mcp_passes_when_every_file_has_every_server() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("│ docs   │   ✓   │   ✓    │"), "{stdout}");
-    assert!(stdout.ends_with("No problems: every config file has every server.\n"), "{stdout}");
+    assert!(
+        stdout.ends_with("No problems: every agent gets the same servers, set up the same way.\n"),
+        "{stdout}"
+    );
     assert!(String::from_utf8(output.stderr).unwrap().contains(": no problems"));
 }
 
@@ -131,7 +147,7 @@ fn ggx_like() -> TempDir {
 }
 
 #[test]
-fn mcp_draws_each_server_in_each_config_file_and_what_to_add() {
+fn mcp_draws_each_server_in_each_agent_and_every_problem() {
     let dir = ggx_like();
 
     let output = gglint(&["mcp".as_ref(), dir.path().as_os_str()]);
@@ -140,24 +156,31 @@ fn mcp_draws_each_server_in_each_config_file_and_what_to_add() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     let (title, report) = stdout.split_once('\n').unwrap();
     assert!(title.starts_with("MCP servers in gglint-test-"), "{stdout}");
-    // No colours: standard output isn't a terminal. Claude Code has no `.mcp.json`, so it
-    // isn't a column.
+    // No colours: standard output isn't a terminal.
     assert_eq!(
         report,
         "
-  ╭───────────────────┬───────┬────────╮
-  │ Server            │ Codex │ Cursor │
-  ├───────────────────┼───────┼────────┤
-  │ code-review-graph │   ✓   │   ✗    │
-  │ angular-cli       │   ✓   │   ✓    │
-  ╰───────────────────┴───────┴────────╯
-  ✓ set up   ✗ missing   ○ turned off
+  ╭───────────────────┬─────────────┬───────┬────────╮
+  │ Server            │ Claude Code │ Codex │ Cursor │
+  ├───────────────────┼─────────────┼───────┼────────┤
+  │ code-review-graph │      ✗      │   ✓   │   ✗    │
+  │ angular-cli       │      ✗      │   ✓   │   ≠    │
+  ╰───────────────────┴─────────────┴───────┴────────╯
+  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
 
-1 problem
+3 problems
 
   code-review-graph
     ✗ Missing from Cursor.
       Add it to .cursor/mcp.json, as set up in .codex/config.toml:1
+
+  angular-cli
+    ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
+      .codex/config.toml:5, .cursor/mcp.json:1
+
+  Missing config files
+    ✗ Claude Code has a .claude directory but no .mcp.json.
+      `gglint mcp --fix --create` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor
 "
     );
 }
@@ -190,7 +213,8 @@ fn mcp_fix_adds_the_missing_servers_and_creates_no_file() {
 
     let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
 
-    assert!(output.status.success());
+    // `angular-cli` is still set up differently, and Claude Code still has no `.mcp.json`.
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.starts_with(
@@ -203,9 +227,46 @@ fn mcp_fix_adds_the_missing_servers_and_creates_no_file() {
         ),
         "{stdout}"
     );
-    assert!(stdout.ends_with("No problems: every config file has every server.\n"), "{stdout}");
+    assert!(
+        stdout.contains("│ angular-cli       │      ✗      │   ✓   │   ≠    │"),
+        "{stdout}"
+    );
     assert!(!dir.path().join(".mcp.json").exists());
-    assert_eq!(std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(), codex);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(),
+        codex
+    );
+}
+
+#[test]
+fn mcp_fix_create_also_creates_the_missing_config_file() {
+    let dir = ggx_like();
+
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--fix".as_ref(),
+        "--create".as_ref(),
+        dir.path().as_os_str(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.starts_with(
+            "Changed 2 files:\n\
+             \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
+             \x20 .cursor/mcp.json   added code-review-graph\n\
+             \n\
+             Review the changes with `git diff`.\n"
+        ),
+        "{stdout}"
+    );
+    // Only the difference is left, reported and unchanged.
+    assert!(stdout.contains("1 problem\n"), "{stdout}");
+    assert!(
+        stdout.contains("│ angular-cli       │      ✓      │   ✓   │   ≠    │"),
+        "{stdout}"
+    );
 }
 
 #[test]
