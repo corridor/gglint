@@ -2,7 +2,8 @@
 name = "gglint"
 version = "0.2.0"
 edition = "2024"
-description = "A linter to catch issues in your AI agents"
+description = "Keeps the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
+repository = "https://github.com/corridor/gglint"
 license = "Apache-2.0"
 
 [lib]
