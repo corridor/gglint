@@ -1,0 +1,125 @@
+# Lints and tests the code, and builds the wheels and source distribution that are
+# published to PyPI. Runs on every push to main and every pull request, and is called by
+# pypi_release.yml when a release is published.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- --deny warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+
+  msrv:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets --locked
+
+  wheels:
+    name: Wheel (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `native: true` means the runner can install and run the wheel it built.
+          - { name: linux-x86_64, runner: ubuntu-latest, target: x86_64, manylinux: auto, native: true }
+          - { name: linux-aarch64, runner: ubuntu-24.04-arm, target: aarch64, manylinux: auto, native: true }
+          - { name: musllinux-x86_64, runner: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2, native: false }
+          - { name: musllinux-aarch64, runner: ubuntu-24.04-arm, target: aarch64, manylinux: musllinux_1_2, native: false }
+          - { name: macos-x86_64, runner: macos-latest, target: x86_64, native: false }
+          - { name: macos-arm64, runner: macos-latest, target: aarch64, native: true }
+          - { name: windows-x64, runner: windows-latest, target: x64, native: true }
+          - { name: windows-arm64, runner: windows-latest, target: aarch64, native: false }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Build the wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist
+      - name: Install and run the wheel
+        if: matrix.native
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ -d .venv/Scripts ]; then bin=.venv/Scripts; else bin=.venv/bin; fi
+          "$bin/python" -m pip install --no-index --find-links dist gglint
+          "$bin/gglint" --version
+          "$bin/gglint" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: dist
+          if-no-files-found: error
+
+  sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+          if-no-files-found: error
