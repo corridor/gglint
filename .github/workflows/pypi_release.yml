@@ -1,12 +1,14 @@
-# This workflow will upload a Python Package to PyPI when a release is created
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
+# Publishes gglint to PyPI when a GitHub release is published.
+#
+# To release: bump `version` in Cargo.toml, merge to main, then publish a GitHub release
+# tagged `v<version>` (for example `v0.1.0`). This workflow runs CI, publishes the wheels
+# and source distribution to PyPI, and attaches them to the release.
+#
+# PyPI accepts the upload through trusted publishing: the project trusts this workflow
+# file in corridor/gglint, run in the `pypi` environment, so no API token is stored here.
+# Renaming this file or the environment means updating the publisher on PyPI too.
 
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-name: Release PyPI package
+name: Release
 
 on:
   release:
@@ -16,50 +18,61 @@ permissions:
   contents: read
 
 jobs:
-  release-build:
+  version:
+    name: Check the version
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Build release distributions
+      - name: Check the tag matches Cargo.toml
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          # NOTE: put your own distribution build steps here.
-          python -m pip install build
-          python -m build
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::The release is tagged $TAG, but Cargo.toml says version $version. Tag it v$version."
+            exit 1
+          fi
 
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-dists
-          path: dist/
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
 
-  pypi-publish:
+  pypi:
+    name: Publish to PyPI
+    needs: [version, ci]
     runs-on: ubuntu-latest
-    needs:
-      - release-build
-    permissions:
-      # IMPORTANT: this permission is mandatory for trusted publishing
-      id-token: write
-
-    # Dedicated environments with protections for publishing are strongly recommended.
-    # For more information, see: https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#deployment-protection-rules
+    timeout-minutes: 10
     environment:
       name: pypi
-      url: https://pypi.org/p/gglint
-      
+      url: https://pypi.org/project/gglint/
+    permissions:
+      # Trusted publishing, and the attestations PyPI stores with each file.
+      id-token: write
     steps:
-      - name: Retrieve release distributions
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: release-dists
-          path: dist/
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
-      - name: Publish release distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+  assets:
+    name: Attach files to the release
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          packages-dir: dist/
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Upload the wheels and source distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
