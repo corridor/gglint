@@ -363,18 +363,22 @@ fn mcp_rejects_an_unknown_format() {
 }
 
 #[test]
-fn mcp_fix_writes_the_configs_and_draws_the_result() {
+fn mcp_fix_adds_what_is_missing_and_leaves_differences() {
     let dir = ggx_like();
 
     let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
 
-    assert!(output.status.success());
+    // angular-cli is still set up differently in Cursor.
+    assert_eq!(output.status.code(), Some(1));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.starts_with(
-            "Fixed 2 files:\n\
+            "Changed 2 files:\n\
              \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
-             \x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n\
+             \x20 .cursor/mcp.json   added code-review-graph\n\
+             \n\
+             Left as they are:\n\
+             \x20 angular-cli in Cursor: set up differently from Codex; left as it is, and `--overwrite` copies Codex's setup\n\
              \n\
              Review the changes with `git diff`.\n\
              \n\
@@ -382,7 +386,20 @@ fn mcp_fix_writes_the_configs_and_draws_the_result() {
         ),
         "{stdout}"
     );
-    assert!(stdout.contains("│ angular-cli       │      ✓      │   ✓   │   ✓    │"), "{stdout}");
+    assert!(stdout.contains("│ angular-cli       │      ✓      │   ✓   │   ≠    │"), "{stdout}");
+}
+
+#[test]
+fn mcp_fix_overwrite_makes_every_harness_match() {
+    let dir = ggx_like();
+
+    let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), "--overwrite".as_ref(), dir.path().as_os_str()]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.starts_with("Changed 2 files:\n\x20 .mcp.json (new)    added code-review-graph, angular-cli\n\x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n"),
+        "{stdout}"
+    );
     assert!(stdout.ends_with("No problems: every harness gets the same servers, set up the same way.\n"), "{stdout}");
-    assert!(dir.path().join(".mcp.json").exists());
 }

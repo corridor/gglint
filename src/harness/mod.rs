@@ -13,7 +13,7 @@ mod mcp;
 use std::path::Path;
 
 pub use compare::{Cell, Finding, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp};
-pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
+pub use fix::{ChangedFile, FixOptions, FixReport, Unfixed, fix_mcp};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
@@ -50,6 +50,17 @@ impl Harness {
     /// The file it reads a repository's MCP servers from, relative to the root.
     pub fn mcp_file(self) -> &'static str {
         mcp::mcp_file(self)
+    }
+
+    /// Its own directory in a repository. When it's there, the repository is set up for the
+    /// harness on purpose, not just mentioned by a file such as `CLAUDE.md`.
+    pub fn directory(self) -> &'static str {
+        match self {
+            Harness::ClaudeCode => ".claude",
+            Harness::Codex => ".codex",
+            Harness::Cursor => ".cursor",
+            Harness::OpenCode => ".opencode",
+        }
     }
 }
 

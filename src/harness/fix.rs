@@ -1,15 +1,23 @@
-//! `gglint mcp --fix`: gives every harness the repository is set up for each server, set up
-//! as in the first harness that has it.
+//! `gglint mcp --fix`: gives every harness the repository is set up for each server.
 //!
-//! A server missing from a harness is added to its config file, which is created when it
-//! doesn't exist yet. A server set up differently is changed to match. Only the keys that
-//! say how a server is started and what it's given are written: keys only one harness has,
-//! such as Codex's `enabled_tools`, are kept, and so are comments and formatting.
+//! It adds, and never changes or removes what is there. A server missing from a harness is
+//! added to its config file, copied from the first harness that has it. The file is created
+//! only when the harness has its own directory (`.claude`, `.cursor`, ...): a `CLAUDE.md`
+//! alone says people use Claude Code, not that they want MCP servers in it. Comments and
+//! formatting are kept.
 //!
-//! Left for a person to decide: a different program under the same name, a server turned
+//! A server set up differently is left as it is: in real repositories most differences
+//! between harnesses are deliberate, such as each harness running its own runtime or
+//! setting its own environment. With `FixOptions::overwrite` it's changed to match the
+//! first harness's setup instead; only the keys that say how a server is started and what
+//! it's given are written, so keys only one harness has, such as Codex's `enabled_tools`,
+//! are kept.
+//!
+//! Left for a person either way: a different program under the same name, a server turned
 //! off, another name, and a value that can't be written in the other harness's syntax.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
@@ -18,6 +26,14 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 use super::compare::{Cell, ServerCheck, same_program};
 use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
+
+/// How `fix_mcp` may change the config files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FixOptions {
+    /// Change a server set up differently to match the first harness's setup. Off by
+    /// default: most differences between harnesses are deliberate.
+    pub overwrite: bool,
+}
 
 /// What `fix_mcp` changed, and what it left.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -37,6 +53,9 @@ pub struct ChangedFile {
     /// The servers added to it, and the ones changed to match the first harness's.
     pub added: Vec<String>,
     pub updated: Vec<String>,
+    /// Whether the repository's `.gitignore` leaves it out, so the change stays on this
+    /// machine and isn't committed.
+    pub ignored: bool,
 }
 
 /// A server `fix_mcp` couldn't set up in a harness.
@@ -67,35 +86,59 @@ struct Write {
 
 /// Fixes the problems in `checks` that have one right answer, by writing config files
 /// under `root`.
-pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> FixReport {
+pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck], options: &FixOptions) -> FixReport {
     let mut writes: Vec<Write> = Vec::new();
     let mut report = FixReport::default();
     for check in checks {
         let reference = &check.setups[0];
+        let from = reference.site.harness.display_name();
         for &(harness, cell) in &check.cells {
-            let update = match cell {
-                Cell::Missing => false,
-                Cell::Different => true,
-                // A server turned off may be off on purpose.
-                Cell::Same | Cell::Off => continue,
-            };
             let target = check.setups.iter().find(|setup| setup.site.harness == harness);
             let name = target
                 .map_or(&reference.server.name, |target| &target.server.name)
                 .clone();
-            if let Some(target) = target
-                && !same_program(target, reference)
-            {
+            let mut leave = |reason: String| {
                 report.unfixed.push(Unfixed {
                     harness,
-                    server: name,
-                    reason: format!(
-                        "it's a different server than in {}; decide which one is right",
-                        reference.site.harness.display_name()
-                    ),
-                });
-                continue;
-            }
+                    server: name.clone(),
+                    reason,
+                })
+            };
+            let update = match cell {
+                Cell::Missing => {
+                    let file = config_file(harness, configs);
+                    if !root.join(&file).exists() && !root.join(harness.directory()).is_dir() {
+                        leave(format!(
+                            "{} has no {} and no {} directory; create {} if its users want MCP servers",
+                            harness.display_name(),
+                            file.display(),
+                            harness.directory(),
+                            file.display()
+                        ));
+                        continue;
+                    }
+                    false
+                }
+                Cell::Different => {
+                    if let Some(target) = target
+                        && !same_program(target, reference)
+                    {
+                        leave(format!(
+                            "it's a different server than in {from}; decide which one is right"
+                        ));
+                        continue;
+                    }
+                    if !options.overwrite {
+                        leave(format!(
+                            "set up differently from {from}; left as it is, and `--overwrite` copies {from}'s setup"
+                        ));
+                        continue;
+                    }
+                    true
+                }
+                // A server turned off may be off on purpose.
+                Cell::Same | Cell::Off => continue,
+            };
             match fields(&reference.server, reference.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
                     harness,
@@ -132,6 +175,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> Fi
         match write_file(root, harness, &relative_path, &file_writes) {
             Ok(Some(created)) => report.changed.push(ChangedFile {
                 harness,
+                ignored: ignored_by_git(root, &relative_path),
                 relative_path,
                 created,
                 added: names(&file_writes, false),
@@ -146,6 +190,21 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], checks: &[ServerCheck]) -> Fi
         }
     }
     report
+}
+
+/// Whether git ignores `relative_path` under `root`. The one program gglint runs is git
+/// itself; outside a repository, or without git, nothing counts as ignored.
+fn ignored_by_git(root: &Path, relative_path: &Path) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["check-ignore", "-q", "--"])
+        .arg(relative_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn names(writes: &[&Write], update: bool) -> Vec<String> {

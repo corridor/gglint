@@ -190,7 +190,7 @@ The crate is also a library. `gglint::discovery::scan(&[root], false)` returns a
 
 ```console
 $ gglint [--all] [--graph] [PATH ...]
-$ gglint mcp [--fix] [--format table|lines] [PATH]
+$ gglint mcp [--fix [--overwrite]] [--format table|lines] [PATH]
 $ gglint mcp --servers [PATH]
 ```
 
@@ -207,7 +207,7 @@ $ gglint mcp --servers [PATH]
 - `--graph` prints the [lineage graph](#lineage-graph) as JSON instead, and its size and the
   time taken to standard error.
 - `gglint mcp` compares the [MCP servers](#mcp-servers) in a repository's harness config
-  files instead, and draws them; `--fix` makes them the same, and `gglint mcp --servers`
+  files instead, and draws them; `--fix` adds what's missing, and `gglint mcp --servers`
   lists them.
 
 ## Asking questions
@@ -570,15 +570,19 @@ environment differently (`${KEY}`, `{env:KEY}`, Codex's `env_vars`).
 
 ### Fixing
 
-`gglint mcp --fix` changes the config files so every harness gets each server, set up as in
-the first harness that has it: Claude Code's `.mcp.json` when there is one. It then draws
-the table again, and exits with status 0 if no problem is left.
+`gglint mcp --fix` adds what is missing, and never changes or removes what is there: each
+harness the repository is set up for gets every server the others have, copied from the
+first harness that has it. It then draws the table again, and exits with status 0 if no
+problem is left.
 
 ```console
 $ gglint mcp --fix path/to/repo
-Fixed 2 files:
+Changed 2 files:
   .mcp.json (new)    added code-review-graph, angular-cli
-  .cursor/mcp.json   added code-review-graph; updated angular-cli
+  .cursor/mcp.json   added code-review-graph
+
+Left as they are:
+  angular-cli in Cursor: set up differently from Codex; left as it is, and `--overwrite` copies Codex's setup
 
 Review the changes with `git diff`.
 
@@ -586,28 +590,38 @@ MCP servers in repo
 ...
 ```
 
-- A missing server is added to the harness's config file, which is created if it doesn't
-  exist. A server set up differently is changed to match.
-- Each harness's file is written in its own format: `command` and `args`, or OpenCode's
+- **A missing server** is added to the harness's config file. The file is created only when
+  the harness has its own directory (`.claude`, `.codex`, `.cursor`, `.opencode`): a
+  `CLAUDE.md` or `.cursorrules` alone shows that people use the harness, not that they want
+  MCP servers in it, so then the server is left for a person.
+- **A server set up differently** is left as it is. Checking 258 popular repositories found
+  that most such differences are deliberate: each harness running its own runtime or port,
+  or setting its own environment variables. `--fix --overwrite` changes it to match the first
+  harness's setup instead. Only the keys that say how a server is started and what it's
+  given are written; keys only one harness has, such as Codex's `cwd` and `enabled_tools`,
+  are kept.
+- **Each harness's file is written in its own format**: `command` and `args`, or OpenCode's
   one `command` list; `type: "http"` or `"sse"` for Claude Code's remote servers; and
   references to the user's environment, in values and command lines, in each harness's
   syntax: `${KEY}` for Claude Code, `${env:KEY}` for Cursor, `{env:KEY}` for OpenCode, and
   Codex's `env_vars`, `env_http_headers` and `bearer_token_env_var`. Codex can't fill in a
   reference in a command line, so such a server is left for a person.
-- Only the keys that say how a server is started and what it's given are written. Keys
-  only one harness has, such as Codex's `cwd` and `enabled_tools`, are kept, and so are
-  comments and formatting: JSON is edited with jsonc-parser's CST and TOML with
-  `toml_edit`.
-- Running it again changes nothing.
+- **Comments and formatting are kept**: JSON is edited with jsonc-parser's CST and TOML with
+  `toml_edit`. Running it again changes nothing.
+- **A file the repository's `.gitignore` leaves out** is still written, and marked
+  `gitignored`: the change stays on this machine. To tell, gglint runs `git check-ignore`,
+  the one program it runs.
 
-Left for a person to decide, and reported under `Couldn't fix`:
+Left for a person, under `Left as they are`: a different program or URL under the same name;
+a value that can't be written in another harness's syntax, such as Claude Code's
+`${KEY:-default}`; a server turned off in one harness, which may be on purpose; and a server
+with another name, since permission rules refer to servers by name.
 
-- A different program or URL under the same name.
-- A value that can't be written in another harness's syntax, such as Claude Code's
-  `${KEY:-default}`, or a variable passed to Codex under another name.
-
-Also left: a server turned off in one harness, which may be on purpose, and a server with
-another name, since permission rules refer to servers by name. Both stay in the table.
+`tests/corpus.rs` checks these promises on real repositories: pointed at a directory of
+clones with `GGLINT_CORPUS`, it fixes a copy of each, both ways, and fails if anything that
+was there is removed or (without `--overwrite`) changed, if a config can't be read
+afterwards, if there are more problems after than before, or if a second run changes
+anything.
 
 ### Listing the servers
 
