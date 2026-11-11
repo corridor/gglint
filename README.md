@@ -1,109 +1,170 @@
 # gglint
 
-**Give every coding agent in your repository the same MCP servers.**
+[![CI](https://github.com/corridor/gglint/actions/workflows/ci.yml/badge.svg)](https://github.com/corridor/gglint/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/gglint.svg)](https://pypi.org/project/gglint/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/corridor/gglint/blob/main/LICENSE)
 
-Claude Code, Codex, Cursor and OpenCode each read their MCP servers from their own file, in
-their own format. When a team uses more than one, the files drift: someone adds a server to
-`.mcp.json` and forgets `.cursor/mcp.json`, pins a version in one file and not another, or
-never gives an agent an MCP config file at all. `gglint mcp` reads every agent's config,
-shows which agent gets which server, and reports each difference. `--fix` adds the missing
-servers, written the way each agent expects, and changes nothing else.
+Keep the MCP servers of every coding agent in your repository in sync.
 
-```console
-$ gglint mcp
-MCP servers in acme-app
+Claude Code, Codex, Cursor and OpenCode each read MCP servers from their own config file, in
+their own format. In a repository set up for more than one of them, those files drift apart:
+a server is added to `.mcp.json` but not to `.cursor/mcp.json`, a version is pinned in one
+file and not the other, or an agent has no MCP config at all. gglint finds every difference
+and adds the missing servers for you, written in each agent's own format.
 
-  ╭────────────┬─────────────┬───────┬────────┬──────────╮
-  │ Server     │ Claude Code │ Codex │ Cursor │ OpenCode │
-  ├────────────┼─────────────┼───────┼────────┼──────────┤
-  │ github     │      ✓      │   ✗   │   ✗    │    ✗     │
-  │ playwright │      ✓      │   ✗   │   ≠    │    ✗     │
-  │ linear     │      ✗      │   ✗   │   ✓    │    ✗     │
-  ╰────────────┴─────────────┴───────┴────────┴──────────╯
-  ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
+<p align="center">
+  <img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="gglint mcp drawing each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then listing six problems: missing servers, servers set up differently, and an agent without a config file" width="100%">
+</p>
 
-6 problems
+- **One view of every agent.** A table shows which agent gets which server, and how each
+  one differs.
+- **Safe fixes.** `--fix` only adds servers. It never changes or removes an existing entry,
+  and keeps your comments and formatting.
+- **Each agent's own format.** A server is translated between JSON and TOML, between each
+  agent's syntax for environment variables, and between local and remote server types.
+- **Fast and read-only by default.** gglint reads a handful of files at fixed paths and
+  finishes in under a millisecond. It never starts a server or downloads anything.
+- **Built for CI.** It exits with status 1 when it finds a problem, and `--format lines`
+  prints one problem per line.
 
-  github
-    ✗ Missing from Codex and Cursor.
-      Add it to .codex/config.toml and .cursor/mcp.json, as set up in .mcp.json:3
+In November 2026 we checked the 258 most-starred GitHub repositories set up for two or more
+of these agents. Of the 179 that configure MCP servers, 128 (72%) had at least one of the
+problems gglint reports.
 
-  playwright
-    ✗ Missing from Codex.
-      Add it to .codex/config.toml, as set up in .mcp.json:8
-    ≠ Runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor.
-      .mcp.json:8, .cursor/mcp.json:3
-    ≠ Started with different arguments: `--headless` in Claude Code; no arguments in Cursor.
-      .mcp.json:8, .cursor/mcp.json:3
+## Installation
 
-  linear
-    ✗ Missing from Claude Code and Codex.
-      Add it to .mcp.json and .codex/config.toml, as set up in .cursor/mcp.json:7
+gglint is a single compiled program, published on PyPI with prebuilt wheels for Linux
+(x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and Windows (x64 and
+ARM64). Any Python 3.8 or later can install it.
 
-  Missing config files
-    ✗ OpenCode has a .opencode directory but no opencode.json.
-      `gglint mcp --fix --create` creates opencode.json with the 3 MCP servers set up for Claude Code and Cursor
+```sh
+pipx install gglint
 ```
 
-It never runs your MCP servers, never downloads anything, never prints a secret, and reads a
-repository in under a millisecond.
+```sh
+uv tool install gglint
+```
 
-**Why it matters.** In November 2026 we checked the 258 most-starred GitHub repositories set
-up for two or more of these agents. 179 of them configure MCP servers, and 128 of those (72%)
-had at least one of these problems: 99 had an agent with its own directory and no MCP config
-file, 25 had a server missing from another agent's config file, and 21 set up the same server
-differently in two agents.
+```sh
+pip install gglint
+```
 
-## Contents
+To run it once without installing it, use `uvx gglint mcp` or `pipx run gglint mcp`.
 
-- [Install](#install)
-- [Usage](#usage)
-- [Supported agents](#supported-agents)
-- [What gglint reports](#what-gglint-reports)
-- [How `--fix` works](#how---fix-works)
-- [Use in CI](#use-in-ci)
-- [Safety](#safety)
-- [Limitations](#limitations)
-- [Use it as a library](#use-it-as-a-library)
-- [Development](#development)
-- [License](#license)
-
-## Install
-
-gglint is a single program, built with Rust. With a [Rust toolchain](https://rustup.rs)
-installed:
+To build it from source, install a [Rust toolchain](https://rustup.rs) (1.88 or later) and
+run:
 
 ```sh
 cargo install --git https://github.com/corridor/gglint --locked
 ```
 
-`--locked` builds with the exact dependency versions gglint is tested with.
+## Quick start
+
+From the root of a repository:
+
+```sh
+gglint mcp          # report every problem
+gglint mcp --fix    # add the missing servers
+git diff            # review what changed
+```
 
 ## Usage
 
-Run it from the root of a repository, or give it the path:
-
-```sh
-gglint mcp                  # report every problem, and draw each server in each agent
-gglint mcp --fix            # add the servers missing from existing config files
-gglint mcp --fix --create   # also create the config file an agent is missing
-gglint mcp --format lines   # one line per problem, for editors and CI
-gglint mcp --servers        # list every server, file by file
-gglint mcp path/to/repo
+```text
+gglint mcp [--fix [--create]] [--format table|lines] [PATH]
+gglint mcp --servers [PATH]
 ```
 
-| Exit status | Meaning |
-| ----------- | ------- |
-| 0           | Every agent gets the same servers, set up the same way |
-| 1           | A problem was found (or is left after `--fix`), or there are no MCP config files |
+| Option              | Effect                                                                                   |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| *(none)*            | Report every problem and draw each server in each agent.                                 |
+| `--fix`             | Add the servers missing from existing config files, then report what's left.             |
+| `--fix --create`    | Also create the config file of an agent that has its own directory but no MCP config.   |
+| `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
+| `--servers`         | List every configured server, file by file, without comparing them.                      |
+| `PATH`              | The repository's root. Defaults to the current directory.                               |
 
-Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The last line,
-with the counts and the time taken, goes to standard error.
+| Exit status | Meaning                                                                       |
+| ----------- | ----------------------------------------------------------------------------- |
+| `0`         | Every agent gets the same servers, set up the same way.                       |
+| `1`         | gglint found a problem, one is left after `--fix`, or there are no MCP config files. |
 
-### Fixing
+Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The summary
+line, with counts and timing, goes to standard error.
 
-`--fix` adds each missing server to the config file that's missing it, then draws the table
-again with what's left:
+## What gglint checks
+
+| Rule               | Reported when                                                                                       | Fixed by          |
+| ------------------ | --------------------------------------------------------------------------------------------------- | ----------------- |
+| `missing-server`   | A server in one agent's config file is missing from another agent's.                                | `--fix`           |
+| `missing-config`   | An agent has its own directory but no MCP config file, while other agents have servers.            | `--fix --create`  |
+| `different-server` | The same server runs another program, URL or version, or has other arguments, environment variables or headers, or is turned off in one agent. | Reported only |
+| `renamed-server`   | The same server has a different name in some agents.                                                | Reported only     |
+
+Differences in how a server is set up are often deliberate, such as each agent running its
+own runtime or port, so gglint reports them and leaves the choice to you.
+
+**Matching servers.** Servers are matched by name, then by what they run, so a server named
+differently in one agent is still recognised as the same server. The way a package is
+launched doesn't count as a difference:
+
+- `npx -y pkg`, `npx --yes pkg@latest`, `pnpm dlx pkg`, `yarn dlx pkg`, `bunx pkg` and
+  `bun x pkg` all run the npm package `pkg`.
+- `uvx pkg`, `uv tool run pkg` and `pipx run pkg` all run the PyPI package `pkg`.
+- `npx mcp-remote <url>` reaches the remote server at `<url>`.
+- No version and `latest` both mean the newest version.
+- `${KEY}` in Claude Code and `${env:KEY}` in Cursor refer to the same environment variable.
+
+Environment variables and headers are compared by name only, since their values can be
+secrets.
+
+## Supported agents
+
+| Agent       | MCP config file                   | Agent directory | Format                                         |
+| ----------- | --------------------------------- | --------------- | ---------------------------------------------- |
+| Claude Code | `.mcp.json`                       | `.claude/`      | JSON, `mcpServers`                             |
+| Codex       | `.codex/config.toml`              | `.codex/`       | TOML, `[mcp_servers.<name>]`                   |
+| Cursor      | `.cursor/mcp.json`                | `.cursor/`      | JSON, `mcpServers`                             |
+| OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp`     |
+
+gglint compares the agents that have an MCP config file or their own directory at the
+repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't
+count, because it doesn't show that the agent is set up in the repository.
+
+## How fixing works
+
+`--fix` adds and never changes or removes anything that is already written.
+
+- A missing server is copied from the first config file where it's turned on, and added to
+  each config file that lacks it.
+- A config file is created only with `--create`, and only for an agent with its own
+  directory. It receives every server that is turned on in the other agents.
+- JSON is edited with [jsonc-parser](https://github.com/dprint/jsonc-parser) and TOML with
+  [toml_edit](https://github.com/toml-rs/toml), so comments and formatting are kept.
+- Running `--fix` a second time changes nothing.
+- A file excluded by `.gitignore` is still updated, and marked `gitignored` in the output,
+  because the change won't be committed.
+
+References to environment variables are rewritten in each agent's syntax, in values and in
+command lines:
+
+| Agent       | Environment variable `KEY`                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| Claude Code | `${KEY}`                                                                                    |
+| Cursor      | `${env:KEY}`                                                                                |
+| OpenCode    | `{env:KEY}`                                                                                 |
+| Codex       | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
+
+Remote servers get `"type": "http"` in Claude Code, or `"sse"` for a URL ending in `/sse`.
+OpenCode servers get `"type": "local"` or `"remote"`, with the command and its arguments in
+one list.
+
+A server is skipped, and listed under `Not added:`, when its setup can't be expressed in the
+other agent's format: for example Claude Code's `${KEY:-default}`, Cursor's
+`${workspaceFolder}`, or an environment variable inside a command line, which Codex doesn't
+expand.
+
+### Example
 
 ```console
 $ gglint mcp --fix
@@ -115,7 +176,7 @@ Changed 3 files:
 Review the changes with `git diff`.
 ```
 
-Each server is written the way its agent expects. The same `github` server became:
+The same `github` server, written for Codex and Cursor:
 
 ```diff
 # .codex/config.toml
@@ -132,35 +193,27 @@ Each server is written the way its agent expects. The same `github` server becam
 +    }
 ```
 
-What's left is for you to decide: `playwright` still runs another version, with other
-arguments, in Cursor, and OpenCode still has no config file. `--fix --create` creates it:
-
 ```console
 $ gglint mcp --fix --create
 Changed 1 file:
   opencode.json (new)   added github, playwright, linear
 ```
 
-### Other formats
+## Output formats
 
-`--format lines` prints one line per problem: where it is, the rule, and a sentence naming
-the server or agent, then where else the server is set up.
+`--format lines` prints one problem per line: where it is, the rule, and a description, with
+the server's other locations indented below it.
 
 ```console
 $ gglint mcp --format lines
 ./.mcp.json:3:5  missing-server   `github` is set up for Claude Code but not for Codex (.codex/config.toml) or Cursor (.cursor/mcp.json)
-./.mcp.json:8:5  missing-server   `playwright` is set up for Claude Code and Cursor but not for Codex (.codex/config.toml)
-    also at ./.cursor/mcp.json:3:5
 ./.mcp.json:8:5  different-server `playwright` runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor
     also at ./.cursor/mcp.json:3:5
-./.mcp.json:8:5  different-server `playwright` is started with different arguments: `--headless` in Claude Code; no arguments in Cursor
-    also at ./.cursor/mcp.json:3:5
-./.cursor/mcp.json:7:5  missing-server   `linear` is set up for Cursor but not for Claude Code (.mcp.json) or Codex (.codex/config.toml)
 ./.mcp.json:3:5  missing-config   OpenCode has a .opencode directory but no opencode.json, so it gets none of the 3 MCP servers set up for Claude Code and Cursor
 ```
 
-`--servers` lists every server as it's written, with the names of its environment variables
-and headers (never their values):
+`--servers` lists every server as it's written. Environment variables and headers are shown
+by name, never by value.
 
 ```console
 $ gglint mcp --servers
@@ -170,154 +223,76 @@ $ gglint mcp --servers
 ./.cursor/mcp.json:7:5  cursor       linear  https://mcp.linear.app/sse
 ```
 
-## Supported agents
+## Continuous integration
 
-| Agent       | MCP config file                   | Its directory | Format                                                                 |
-| ----------- | --------------------------------- | ------------- | ---------------------------------------------------------------------- |
-| Claude Code | `.mcp.json`                       | `.claude/`    | JSON, `mcpServers`                                                     |
-| Codex       | `.codex/config.toml`              | `.codex/`     | TOML, `[mcp_servers.<name>]`                                           |
-| Cursor      | `.cursor/mcp.json`                | `.cursor/`    | JSON, `mcpServers`                                                     |
-| OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`  | JSON with comments, `mcp.servers` (or `mcp` before V2); the command is one list |
-
-The agents compared are those with an MCP config file or their own directory at the
-repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` alone doesn't count: it says
-people use an agent, not that the repository sets it up.
-
-## What gglint reports
-
-| Rule               | Reported when                                                                                   |
-| ------------------ | ----------------------------------------------------------------------------------------------- |
-| `missing-server`   | A server set up in one agent's MCP config file isn't in another agent's. `--fix` adds it.       |
-| `missing-config`   | An agent has its own directory but no MCP config file, while other agents have servers. `--fix --create` creates the file. |
-| `different-server` | The same server runs another program, URL or version, with other arguments, environment variables or headers, or is turned off in one agent. Reported only. |
-| `renamed-server`   | The same server has another name in some agents. Reported only.                                 |
-
-**Servers are matched by name, and then by what they run**, so a server under another name
-in one agent is still the same server (and reported as `renamed-server`, not missing). How a
-server is started doesn't count as a difference: `npx -y pkg`, `npx --yes pkg@latest`,
-`pnpm dlx pkg`, `yarn dlx pkg`, `bunx pkg` and `bun x pkg` all run the npm package `pkg`,
-`uvx pkg`, `uv tool run pkg` and `pipx run pkg` the PyPI package `pkg`, and
-`npx mcp-remote <url>` reaches the server at `<url>`. No version and `latest` both mean the
-newest version. References to an environment variable mean the same in every agent's
-syntax: `${KEY}` in Claude Code and `${env:KEY}` in Cursor are the same argument.
-
-**Environment variables and headers** are compared by name only: their values can be secrets,
-and each agent writes references to the environment differently.
-
-**A server turned off** (`enabled = false` in Codex or OpenCode) is reported as a difference
-from the agents where it's on, and isn't copied anywhere. A server turned off in every agent
-that has it isn't missing anywhere.
-
-## How `--fix` works
-
-`--fix` **adds and never removes or changes** what is already written.
-
-- **A missing server** is added to the agent's config file, copied from the first file where
-  it's turned on.
-- **A config file is created only with `--create`**, and only for an agent with its own
-  directory. It gets every server turned on in the other agents.
-- **A server set up differently is never changed.** Those differences are reported, and are
-  often deliberate: each agent running its own runtime or port, or setting its own
-  environment. Decide which setup is right and edit it yourself.
-- **Comments and formatting are kept**: JSON is edited with
-  [jsonc-parser](https://github.com/dprint/jsonc-parser)'s CST and TOML with
-  [toml_edit](https://github.com/toml-rs/toml). Running `--fix` again changes nothing.
-- **A file your `.gitignore` leaves out** is still written, and marked `gitignored`: the change
-  stays on your machine.
-
-Each agent's syntax for a reference to the user's environment is translated, in values and in
-command lines:
-
-| Agent       | Environment variable `KEY`                                                       |
-| ----------- | -------------------------------------------------------------------------------- |
-| Claude Code | `${KEY}`                                                                         |
-| Cursor      | `${env:KEY}`                                                                     |
-| OpenCode    | `{env:KEY}`                                                                      |
-| Codex       | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
-
-Remote servers get `"type": "http"` in Claude Code, or `"sse"` for a URL ending in `/sse`;
-OpenCode servers get `"type": "local"` or `"remote"`, with the command and its arguments as one
-list.
-
-**Not added**, and listed under `Not added:`, is a server whose setup the other agent can't
-express: a value such as Claude Code's `${KEY:-default}` or Cursor's `${workspaceFolder}`, or
-a reference to an environment variable in a command line, which Codex can't fill in.
-
-## Use in CI
-
-`gglint mcp` exits with status 1 when it finds a problem, so it can fail a build:
+Fail a pull request when the agents' MCP servers drift apart:
 
 ```yaml
 # .github/workflows/mcp.yml
 name: MCP servers
 on: [pull_request]
+
 jobs:
   gglint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: cargo install --git https://github.com/corridor/gglint --locked
-      - run: gglint mcp --format lines
+      - run: pipx run --spec gglint==0.1.0 gglint mcp --format lines
 ```
 
-## Safety
+## Security
 
-- **Nothing is run or fetched.** MCP servers aren't started, packages aren't looked up, and
-  references to the environment aren't expanded. gglint only reads files at fixed paths under
-  the repository's root, so it's safe to point at an untrusted repository.
-- **Secrets stay out of the output.** Environment variables and headers are printed by name,
-  never by value.
-- **The one program gglint runs** is `git check-ignore`, during `--fix`, to mark files your
-  `.gitignore` leaves out.
-- **It's fast.** Reading and comparing a repository's config files takes well under a
-  millisecond; most of the time is spent starting the program.
+- **Read-only by default.** Without `--fix`, gglint reads files and writes nothing.
+- **Nothing is executed or fetched.** MCP servers aren't started, packages aren't resolved,
+  and environment variables aren't expanded. It's safe to run on an untrusted repository.
+- **Secrets stay out of the output.** Environment variables and headers are printed by name
+  only.
+- **One external program.** During `--fix`, gglint runs `git check-ignore` to mark files your
+  `.gitignore` excludes.
 
 ## Limitations
 
-- **Claude Code plugins.** Servers a plugin adds, turned on in `.claude/settings.json`, aren't
-  read, so a server another agent's file has can be reported missing from Claude Code.
-- **Settings outside the repository**, such as each person's `~/.claude.json` or
-  `~/.codex/config.toml`, aren't read.
-- **Other agents**, such as VS Code and GitHub Copilot (`.vscode/mcp.json`) or Gemini CLI
-  (`.gemini/settings.json`), aren't read yet.
-- **Monorepos.** Only config files at the repository's root are read.
-- **Codex** only reads `.codex/config.toml` in projects the user has trusted.
-
-## Use it as a library
-
-```rust
-use std::path::Path;
-
-use gglint::harness::{FixOptions, check_mcp, fix_mcp, read_mcp};
-
-let root = Path::new("path/to/repo");
-let configs = read_mcp(root); // each agent's MCP config file, and its servers
-let check = check_mcp(root, &configs); // each server in each agent, and every problem
-for finding in check.findings() {
-    println!("{}: {}", finding.rule.as_str(), finding.message);
-}
-let report = fix_mcp(root, &configs, &check, &FixOptions::default()); // add what's missing
-```
+- Servers added by Claude Code plugins, enabled in `.claude/settings.json`, aren't read. A
+  server provided by a plugin can be reported as missing from Claude Code.
+- User-level settings such as `~/.claude.json` or `~/.codex/config.toml` aren't read.
+- Only config files at the repository's root are read, so each package of a monorepo is
+  checked separately.
+- VS Code and GitHub Copilot (`.vscode/mcp.json`) and Gemini CLI (`.gemini/settings.json`)
+  aren't supported yet.
+- Codex only reads `.codex/config.toml` in projects you have marked as trusted.
 
 ## Development
 
 ```sh
-cargo test
+cargo test                          # unit and integration tests
+cargo clippy --all-targets          # lints
+cargo fmt                           # formatting
 ```
 
-`tests/corpus.rs` checks `--fix` against real repositories. Point it at a directory of clones,
-and it fixes a copy of each, with and without `--create`, and fails if anything that was there
-is removed or changed, if a config file is created without `--create` or where the agent has
-no directory, if a config can't be read afterwards, if there are more problems after than
-before, or if a second run changes anything:
+`tests/corpus.rs` runs `--fix` against a directory of real repositories and checks that
+nothing existing is removed or changed, that config files are created only with `--create`
+and only in an agent's directory, that no file becomes unreadable, that problems never
+increase, and that a second run changes nothing:
 
 ```sh
 GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --nocapture
 ```
 
-The code is in [`src/harness/`](src/harness/): `mcp.rs` reads each agent's file, `compare.rs`
-finds the problems, and `fix.rs` adds the missing servers.
+The code lives in [`src/harness/`](https://github.com/corridor/gglint/tree/main/src/harness):
+`mcp.rs` reads each agent's config, `compare.rs` finds the problems, and `fix.rs` writes the
+fixes.
+
+### Releasing
+
+1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
+2. Merge to `main`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.1.0`.
+
+The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
+builds and tests every wheel, publishes them to PyPI, and attaches them to the release.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+gglint is licensed under the [Apache License 2.0](https://github.com/corridor/gglint/blob/main/LICENSE).
+The licenses of the libraries compiled into it are listed in
+[THIRD_PARTY_LICENSES](https://github.com/corridor/gglint/blob/main/THIRD_PARTY_LICENSES).
