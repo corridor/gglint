@@ -23,6 +23,8 @@ Scripts that pass `--create` or `--overwrite` need to drop them.
   same command and arguments in every agent
   ([#4](https://github.com/corridor/gglint/issues/4)).
 - The hints under `missing-config` and `different-server` findings now point to `--fix`.
+- The README shows one way to run gglint, `uvx gglint`, and every block of commands is a
+  sequence of steps to run in order, never a list of alternatives.
 
 ### Removed
 

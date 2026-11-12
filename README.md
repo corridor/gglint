@@ -33,49 +33,27 @@ problems gglint reports.
 
 ## Quick start
 
-From the root of a repository, run gglint with [uv](https://docs.astral.sh/uv/). Nothing
-needs to be installed first:
+gglint runs with `uvx`, which comes with [uv](https://docs.astral.sh/uv/). If `uvx` isn't on
+your machine, install uv with its
+[installation guide](https://docs.astral.sh/uv/getting-started/installation/) first.
+
+From the root of a repository, run these three commands in order:
 
 ```sh
-uvx gglint mcp          # report every problem
-uvx gglint mcp --fix    # fix them
-git diff                # review what changed
+uvx gglint mcp
+uvx gglint mcp --fix
+git diff
 ```
 
-Without uv, `pipx run gglint mcp` does the same.
-
-## Installation
-
-To install gglint and run it as `gglint`:
-
-```sh
-uv tool install gglint
-```
-
-```sh
-pipx install gglint
-```
-
-```sh
-pip install gglint
-```
-
-gglint is a single compiled program, published on PyPI with prebuilt wheels for Linux
-(x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and Windows (x64 and
-ARM64). Any Python 3.8 or later can install it.
-
-To build it from source, install a [Rust toolchain](https://rustup.rs) (1.88 or later) and
-run:
-
-```sh
-cargo install --git https://github.com/corridor/gglint --locked
-```
+The first reports every problem, the second fixes them, and the third shows what changed.
+`uvx` downloads gglint the first time and reuses it afterwards; there's nothing else to
+install. It works on Linux, macOS and Windows.
 
 ## Usage
 
 ```text
-gglint mcp [--fix] [--source AGENT] [--format table|lines] [PATH]
-gglint mcp --servers [PATH]
+uvx gglint mcp [--fix] [--source AGENT] [--format table|lines] [PATH]
+uvx gglint mcp --servers [PATH]
 ```
 
 | Option              | Effect                                                                                   |
@@ -140,7 +118,7 @@ count, because it doesn't show that the agent is set up in the repository.
 
 Every server is copied from the first config file where it's turned on, in the order
 Claude Code, Codex, Cursor, OpenCode. To make one agent the source of truth instead, name it
-with `--source`: `gglint mcp --fix --source codex` takes each server from Codex wherever
+with `--source`: `uvx gglint mcp --fix --source codex` takes each server from Codex wherever
 Codex has it turned on, and from the first agent otherwise. `--fix` never removes a server.
 
 - A missing server is added to each config file that lacks it.
@@ -179,7 +157,7 @@ expand.
 ### Example
 
 ```console
-$ gglint mcp --fix
+$ uvx gglint mcp --fix
 Changed 4 files:
   .mcp.json             added linear
   .codex/config.toml    added github, playwright, linear
@@ -220,7 +198,7 @@ Cursor's `playwright` now starts as in Claude Code:
 the server's other locations indented below it.
 
 ```console
-$ gglint mcp --format lines
+$ uvx gglint mcp --format lines
 ./.mcp.json:3:5  missing-server   `github` is set up for Claude Code but not for Codex (.codex/config.toml) or Cursor (.cursor/mcp.json)
 ./.mcp.json:8:5  different-server `playwright` runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor
     also at ./.cursor/mcp.json:3:5
@@ -231,7 +209,7 @@ $ gglint mcp --format lines
 by name, never by value.
 
 ```console
-$ gglint mcp --servers
+$ uvx gglint mcp --servers
 ./.mcp.json:3:5  claude-code  github  https://api.githubcopilot.com/mcp/  (headers=[Authorization])
 ./.mcp.json:8:5  claude-code  playwright  npx -y @playwright/mcp@0.0.78 --headless
 ./.cursor/mcp.json:3:5  cursor       playwright  npx -y @playwright/mcp@latest
@@ -252,7 +230,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pipx run --spec gglint==0.2.0 gglint mcp --format lines
+      - uses: astral-sh/setup-uv@v7
+      - run: uvx gglint@0.2.0 mcp --format lines
 ```
 
 ## Security
@@ -278,10 +257,13 @@ jobs:
 
 ## Development
 
+gglint is written in Rust. With a [Rust toolchain](https://rustup.rs) 1.88 or later, run these
+three commands in order before each commit; CI runs the same checks:
+
 ```sh
-cargo test                          # unit and integration tests
-cargo clippy --all-targets          # lints
-cargo fmt                           # formatting
+cargo fmt
+cargo clippy --all-targets -- --deny warnings
+cargo test
 ```
 
 `tests/corpus.rs` runs `--fix` against a directory of real repositories and checks that no
