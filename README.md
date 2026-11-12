@@ -13,8 +13,18 @@ file and not the other, or an agent has no MCP config at all. gglint finds every
 and fixes it for you, written in each agent's own format.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="gglint mcp drawing each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then listing six problems: missing servers, servers set up differently, and an agent without a config file" width="100%">
+  <img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="An animated terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%">
 </p>
+
+The same result as a table. Hover over a server, an agent or a cell to see what gglint found
+there and what `--fix` does about it:
+
+<table>
+<tr><th>Server</th><th><a href="#what-gglint-checks" title="Claude Code reads .mcp.json">Claude Code</a></th><th><a href="#what-gglint-checks" title="Codex reads .codex/config.toml">Codex</a></th><th><a href="#what-gglint-checks" title="Cursor reads .cursor/mcp.json">Cursor</a></th><th><a href="#what-gglint-checks" title="OpenCode has a .opencode directory but no opencode.json">OpenCode</a></th></tr>
+<tr><td><a href="#what-gglint-checks" title="https://api.githubcopilot.com/mcp/, with an Authorization header"><code>github</code></a></td><td align="center"><a href="#what-gglint-checks" title="Set up in .mcp.json:3">✓</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Codex. --fix adds it to .codex/config.toml, as set up in .mcp.json:3">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Cursor. --fix adds it to .cursor/mcp.json, as set up in .mcp.json:3">✗</a></td><td align="center"><a href="#what-gglint-checks" title="OpenCode has no opencode.json. --fix creates it with the 3 MCP servers set up for Claude Code and Cursor.">✗</a></td></tr>
+<tr><td><a href="#what-gglint-checks" title="npx -y @playwright/mcp@0.0.78 --headless in Claude Code; npx -y @playwright/mcp@latest in Cursor"><code>playwright</code></a></td><td align="center"><a href="#what-gglint-checks" title="Set up in .mcp.json:8: npx -y @playwright/mcp@0.0.78 --headless">✓</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Codex. --fix adds it to .codex/config.toml, as set up in .mcp.json:8">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Set up differently in .cursor/mcp.json:3: the newest version, without --headless. --fix starts it as in .mcp.json:8">≠</a></td><td align="center"><a href="#what-gglint-checks" title="OpenCode has no opencode.json. --fix creates it with the 3 MCP servers set up for Claude Code and Cursor.">✗</a></td></tr>
+<tr><td><a href="#what-gglint-checks" title="https://mcp.linear.app/sse"><code>linear</code></a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Claude Code. --fix adds it to .mcp.json, as set up in .cursor/mcp.json:7">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Codex. --fix adds it to .codex/config.toml, as set up in .cursor/mcp.json:7">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Set up in .cursor/mcp.json:7">✓</a></td><td align="center"><a href="#what-gglint-checks" title="OpenCode has no opencode.json. --fix creates it with the 3 MCP servers set up for Claude Code and Cursor.">✗</a></td></tr>
+</table>
 
 - **One view of every agent.** A table shows which agent gets which server, and how each
   one differs.
