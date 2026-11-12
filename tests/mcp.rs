@@ -710,7 +710,7 @@ fn describes_each_finding_and_how_to_fix_it() {
             ),
             (
                 "Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.",
-                None
+                Some("`gglint mcp --fix --overwrite` starts it everywhere as in .codex/config.toml:5")
             ),
             (
                 "Claude Code has a .claude directory but no .mcp.json.",
@@ -910,7 +910,13 @@ fn fix_creates_no_config_file_without_create() {
 fn fix_with_create_creates_the_config_file_of_an_agent_with_its_directory() {
     let dir = without_cursor_config();
 
-    let (report, left) = fix_with(&dir, FixOptions { create: true });
+    let (report, left) = fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
 
     assert!(left.is_empty(), "{left:?}");
     let changed: Vec<(String, bool)> = report
@@ -936,7 +942,13 @@ fn fix_creates_an_opencode_config_with_its_schema() {
     );
     dir.write(".opencode/agent/review.md", "Be brief.\n");
 
-    let (_, left) = fix_with(&dir, FixOptions { create: true });
+    let (_, left) = fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
 
     assert!(left.is_empty(), "{left:?}");
     assert_eq!(
@@ -958,7 +970,13 @@ fn fix_leaves_a_server_set_up_differently_as_it_is() {
     dir.write(".mcp.json", &claude);
     dir.write(".codex/config.toml", codex);
 
-    let (report, left) = fix_with(&dir, FixOptions { create: true });
+    let (report, left) = fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
 
     assert_eq!(report, FixReport::default());
     assert_eq!(read(&dir, ".mcp.json"), claude);
@@ -1000,6 +1018,147 @@ fn fix_leaves_a_server_it_cannot_write_for_the_other_agent() {
 }
 
 #[test]
+fn fix_overwrite_starts_a_server_as_in_the_first_file_and_keeps_its_other_keys() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""angular-cli": { "command": "npx", "args": ["-y", "@angular/cli", "mcp", "--read-only"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "# Codex only.\n[mcp_servers.angular-cli]\ncommand = \"pnpm\"\nargs = [\"dlx\", \"@angular/cli\", \"mcp\"]\n\
+         cwd = \".\"\nenabled_tools = [\"list_projects\"]\n",
+    );
+    dir.write(
+        "opencode.jsonc",
+        r#"{
+  // Shared with the team.
+  "mcp": {
+    "angular-cli": { "type": "local", "command": ["npx", "-y", "@angular/cli", "mcp"], "enabled": true },
+  },
+}
+"#,
+    );
+
+    let (report, left) = fix_with(
+        &dir,
+        FixOptions {
+            overwrite: true,
+            ..FixOptions::default()
+        },
+    );
+
+    assert!(left.is_empty(), "{left:?}");
+    let updated: Vec<(String, Vec<String>)> = report
+        .changed
+        .iter()
+        .map(|file| (file.relative_path.display().to_string(), file.updated.clone()))
+        .collect();
+    assert_eq!(
+        updated,
+        [
+            (".codex/config.toml".to_string(), vec!["angular-cli".to_string()]),
+            ("opencode.jsonc".to_string(), vec!["angular-cli".to_string()]),
+        ]
+    );
+    // Codex's own keys and the comments are kept.
+    assert_eq!(
+        read(&dir, ".codex/config.toml"),
+        "# Codex only.\n[mcp_servers.angular-cli]\ncommand = \"npx\"\nargs = [\"-y\", \"@angular/cli\", \"mcp\", \"--read-only\"]\n\
+         cwd = \".\"\nenabled_tools = [\"list_projects\"]\n"
+    );
+    assert_eq!(
+        read(&dir, "opencode.jsonc"),
+        r#"{
+  // Shared with the team.
+  "mcp": {
+    "angular-cli": { "type": "local", "command": ["npx", "-y", "@angular/cli", "mcp", "--read-only"], "enabled": true },
+  },
+}
+"#
+    );
+}
+
+#[test]
+fn fix_overwrite_removes_arguments_the_first_file_does_not_have() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", mcp_servers(r#""lint": { "command": "lint-mcp" }"#));
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.lint]\ncommand = \"lint-mcp\"\nargs = [\"--strict\"]\n",
+    );
+
+    let (_, left) = fix_with(
+        &dir,
+        FixOptions {
+            overwrite: true,
+            ..FixOptions::default()
+        },
+    );
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(
+        read(&dir, ".codex/config.toml"),
+        "[mcp_servers.lint]\ncommand = \"lint-mcp\"\n"
+    );
+}
+
+#[test]
+fn fix_overwrite_leaves_every_other_difference() {
+    let dir = TempDir::new();
+    let claude = mcp_servers(
+        r#""docs": { "type": "http", "url": "https://docs.example.com/mcp" },
+           "search": { "command": "npx", "args": ["search-mcp"], "env": { "TOKEN": "${TOKEN}" } },
+           "lint": { "command": "npx", "args": ["lint-mcp"] }"#,
+    );
+    // Another program under the same name, other environment variables, and a server
+    // turned off.
+    let codex = "[mcp_servers.docs]\ncommand = \"uvx\"\nargs = [\"docs-mcp\"]\n\n\
+                 [mcp_servers.search]\ncommand = \"npx\"\nargs = [\"search-mcp\"]\n\n\
+                 [mcp_servers.lint]\ncommand = \"npx\"\nargs = [\"lint-mcp\", \"--fix\"]\nenabled = false\n";
+    dir.write(".mcp.json", &claude);
+    dir.write(".codex/config.toml", codex);
+
+    let (report, left) = fix_with(
+        &dir,
+        FixOptions {
+            overwrite: true,
+            ..FixOptions::default()
+        },
+    );
+
+    assert_eq!(report, FixReport::default());
+    assert_eq!(read(&dir, ".mcp.json"), claude);
+    assert_eq!(read(&dir, ".codex/config.toml"), codex);
+    assert_eq!(left.len(), 4, "{left:?}");
+}
+
+#[test]
+fn fix_overwrite_twice_changes_nothing_the_second_time() {
+    let dir = ggx_like();
+    let options = FixOptions {
+        create: true,
+        overwrite: true,
+    };
+
+    let (first, left) = fix_with(&dir, options);
+    let files: Vec<String> = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]
+        .iter()
+        .map(|file| read(&dir, file))
+        .collect();
+    let (second, _) = fix_with(&dir, options);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(first.changed.len(), 2);
+    assert_eq!(second, FixReport::default());
+    let again: Vec<String> = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]
+        .iter()
+        .map(|file| read(&dir, file))
+        .collect();
+    assert_eq!(again, files);
+}
+
+#[test]
 fn fix_never_removes_or_changes_what_is_there() {
     let dir = TempDir::new();
     dir.write(
@@ -1012,7 +1171,13 @@ fn fix_never_removes_or_changes_what_is_there() {
     );
     let before = read_mcp(dir.path());
 
-    fix_with(&dir, FixOptions { create: true });
+    fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
 
     let after = read_mcp(dir.path());
     for config in &before {
@@ -1037,10 +1202,22 @@ fn fix_never_removes_or_changes_what_is_there() {
 fn fix_twice_changes_nothing_the_second_time() {
     let dir = ggx_like();
 
-    let (first, _) = fix_with(&dir, FixOptions { create: true });
+    let (first, _) = fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
     let claude = read(&dir, ".mcp.json");
     let cursor = read(&dir, ".cursor/mcp.json");
-    let (second, left) = fix_with(&dir, FixOptions { create: true });
+    let (second, left) = fix_with(
+        &dir,
+        FixOptions {
+            create: true,
+            ..FixOptions::default()
+        },
+    );
 
     assert_eq!(first.changed.len(), 2);
     assert_eq!(second, FixReport::default());

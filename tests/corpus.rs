@@ -76,17 +76,33 @@ fn fix_keeps_its_promises_on_real_repositories() {
     let mut broken = Vec::new();
     let mut totals = Vec::new();
 
-    for create in [false, true] {
-        let (mut before_total, mut after_total, mut created, mut edited, mut added, mut left) = (0, 0, 0, 0, 0, 0);
+    let modes = [
+        ("--fix", FixOptions::default()),
+        (
+            "--fix --create",
+            FixOptions {
+                create: true,
+                ..FixOptions::default()
+            },
+        ),
+        (
+            "--fix --overwrite",
+            FixOptions {
+                overwrite: true,
+                ..FixOptions::default()
+            },
+        ),
+    ];
+    for (mode, options) in modes {
+        let (mut before_total, mut after_total, mut created, mut edited, mut added, mut updated, mut left) =
+            (0, 0, 0, 0, 0, 0, 0);
         for repo in &repos {
             let name = repo.file_name().unwrap().to_string_lossy().to_string();
             let dir = copy(repo);
             let root = dir.path();
-            let options = FixOptions { create };
             let before = read_mcp(root);
             let report = fix_mcp(root, &before, &check_mcp(root, &before), &options);
             let after = read_mcp(root);
-            let mode = if create { "--fix --create" } else { "--fix" };
             let mut fail = |what: String| broken.push(format!("{name} {mode}: {what}"));
 
             let new_warnings: Vec<_> = warnings(&after)
@@ -100,7 +116,7 @@ fn fix_keeps_its_promises_on_real_repositories() {
                 .iter()
                 .filter(|config| !before.iter().any(|old| old.relative_path == config.relative_path))
             {
-                if !create || !root.join(config.harness.directory()).is_dir() {
+                if !options.create || !root.join(config.harness.directory()).is_dir() {
                     fail(format!("created {}", config.relative_path.display()));
                 }
             }
@@ -116,8 +132,9 @@ fn fix_keeps_its_promises_on_real_repositories() {
                             server.name,
                             config.relative_path.display()
                         )),
+                        // Only `--overwrite` may change a command line, and nothing else.
                         Some(kept)
-                            if kept.transport != server.transport
+                            if (kept.transport != server.transport && !options.overwrite)
                                 || kept.env != server.env
                                 || kept.headers != server.headers
                                 || kept.enabled != server.enabled =>
@@ -145,13 +162,13 @@ fn fix_keeps_its_promises_on_real_repositories() {
             created += report.changed.iter().filter(|file| file.created).count();
             edited += report.changed.iter().filter(|file| !file.created).count();
             added += report.changed.iter().map(|file| file.added.len()).sum::<usize>();
+            updated += report.changed.iter().map(|file| file.updated.len()).sum::<usize>();
             left += report.unfixed.len();
         }
         totals.push(format!(
-        "{mode}: {before_total} problems before, {after_total} after; {added} servers added, {edited} files edited, \
-         {created} created; {left} servers not added",
-        mode = if create { "--fix --create" } else { "--fix" },
-    ));
+            "{mode}: {before_total} problems before, {after_total} after; {added} servers added, {updated} command \
+             lines updated, {edited} files edited, {created} created; {left} servers not added"
+        ));
     }
 
     eprintln!("{} repositories", repos.len());

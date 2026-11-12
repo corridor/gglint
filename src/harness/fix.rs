@@ -7,9 +7,15 @@
 //! A config file is created only with `FixOptions::create`, for an agent that has its own
 //! directory in the repository and no config file; it gets every server turned on elsewhere.
 //!
-//! Left for a person: a server set up differently in two files, which is reported and never
-//! changed, and a server whose setup can't be written for the other agent, such as a
-//! command line that reads an environment variable Codex can't fill in.
+//! With `FixOptions::overwrite`, a server that runs another version of the same program, or
+//! the same program with other arguments, is changed to start as in the first file where
+//! it's turned on. Only its command and arguments are written; its environment, headers and
+//! keys only one agent has (Codex's `cwd`, for example) are kept.
+//!
+//! Left for a person: a different program under the same name, other environment variables
+//! or headers, a server turned off in one agent, and a server whose setup can't be written
+//! for the other agent, such as a command line that reads an environment variable Codex
+//! can't fill in.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -18,7 +24,7 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
-use super::compare::{Cell, McpCheck};
+use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
 use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
@@ -28,6 +34,9 @@ pub struct FixOptions {
     /// Create the config file of an agent that has its own directory and no config file.
     /// Off by default: its users may not want MCP servers.
     pub create: bool,
+    /// Change a server started with another version or other arguments to start as in the
+    /// first file where it's turned on. Off by default: such differences can be deliberate.
+    pub overwrite: bool,
 }
 
 /// What `fix_mcp` changed, and what it left.
@@ -45,8 +54,9 @@ pub struct ChangedFile {
     pub relative_path: PathBuf,
     /// Whether it didn't exist before.
     pub created: bool,
-    /// The servers added to it.
+    /// The servers added to it, and those whose command line `overwrite` changed.
     pub added: Vec<String>,
+    pub updated: Vec<String>,
     /// Whether the repository's `.gitignore` leaves it out, so the change stays on this
     /// machine and isn't committed.
     pub ignored: bool,
@@ -67,13 +77,15 @@ enum Field {
     Map(Vec<(String, String)>),
 }
 
-/// One server to add to one agent's file.
+/// One server to add to one agent's file, or whose command line to change in it.
 struct Write {
     harness: Harness,
     relative_path: PathBuf,
     /// Its name in that file.
     name: String,
     fields: Vec<(&'static str, Field)>,
+    /// Whether it's already in the file, so only the keys in `fields` are written.
+    update: bool,
 }
 
 /// Adds the servers missing from the config files under `root`, as `check` lists them.
@@ -99,12 +111,32 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
                     relative_path,
                     name: source.server.name.clone(),
                     fields,
+                    update: false,
                 }),
                 Err(reason) => report.unfixed.push(Unfixed {
                     harness,
                     server: source.server.name.clone(),
                     reason,
                 }),
+            }
+        }
+        if options.overwrite {
+            for target in server.setups.iter().filter(|target| needs_overwrite(target, source)) {
+                let harness = target.site.harness;
+                match command_line_fields(&source.server.transport, source.site.harness, harness) {
+                    Ok(fields) => writes.push(Write {
+                        harness,
+                        relative_path: target.site.relative_path.clone(),
+                        name: target.server.name.clone(),
+                        fields,
+                        update: true,
+                    }),
+                    Err(reason) => report.unfixed.push(Unfixed {
+                        harness,
+                        server: target.server.name.clone(),
+                        reason,
+                    }),
+                }
             }
         }
     }
@@ -128,7 +160,8 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
                 ignored: ignored_by_git(root, &relative_path),
                 relative_path,
                 created,
-                added: file_writes.iter().map(|write| write.name.clone()).collect(),
+                added: names(&file_writes, false),
+                updated: names(&file_writes, true),
             }),
             Ok(None) => {}
             Err(reason) => report.unfixed.extend(file_writes.iter().map(|write| Unfixed {
@@ -139,6 +172,23 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
         }
     }
     report
+}
+
+/// Whether `target` should start as `source` does: the same program, turned on, started
+/// with another version or other arguments.
+fn needs_overwrite(target: &Setup, source: &Setup) -> bool {
+    target.site.harness != source.site.harness
+        && target.server.enabled
+        && same_program(target, source)
+        && !same_command_line(target, source)
+}
+
+fn names(writes: &[&Write], update: bool) -> Vec<String> {
+    writes
+        .iter()
+        .filter(|write| write.update == update)
+        .map(|write| write.name.clone())
+        .collect()
 }
 
 /// Whether git ignores `relative_path` under `root`. The one program gglint runs is git
@@ -265,6 +315,26 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
         }
     }
     Ok(fields)
+}
+
+/// The keys that say how `transport`, read from `source`, starts in `harness`'s file: its
+/// command and arguments, or OpenCode's one `command` list.
+fn command_line_fields(
+    transport: &Transport,
+    source: Harness,
+    harness: Harness,
+) -> Result<Vec<(&'static str, Field)>, String> {
+    match written_transport(transport, source, harness)? {
+        Transport::Command { command, args } if harness == Harness::OpenCode => {
+            let mut list = vec![command];
+            list.extend(args);
+            Ok(vec![("command", Field::List(list))])
+        }
+        Transport::Command { command, args } => {
+            Ok(vec![("command", Field::Text(command)), ("args", Field::List(args))])
+        }
+        Transport::Remote { .. } => Err("a remote server has no command line to change".to_string()),
+    }
 }
 
 fn is_empty(field: &Field) -> bool {
@@ -395,16 +465,32 @@ fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) ->
         }
     }
     for write in writes {
-        // Never over a server that's there.
-        if servers.get(&write.name).is_some() {
-            continue;
+        let existing = servers.get(&write.name).and_then(|property| property.object_value());
+        match existing {
+            Some(entry) if write.update => {
+                for (key, field) in &write.fields {
+                    match entry.get(key) {
+                        Some(property) if is_empty(field) => property.remove(),
+                        Some(property) => property.set_value(json_value(field)),
+                        None if is_empty(field) => {}
+                        None => {
+                            entry.append(key, json_value(field));
+                        }
+                    }
+                }
+            }
+            // Never over a server that's there.
+            Some(_) => {}
+            None if write.update => {}
+            None => {
+                let entry = write
+                    .fields
+                    .iter()
+                    .map(|(key, field)| (key.to_string(), json_value(field)))
+                    .collect();
+                servers.append(&write.name, CstInputValue::Object(entry));
+            }
         }
-        let entry = write
-            .fields
-            .iter()
-            .map(|(key, field)| (key.to_string(), json_value(field)))
-            .collect();
-        servers.append(&write.name, CstInputValue::Object(entry));
     }
     let mut written = root.to_string();
     if !written.ends_with('\n') {
@@ -435,6 +521,18 @@ fn write_toml(text: &str, writes: &[&Write]) -> Result<String, String> {
         return Err("its `mcp_servers` is written on one line".to_string());
     };
     for write in writes {
+        if write.update {
+            if let Some(entry) = servers.get_mut(&write.name).and_then(Item::as_table_like_mut) {
+                for (key, field) in &write.fields {
+                    if is_empty(field) {
+                        entry.remove(key);
+                    } else {
+                        entry.insert(key, toml_item(field));
+                    }
+                }
+            }
+            continue;
+        }
         // Never over a server that's there.
         if servers.contains_key(&write.name) {
             continue;

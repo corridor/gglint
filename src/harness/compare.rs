@@ -115,9 +115,12 @@ pub struct ServerCheck {
     /// up in it.
     pub cells: Vec<(Harness, Cell)>,
     pub findings: Vec<Finding>,
-    /// The setup a file missing the server gets: the first one that's turned on. `None`
-    /// when the server is turned off everywhere it's set up, so it isn't missing anywhere.
+    /// The setup a file missing the server gets, and the one `--overwrite` copies: the
+    /// first one that's turned on. `None` when the server is turned off everywhere it's set
+    /// up, so it isn't missing anywhere.
     pub source: Option<Setup>,
+    /// Every agent's setup of the server, in the order agents are reported.
+    pub setups: Vec<Setup>,
 }
 
 /// One agent's setup of a server.
@@ -125,6 +128,18 @@ pub struct ServerCheck {
 pub struct Setup {
     pub site: Site,
     pub server: McpServer,
+}
+
+/// Whether `a` and `b` run the same package, program or URL, however they're started.
+pub(super) fn same_program(a: &Setup, b: &Setup) -> bool {
+    Launch::of(&a.server.transport, a.site.harness).identity()
+        == Launch::of(&b.server.transport, b.site.harness).identity()
+}
+
+/// Whether `a` and `b` start the same version of the same program with the same arguments.
+/// The runner doesn't count: `npx -y pkg` and `pnpm dlx pkg` start the same command line.
+pub(super) fn same_command_line(a: &Setup, b: &Setup) -> bool {
+    Launch::of(&a.server.transport, a.site.harness) == Launch::of(&b.server.transport, b.site.harness)
 }
 
 /// The agents compared in the repository at `root`, in the order agents are reported: those
@@ -597,14 +612,26 @@ impl Group<'_> {
             findings.push(finding);
         }
 
-        let mut differ = |message: String, detail: String| {
-            findings.push(self.finding(Rule::DifferentServer, message, detail));
+        // A different version or other arguments of the same program has one fix: start it
+        // the same way everywhere, as the setup missing files get it from.
+        let overwrite = source.map(|entry| {
+            format!(
+                "`gglint mcp --fix --overwrite` starts it everywhere as in {}:{}",
+                entry.site.relative_path.display(),
+                entry.site.location.line
+            )
+        });
+        let mut differ = |message: String, detail: String, fix: Option<String>| {
+            let mut finding = self.finding(Rule::DifferentServer, message, detail);
+            finding.fix = fix;
+            findings.push(finding);
         };
         if let Some(servers) = self.disagreement(|entry| entry.launch.identity(), String::clone, &mut different) {
             // Versions and arguments of different programs can't be compared.
             differ(
                 format!("`{name}` is a different server in each file: {servers}"),
                 format!("A different server in each file: {servers}."),
+                None,
             );
         } else {
             if let Launch::Package {
@@ -623,6 +650,7 @@ impl Group<'_> {
                     differ(
                         format!("`{name}` runs different versions of the {registry} package `{package}`: {versions}"),
                         format!("Runs different versions of the {registry} package `{package}`: {versions}."),
+                        overwrite.clone(),
                     );
                 }
             }
@@ -635,6 +663,7 @@ impl Group<'_> {
                 differ(
                     format!("`{name}` is started with different arguments: {args}"),
                     format!("Started with different arguments: {args}."),
+                    overwrite.clone(),
                 );
             }
         }
@@ -660,6 +689,7 @@ impl Group<'_> {
             differ(
                 format!("`{name}` is given different environment variables: {env}"),
                 format!("Given different environment variables: {env}."),
+                None,
             );
         }
         let headers = |entry: &Entry| {
@@ -674,6 +704,7 @@ impl Group<'_> {
             differ(
                 format!("`{name}` is sent different HTTP headers: {headers}"),
                 format!("Sent different HTTP headers: {headers}."),
+                None,
             );
         }
 
@@ -710,6 +741,14 @@ impl Group<'_> {
                 site: entry.site.clone(),
                 server: entry.server.clone(),
             }),
+            setups: self
+                .entries
+                .iter()
+                .map(|entry| Setup {
+                    site: entry.site.clone(),
+                    server: entry.server.clone(),
+                })
+                .collect(),
         }
     }
 }

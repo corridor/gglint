@@ -1,8 +1,8 @@
 //! The `gglint` command.
 //!
 //! ```text
-//! gglint mcp [--fix [--create]] [--format F] [PATH]
-//!                               compare each agent's MCP servers, and add the missing ones
+//! gglint mcp [--fix [--create] [--overwrite]] [--format F] [PATH]
+//!                               compare each agent's MCP servers, and fix them
 //! gglint mcp --servers [PATH]   list every server
 //! ```
 
@@ -23,11 +23,14 @@ Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers
   gglint mcp --fix [PATH]           add the servers missing from a config file
   gglint mcp --fix --create [PATH]  also create the config file an agent is missing
+  gglint mcp --fix --overwrite [PATH]
+                                    also start each server with the same command line
   gglint mcp --servers [PATH]       list every server, file by file
   gglint mcp --format lines [PATH]  one line per problem, for scripts and CI
 
-PATH is the repository's root, the current directory by default. `--fix` only adds: a
-server set up differently in two files is reported and never changed.
+PATH is the repository's root, the current directory by default. `--fix` only adds.
+`--overwrite` copies the command and arguments of the first agent where a server is
+turned on to the others; everything else set up differently is reported and never changed.
 ";
 
 fn main() -> ExitCode {
@@ -81,10 +84,15 @@ fn mcp(args: &[String]) -> ExitCode {
                 fix = true;
                 continue;
             }
-            // Creating a config file is a way of fixing.
+            // Creating a config file and overwriting a command line are ways of fixing.
             "--create" => {
                 fix = true;
                 options.create = true;
+                continue;
+            }
+            "--overwrite" => {
+                fix = true;
+                options.overwrite = true;
                 continue;
             }
             "--help" | "-h" => {
@@ -232,7 +240,14 @@ fn print_fixes(report: &FixReport) {
         let count = report.changed.len();
         out.push_str(&format!("Changed {count} file{}:\n", if count == 1 { "" } else { "s" }));
         for (file, label) in report.changed.iter().zip(&labels) {
-            out.push_str(&format!("  {label:<width$}   added {}\n", file.added.join(", ")));
+            let mut what = Vec::new();
+            if !file.added.is_empty() {
+                what.push(format!("added {}", file.added.join(", ")));
+            }
+            if !file.updated.is_empty() {
+                what.push(format!("updated {}", file.updated.join(", ")));
+            }
+            out.push_str(&format!("  {label:<width$}   {}\n", what.join("; ")));
         }
         if report.changed.iter().any(|file| file.ignored) {
             out.push_str("  Gitignored files aren't committed, so those changes stay on this machine.\n");

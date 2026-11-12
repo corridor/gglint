@@ -187,7 +187,7 @@ fn mcp_draws_each_server_in_each_agent_and_every_problem() {
 
   angular-cli
     ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
-      .codex/config.toml:5, .cursor/mcp.json:1
+      `gglint mcp --fix --overwrite` starts it everywhere as in .codex/config.toml:5
 
   Missing config files
     ✗ Claude Code has a .claude directory but no .mcp.json.
@@ -215,13 +215,13 @@ fn mcp_rejects_an_unknown_format() {
 fn mcp_rejects_an_unknown_option() {
     let dir = ggx_like();
 
-    let output = gglint(&["mcp".as_ref(), "--overwrite".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&["mcp".as_ref(), "--force".as_ref(), dir.path().as_os_str()]);
 
     assert_eq!(output.status.code(), Some(1));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("unknown option \"--overwrite\"")
+            .contains("unknown option \"--force\"")
     );
     assert!(!dir.path().join(".mcp.json").exists());
 }
@@ -313,5 +313,38 @@ fn prints_the_version_and_usage() {
         String::from_utf8(bare.stderr)
             .unwrap()
             .starts_with("Keep the MCP servers")
+    );
+}
+
+#[test]
+fn mcp_fix_overwrite_starts_each_server_the_same_way() {
+    let dir = ggx_like();
+
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--fix".as_ref(),
+        "--create".as_ref(),
+        "--overwrite".as_ref(),
+        dir.path().as_os_str(),
+    ]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.starts_with(
+            "Changed 2 files:\n\
+             \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
+             \x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.ends_with("No problems: every agent gets the same servers, set up the same way.\n"),
+        "{stdout}"
+    );
+    let cursor = std::fs::read_to_string(dir.path().join(".cursor/mcp.json")).unwrap();
+    assert!(
+        cursor.contains(r#""command": "pnpm", "args": ["dlx", "@angular/cli", "mcp", "--read-only"]"#),
+        "{cursor}"
     );
 }
