@@ -12,8 +12,7 @@ All notable changes to gglint are recorded in this file. The format follows
   the config file of an agent that has its own directory, and starts each server with the
   same command and arguments in every agent
   ([#4](https://github.com/corridor/gglint/issues/4)).
-- `--create` and `--overwrite` are no longer needed. They're still accepted, print a note,
-  and do what `--fix` does.
+- `--create` and `--overwrite` are removed: `--fix` does what they did.
 
 ## [0.1.1] - 2026-11-12
 

@@ -215,13 +215,13 @@ fn mcp_rejects_an_unknown_format() {
 fn mcp_rejects_an_unknown_option() {
     let dir = ggx_like();
 
-    let output = gglint(&["mcp".as_ref(), "--force".as_ref(), dir.path().as_os_str()]);
+    let output = gglint(&["mcp".as_ref(), "--create".as_ref(), dir.path().as_os_str()]);
 
     assert_eq!(output.status.code(), Some(1));
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("unknown option \"--force\"")
+            .contains("unknown option \"--create\"")
     );
     assert!(!dir.path().join(".mcp.json").exists());
 }
@@ -286,25 +286,4 @@ fn prints_the_version_and_usage() {
             .unwrap()
             .starts_with("Keep the MCP servers")
     );
-}
-
-#[test]
-fn mcp_still_accepts_the_create_and_overwrite_flags_of_0_1_1() {
-    let dir = ggx_like();
-
-    let output = gglint(&[
-        "mcp".as_ref(),
-        "--create".as_ref(),
-        "--overwrite".as_ref(),
-        dir.path().as_os_str(),
-    ]);
-
-    assert!(output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-        stderr.contains("note: --create is no longer needed: --fix does it")
-            && stderr.contains("note: --overwrite is no longer needed: --fix does it"),
-        "{stderr}"
-    );
-    assert!(dir.path().join(".mcp.json").exists());
 }

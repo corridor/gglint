@@ -80,12 +80,6 @@ fn mcp(args: &[String]) -> ExitCode {
                 fix = true;
                 continue;
             }
-            // `--fix` does what these did in 0.1.1; they're still accepted so scripts keep working.
-            "--create" | "--overwrite" => {
-                eprintln!("note: {arg} is no longer needed: --fix does it");
-                fix = true;
-                continue;
-            }
             "--help" | "-h" => {
                 print!("{USAGE}");
                 return ExitCode::SUCCESS;
