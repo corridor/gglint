@@ -19,7 +19,8 @@ and adds the missing servers for you, written in each agent's own format.
 - **One view of every agent.** A table shows which agent gets which server, and how each
   one differs.
 - **Safe fixes.** `--fix` only adds servers. It never changes or removes an existing entry,
-  and keeps your comments and formatting.
+  and keeps your comments and formatting. `--overwrite`, when you ask for it, makes each
+  server start with the same command and arguments everywhere.
 - **Each agent's own format.** A server is translated between JSON and TOML, between each
   agent's syntax for environment variables, and between local and remote server types.
 - **Fast and read-only by default.** gglint reads a handful of files at fixed paths and
@@ -74,7 +75,7 @@ cargo install --git https://github.com/corridor/gglint --locked
 ## Usage
 
 ```text
-gglint mcp [--fix [--create]] [--format table|lines] [PATH]
+gglint mcp [--fix [--create] [--overwrite]] [--format table|lines] [PATH]
 gglint mcp --servers [PATH]
 ```
 
@@ -83,6 +84,7 @@ gglint mcp --servers [PATH]
 | *(none)*            | Report every problem and draw each server in each agent.                                 |
 | `--fix`             | Add the servers missing from existing config files, then report what's left.             |
 | `--fix --create`    | Also create the config file of an agent that has its own directory but no MCP config.   |
+| `--fix --overwrite` | Also make each server start with the same command and arguments in every agent.          |
 | `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
 | `--servers`         | List every configured server, file by file, without comparing them.                      |
 | `PATH`              | The repository's root. Defaults to the current directory.                               |
@@ -101,11 +103,13 @@ line, with counts and timing, goes to standard error.
 | ------------------ | --------------------------------------------------------------------------------------------------- | ----------------- |
 | `missing-server`   | A server in one agent's config file is missing from another agent's.                                | `--fix`           |
 | `missing-config`   | An agent has its own directory but no MCP config file, while other agents have servers.            | `--fix --create`  |
-| `different-server` | The same server runs another program, URL or version, or has other arguments, environment variables or headers, or is turned off in one agent. | Reported only |
+| `different-server` | The same server runs another version or has other arguments.                                        | `--fix --overwrite` |
+|                    | The same server runs another program or URL, has other environment variables or headers, or is turned off in one agent. | Reported only |
 | `renamed-server`   | The same server has a different name in some agents.                                                | Reported only     |
 
-Differences in how a server is set up are often deliberate, such as each agent running its
-own runtime or port, so gglint reports them and leaves the choice to you.
+Differences in how a server is set up are sometimes deliberate, such as each agent running
+its own runtime or port, so `--fix` only reports them. When the command lines should match,
+`--overwrite` makes them match; everything else is left to you.
 
 **Matching servers.** Servers are matched by name, then by what they run, so a server named
 differently in one agent is still recognised as the same server. The way a package is
@@ -138,10 +142,16 @@ count, because it doesn't show that the agent is set up in the repository.
 
 `--fix` adds and never changes or removes anything that is already written.
 
-- A missing server is copied from the first config file where it's turned on, and added to
-  each config file that lacks it.
+- A missing server is copied from the first config file where it's turned on, in the order
+  Claude Code, Codex, Cursor, OpenCode, and added to each config file that lacks it.
 - A config file is created only with `--create`, and only for an agent with its own
   directory. It receives every server that is turned on in the other agents.
+- A command line is changed only with `--overwrite`. A server that runs another version of
+  the same program, or the same program with other arguments, gets the command and
+  arguments of that same first config file. Its environment variables, headers, on/off
+  state and keys only one agent has, such as Codex's `cwd`, are kept. Review the result
+  with `git diff`: a difference such as a runtime chosen per agent, or a path that starts
+  with Cursor's `${workspaceFolder}`, may have been deliberate.
 - JSON is edited with [jsonc-parser](https://github.com/dprint/jsonc-parser) and TOML with
   [toml_edit](https://github.com/toml-rs/toml), so comments and formatting are kept.
 - Running `--fix` a second time changes nothing.
@@ -196,6 +206,22 @@ The same `github` server, written for Codex and Cursor:
 +    }
 ```
 
+With `--overwrite`, Cursor's `playwright` also starts as in Claude Code:
+
+```console
+$ gglint mcp --fix --overwrite
+Changed 3 files:
+  .mcp.json            added linear
+  .codex/config.toml   added github, playwright, linear
+  .cursor/mcp.json     added github; updated playwright
+```
+
+```diff
+# .cursor/mcp.json
+-      "args": ["-y", "@playwright/mcp@latest"]
++      "args": ["-y", "@playwright/mcp@0.0.78", "--headless"]
+```
+
 ```console
 $ gglint mcp --fix --create
 Changed 1 file:
@@ -240,7 +266,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pipx run --spec gglint==0.1.0 gglint mcp --format lines
+      - run: pipx run --spec gglint==0.1.1 gglint mcp --format lines
 ```
 
 ## Security
