@@ -4,12 +4,16 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-12
+
+`--fix` is now the only fix flag, and `--source` chooses the agent servers are copied from.
+Scripts that pass `--create` or `--overwrite` need to drop them.
 
 ### Added
 
 - `--source AGENT` makes one agent the source of truth: each server's setup is taken from
-  it wherever it has the server turned on, instead of from the first agent
+  it wherever it has the server turned on, instead of from the first agent in the order
+  Claude Code, Codex, Cursor, OpenCode
   ([#3](https://github.com/corridor/gglint/issues/3)).
 
 ### Changed
@@ -18,7 +22,12 @@ All notable changes to gglint are recorded in this file. The format follows
   the config file of an agent that has its own directory, and starts each server with the
   same command and arguments in every agent
   ([#4](https://github.com/corridor/gglint/issues/4)).
-- `--create` and `--overwrite` are removed: `--fix` does what they did.
+- The hints under `missing-config` and `different-server` findings now point to `--fix`.
+
+### Removed
+
+- `--create` and `--overwrite`. `--fix` does what they did, and passing either is now an
+  unknown option.
 
 ## [0.1.1] - 2026-11-12
 
@@ -59,5 +68,6 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.2.0]: https://github.com/corridor/gglint/releases/tag/v0.2.0
 [0.1.1]: https://github.com/corridor/gglint/releases/tag/v0.1.1
 [0.1.0]: https://github.com/corridor/gglint/releases/tag/v0.1.0
