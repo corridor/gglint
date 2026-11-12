@@ -25,8 +25,9 @@ Scripts that pass `--create` or `--overwrite` need to drop them.
 - The hints under `missing-config` and `different-server` findings now point to `--fix`.
 - The README shows one way to run gglint, `uvx gglint`, and every block of commands is a
   sequence of steps to run in order, never a list of alternatives.
-- The README's screenshot is replaced by an animated terminal, followed by a table whose
-  servers, agents and cells explain themselves on hover, on GitHub and on PyPI.
+- The README's screenshot is replaced by a terminal graphic. Opened on its own, hovering a
+  server, an agent, a cell or a problem shows a card with the details. Below it, a table
+  explains its servers, agents and cells on hover, on GitHub and on PyPI.
 
 ### Removed
 

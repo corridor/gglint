@@ -13,11 +13,12 @@ file and not the other, or an agent has no MCP config at all. gglint finds every
 and fixes it for you, written in each agent's own format.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="An animated terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%">
+  <a href="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg"><img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="A terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%"></a>
 </p>
 
-The same result as a table. Hover over a server, an agent or a cell to see what gglint found
-there and what `--fix` does about it:
+Click the terminal to open it on its own, then hover over a server, an agent, a cell or a
+problem to see what gglint found there and what `--fix` does about it. The same details are
+in this table, on hover:
 
 <table>
 <tr><th>Server</th><th><a href="#what-gglint-checks" title="Claude Code reads .mcp.json">Claude Code</a></th><th><a href="#what-gglint-checks" title="Codex reads .codex/config.toml">Codex</a></th><th><a href="#what-gglint-checks" title="Cursor reads .cursor/mcp.json">Cursor</a></th><th><a href="#what-gglint-checks" title="OpenCode has a .opencode directory but no opencode.json">OpenCode</a></th></tr>
