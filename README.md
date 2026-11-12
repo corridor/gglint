@@ -105,9 +105,9 @@ line, with counts and timing, goes to standard error.
 |                    | The same server runs another program or URL, has other environment variables or headers, or is turned off in one agent. | Reported only |
 | `renamed-server`   | The same server has a different name in some agents.                                                | Reported only     |
 
-Differences in how a server is set up are sometimes deliberate, such as each agent running
-its own runtime or port, so `--fix` only reports them. When the command lines should match,
-`--fix` makes them match; everything else is left to you.
+`--fix` makes the command lines match, since the same server should normally start the same
+way everywhere. The other differences can be deliberate, such as each agent setting its own
+environment variables, so gglint reports them and leaves them to you.
 
 **Matching servers.** Servers are matched by name, then by what they run, so a server named
 differently in one agent is still recognised as the same server. The way a package is
@@ -252,7 +252,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pipx run --spec gglint==0.1.1 gglint mcp --format lines
+      - run: pipx run --spec gglint==0.2.0 gglint mcp --format lines
 ```
 
 ## Security
@@ -301,7 +301,7 @@ fixes.
 
 1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
 2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.1.0`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.2.0`.
 
 The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
 builds and tests every wheel, publishes them to PyPI, and attaches them to the release.
