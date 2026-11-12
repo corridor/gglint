@@ -4,7 +4,7 @@
 //!   to use.
 //! - `compare.rs` finds how they differ: missing servers, missing config files, and servers
 //!   set up differently.
-//! - `fix.rs` adds the missing servers, and with `--create` the missing config files.
+//! - `fix.rs` adds the missing servers and config files, and starts each server the same way.
 
 mod compare;
 mod fix;
@@ -13,7 +13,7 @@ mod mcp;
 pub use compare::{
     Cell, Finding, McpCheck, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp, compared_harnesses,
 };
-pub use fix::{ChangedFile, FixOptions, FixReport, Unfixed, fix_mcp};
+pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.

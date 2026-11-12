@@ -7,8 +7,8 @@ use std::path::Path;
 use common::TempDir;
 use gglint::harness::Location;
 use gglint::harness::{
-    Cell, FixOptions, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp,
-    compare_mcp, fix_mcp, read_mcp,
+    Cell, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
+    read_mcp,
 };
 
 fn setting(name: &str, value: &[Part]) -> Setting {
@@ -710,13 +710,11 @@ fn describes_each_finding_and_how_to_fix_it() {
             ),
             (
                 "Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.",
-                Some("`gglint mcp --fix --overwrite` starts it everywhere as in .codex/config.toml:5")
+                Some("`gglint mcp --fix` starts it everywhere as in .codex/config.toml:5")
             ),
             (
                 "Claude Code has a .claude directory but no .mcp.json.",
-                Some(
-                    "`gglint mcp --fix --create` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor"
-                )
+                Some("`gglint mcp --fix` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor")
             ),
         ]
     );
@@ -728,13 +726,9 @@ fn describes_each_finding_and_how_to_fix_it() {
 
 /// Adds the servers missing from the config files in `dir`, then checks them again.
 fn fix(dir: &TempDir) -> (FixReport, Vec<String>) {
-    fix_with(dir, FixOptions::default())
-}
-
-fn fix_with(dir: &TempDir, options: FixOptions) -> (FixReport, Vec<String>) {
     let configs = read_mcp(dir.path());
     let check = check_mcp(dir.path(), &configs);
-    let report = fix_mcp(dir.path(), &configs, &check, &options);
+    let report = fix_mcp(dir.path(), &configs, &check);
     (report, findings(dir))
 }
 
@@ -895,28 +889,10 @@ fn without_cursor_config() -> TempDir {
 }
 
 #[test]
-fn fix_creates_no_config_file_without_create() {
+fn fix_creates_the_config_file_of_an_agent_with_its_directory() {
     let dir = without_cursor_config();
 
     let (report, left) = fix(&dir);
-
-    assert_eq!(report, FixReport::default());
-    assert_eq!(left.len(), 1, "{left:?}");
-    assert!(left[0].contains("missing-config"), "{left:?}");
-    assert!(!dir.path().join(".cursor/mcp.json").exists());
-}
-
-#[test]
-fn fix_with_create_creates_the_config_file_of_an_agent_with_its_directory() {
-    let dir = without_cursor_config();
-
-    let (report, left) = fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
 
     assert!(left.is_empty(), "{left:?}");
     let changed: Vec<(String, bool)> = report
@@ -942,13 +918,7 @@ fn fix_creates_an_opencode_config_with_its_schema() {
     );
     dir.write(".opencode/agent/review.md", "Be brief.\n");
 
-    let (_, left) = fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
+    let (_, left) = fix(&dir);
 
     assert!(left.is_empty(), "{left:?}");
     assert_eq!(
@@ -959,9 +929,10 @@ fn fix_creates_an_opencode_config_with_its_schema() {
 }
 
 #[test]
-fn fix_leaves_a_server_set_up_differently_as_it_is() {
+fn fix_copies_the_command_line_even_where_it_differs_on_purpose() {
     let dir = TempDir::new();
-    // As in Q00/ouroboros: each agent runs the server with its own runtime, on purpose.
+    // As in Q00/ouroboros: each agent runs the server with its own runtime, on purpose. The
+    // fix still makes them match, and the environment variables are left as they are.
     let claude = mcp_servers(
         r#""ouroboros": { "command": "ouroboros", "args": ["mcp", "serve", "--runtime", "claude-cli"], "env": { "A": "1" } }"#,
     );
@@ -970,23 +941,18 @@ fn fix_leaves_a_server_set_up_differently_as_it_is() {
     dir.write(".mcp.json", &claude);
     dir.write(".codex/config.toml", codex);
 
-    let (report, left) = fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
+    let (report, left) = fix(&dir);
 
-    assert_eq!(report, FixReport::default());
     assert_eq!(read(&dir, ".mcp.json"), claude);
-    assert_eq!(read(&dir, ".codex/config.toml"), codex);
-    // Reported, never changed.
-    assert_eq!(left.len(), 2, "{left:?}");
-    assert!(
-        left.iter().all(|finding| finding.contains("different-server")),
-        "{left:?}"
+    assert_eq!(
+        read(&dir, ".codex/config.toml"),
+        "[mcp_servers.ouroboros]\ncommand = \"ouroboros\"\nargs = [\"mcp\", \"serve\", \"--runtime\", \"claude-cli\"]\n\
+         env = { A = \"1\", B = \"2\" }\n"
     );
+    assert_eq!(report.changed[0].updated, ["ouroboros"]);
+    // Other environment variables are reported, never changed.
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert!(left[0].contains("different environment variables"), "{left:?}");
 }
 
 #[test]
@@ -1018,7 +984,7 @@ fn fix_leaves_a_server_it_cannot_write_for_the_other_agent() {
 }
 
 #[test]
-fn fix_overwrite_starts_a_server_as_in_the_first_file_and_keeps_its_other_keys() {
+fn fix_starts_a_server_as_in_the_first_file_and_keeps_its_other_keys() {
     let dir = TempDir::new();
     dir.write(
         ".mcp.json",
@@ -1040,13 +1006,7 @@ fn fix_overwrite_starts_a_server_as_in_the_first_file_and_keeps_its_other_keys()
 "#,
     );
 
-    let (report, left) = fix_with(
-        &dir,
-        FixOptions {
-            overwrite: true,
-            ..FixOptions::default()
-        },
-    );
+    let (report, left) = fix(&dir);
 
     assert!(left.is_empty(), "{left:?}");
     let updated: Vec<(String, Vec<String>)> = report
@@ -1080,7 +1040,7 @@ fn fix_overwrite_starts_a_server_as_in_the_first_file_and_keeps_its_other_keys()
 }
 
 #[test]
-fn fix_overwrite_removes_arguments_the_first_file_does_not_have() {
+fn fix_removes_arguments_the_first_file_does_not_have() {
     let dir = TempDir::new();
     dir.write(".mcp.json", mcp_servers(r#""lint": { "command": "lint-mcp" }"#));
     dir.write(
@@ -1088,13 +1048,7 @@ fn fix_overwrite_removes_arguments_the_first_file_does_not_have() {
         "[mcp_servers.lint]\ncommand = \"lint-mcp\"\nargs = [\"--strict\"]\n",
     );
 
-    let (_, left) = fix_with(
-        &dir,
-        FixOptions {
-            overwrite: true,
-            ..FixOptions::default()
-        },
-    );
+    let (_, left) = fix(&dir);
 
     assert!(left.is_empty(), "{left:?}");
     assert_eq!(
@@ -1104,7 +1058,7 @@ fn fix_overwrite_removes_arguments_the_first_file_does_not_have() {
 }
 
 #[test]
-fn fix_overwrite_leaves_every_other_difference() {
+fn fix_leaves_every_other_difference() {
     let dir = TempDir::new();
     let claude = mcp_servers(
         r#""docs": { "type": "http", "url": "https://docs.example.com/mcp" },
@@ -1119,13 +1073,7 @@ fn fix_overwrite_leaves_every_other_difference() {
     dir.write(".mcp.json", &claude);
     dir.write(".codex/config.toml", codex);
 
-    let (report, left) = fix_with(
-        &dir,
-        FixOptions {
-            overwrite: true,
-            ..FixOptions::default()
-        },
-    );
+    let (report, left) = fix(&dir);
 
     assert_eq!(report, FixReport::default());
     assert_eq!(read(&dir, ".mcp.json"), claude);
@@ -1134,32 +1082,7 @@ fn fix_overwrite_leaves_every_other_difference() {
 }
 
 #[test]
-fn fix_overwrite_twice_changes_nothing_the_second_time() {
-    let dir = ggx_like();
-    let options = FixOptions {
-        create: true,
-        overwrite: true,
-    };
-
-    let (first, left) = fix_with(&dir, options);
-    let files: Vec<String> = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]
-        .iter()
-        .map(|file| read(&dir, file))
-        .collect();
-    let (second, _) = fix_with(&dir, options);
-
-    assert!(left.is_empty(), "{left:?}");
-    assert_eq!(first.changed.len(), 2);
-    assert_eq!(second, FixReport::default());
-    let again: Vec<String> = [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]
-        .iter()
-        .map(|file| read(&dir, file))
-        .collect();
-    assert_eq!(again, files);
-}
-
-#[test]
-fn fix_never_removes_or_changes_what_is_there() {
+fn fix_never_removes_a_server_or_changes_its_environment() {
     let dir = TempDir::new();
     dir.write(
         ".mcp.json",
@@ -1171,13 +1094,7 @@ fn fix_never_removes_or_changes_what_is_there() {
     );
     let before = read_mcp(dir.path());
 
-    fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
+    fix(&dir);
 
     let after = read_mcp(dir.path());
     for config in &before {
@@ -1188,36 +1105,25 @@ fn fix_never_removes_or_changes_what_is_there() {
         for server in &config.servers {
             let kept = now.servers.iter().find(|other| other.name == server.name).unwrap();
             assert_eq!(
-                (&kept.transport, &kept.env, &kept.headers),
-                (&server.transport, &server.env, &server.headers)
+                (&kept.env, &kept.headers, kept.enabled),
+                (&server.env, &server.headers, server.enabled)
             );
         }
     }
-    // `docs` was added to Codex; `lint`, at another version there, was left alone.
-    assert!(read(&dir, ".codex/config.toml").contains("[mcp_servers.docs]"));
-    assert!(read(&dir, ".codex/config.toml").contains("lint-mcp@2"));
+    // `docs` was added to Codex, and `lint` starts there as in Claude Code, keeping `cwd`.
+    let codex = read(&dir, ".codex/config.toml");
+    assert!(codex.contains("[mcp_servers.docs]"), "{codex}");
+    assert!(codex.contains("lint-mcp@1") && codex.contains("cwd = \".\""), "{codex}");
 }
 
 #[test]
 fn fix_twice_changes_nothing_the_second_time() {
     let dir = ggx_like();
 
-    let (first, _) = fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
+    let (first, _) = fix(&dir);
     let claude = read(&dir, ".mcp.json");
     let cursor = read(&dir, ".cursor/mcp.json");
-    let (second, left) = fix_with(
-        &dir,
-        FixOptions {
-            create: true,
-            ..FixOptions::default()
-        },
-    );
+    let (second, left) = fix(&dir);
 
     assert_eq!(first.changed.len(), 2);
     assert_eq!(second, FixReport::default());
@@ -1225,8 +1131,7 @@ fn fix_twice_changes_nothing_the_second_time() {
         (read(&dir, ".mcp.json"), read(&dir, ".cursor/mcp.json")),
         (claude, cursor)
     );
-    // `angular-cli` is still started with other arguments in Cursor.
-    assert_eq!(left.len(), 1, "{left:?}");
+    assert!(left.is_empty(), "{left:?}");
 }
 
 #[test]

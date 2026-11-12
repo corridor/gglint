@@ -1,7 +1,7 @@
 //! The `gglint` command.
 //!
 //! ```text
-//! gglint mcp [--fix [--create] [--overwrite]] [--format F] [PATH]
+//! gglint mcp [--fix] [--format F] [PATH]
 //!                               compare each agent's MCP servers, and fix them
 //! gglint mcp --servers [PATH]   list every server
 //! ```
@@ -12,8 +12,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use gglint::harness::{
-    Cell, Finding, FixOptions, FixReport, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp, fix_mcp,
-    read_mcp,
+    Cell, Finding, FixReport, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp, fix_mcp, read_mcp,
 };
 
 const USAGE: &str = "\
@@ -21,16 +20,14 @@ Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
 
 Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers
-  gglint mcp --fix [PATH]           add the servers missing from a config file
-  gglint mcp --fix --create [PATH]  also create the config file an agent is missing
-  gglint mcp --fix --overwrite [PATH]
-                                    also start each server with the same command line
+  gglint mcp --fix [PATH]           give every agent the same servers, started the same way
   gglint mcp --servers [PATH]       list every server, file by file
   gglint mcp --format lines [PATH]  one line per problem, for scripts and CI
 
-PATH is the repository's root, the current directory by default. `--fix` only adds.
-`--overwrite` copies the command and arguments of the first agent where a server is
-turned on to the others; everything else set up differently is reported and never changed.
+PATH is the repository's root, the current directory by default. `--fix` adds missing
+servers, creates the config file of an agent that has its own directory, and copies the
+command and arguments of the first agent where a server is turned on to the others. It
+never removes a server; everything else set up differently is reported only.
 ";
 
 fn main() -> ExitCode {
@@ -71,7 +68,6 @@ enum McpView {
 fn mcp(args: &[String]) -> ExitCode {
     let mut view = McpView::Table;
     let mut fix = false;
-    let mut options = FixOptions::default();
     let mut path = ".";
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -84,15 +80,10 @@ fn mcp(args: &[String]) -> ExitCode {
                 fix = true;
                 continue;
             }
-            // Creating a config file and overwriting a command line are ways of fixing.
-            "--create" => {
+            // `--fix` does what these did in 0.1.1; they're still accepted so scripts keep working.
+            "--create" | "--overwrite" => {
+                eprintln!("note: {arg} is no longer needed: --fix does it");
                 fix = true;
-                options.create = true;
-                continue;
-            }
-            "--overwrite" => {
-                fix = true;
-                options.overwrite = true;
                 continue;
             }
             "--help" | "-h" => {
@@ -143,7 +134,7 @@ fn mcp(args: &[String]) -> ExitCode {
     let elapsed = start.elapsed();
     // After fixing, everything below is about the files as they are now.
     let configs = if fix {
-        print_fixes(&fix_mcp(root, &configs, &check, &options));
+        print_fixes(&fix_mcp(root, &configs, &check));
         let configs = read_mcp(root);
         check = check_mcp(root, &configs);
         configs

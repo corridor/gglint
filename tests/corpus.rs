@@ -13,7 +13,7 @@ mod common;
 use std::path::Path;
 
 use common::TempDir;
-use gglint::harness::{FixOptions, McpConfig, check_mcp, fix_mcp, read_mcp};
+use gglint::harness::{McpConfig, check_mcp, fix_mcp, read_mcp};
 
 const FILES: &[&str] = &[
     ".mcp.json",
@@ -22,7 +22,7 @@ const FILES: &[&str] = &[
     "opencode.json",
     "opencode.jsonc",
 ];
-/// The agents' own directories: `--create` writes a config file only where one is.
+/// The agents' own directories: `--fix` creates a config file only where one is.
 const DIRECTORIES: &[&str] = &[".claude", ".codex", ".cursor", ".opencode"];
 
 /// A scratch copy of what `gglint mcp` reads in `repo`: its MCP files and, empty, the
@@ -74,107 +74,86 @@ fn fix_keeps_its_promises_on_real_repositories() {
         .collect();
     repos.sort();
     let mut broken = Vec::new();
-    let mut totals = Vec::new();
+    let (mut before_total, mut after_total, mut created, mut edited, mut added, mut updated, mut left) =
+        (0, 0, 0, 0, 0, 0, 0);
+    for repo in &repos {
+        let name = repo.file_name().unwrap().to_string_lossy().to_string();
+        let dir = copy(repo);
+        let root = dir.path();
+        let before = read_mcp(root);
+        let report = fix_mcp(root, &before, &check_mcp(root, &before));
+        let after = read_mcp(root);
+        let mut fail = |what: String| broken.push(format!("{name}: {what}"));
 
-    let modes = [
-        ("--fix", FixOptions::default()),
-        (
-            "--fix --create",
-            FixOptions {
-                create: true,
-                ..FixOptions::default()
-            },
-        ),
-        (
-            "--fix --overwrite",
-            FixOptions {
-                overwrite: true,
-                ..FixOptions::default()
-            },
-        ),
-    ];
-    for (mode, options) in modes {
-        let (mut before_total, mut after_total, mut created, mut edited, mut added, mut updated, mut left) =
-            (0, 0, 0, 0, 0, 0, 0);
-        for repo in &repos {
-            let name = repo.file_name().unwrap().to_string_lossy().to_string();
-            let dir = copy(repo);
-            let root = dir.path();
-            let before = read_mcp(root);
-            let report = fix_mcp(root, &before, &check_mcp(root, &before), &options);
-            let after = read_mcp(root);
-            let mut fail = |what: String| broken.push(format!("{name} {mode}: {what}"));
-
-            let new_warnings: Vec<_> = warnings(&after)
-                .into_iter()
-                .filter(|w| !warnings(&before).contains(w))
-                .collect();
-            if !new_warnings.is_empty() {
-                fail(format!("left a config it can't read: {new_warnings:?}"));
+        let new_warnings: Vec<_> = warnings(&after)
+            .into_iter()
+            .filter(|w| !warnings(&before).contains(w))
+            .collect();
+        if !new_warnings.is_empty() {
+            fail(format!("left a config it can't read: {new_warnings:?}"));
+        }
+        for config in after
+            .iter()
+            .filter(|config| !before.iter().any(|old| old.relative_path == config.relative_path))
+        {
+            if !root.join(config.harness.directory()).is_dir() {
+                fail(format!(
+                    "created {} without a {} directory",
+                    config.relative_path.display(),
+                    config.harness.directory()
+                ));
             }
-            for config in after
-                .iter()
-                .filter(|config| !before.iter().any(|old| old.relative_path == config.relative_path))
-            {
-                if !options.create || !root.join(config.harness.directory()).is_dir() {
-                    fail(format!("created {}", config.relative_path.display()));
-                }
-            }
-            for config in &before {
-                let Some(now) = after.iter().find(|other| other.relative_path == config.relative_path) else {
-                    fail(format!("{} disappeared", config.relative_path.display()));
-                    continue;
-                };
-                for server in &config.servers {
-                    match now.servers.iter().find(|other| other.name == server.name) {
-                        None => fail(format!(
-                            "removed `{}` from {}",
+        }
+        for config in &before {
+            let Some(now) = after.iter().find(|other| other.relative_path == config.relative_path) else {
+                fail(format!("{} disappeared", config.relative_path.display()));
+                continue;
+            };
+            for server in &config.servers {
+                match now.servers.iter().find(|other| other.name == server.name) {
+                    None => fail(format!(
+                        "removed `{}` from {}",
+                        server.name,
+                        config.relative_path.display()
+                    )),
+                    // A command line may change; nothing else may.
+                    Some(kept)
+                        if kept.env != server.env
+                            || kept.headers != server.headers
+                            || kept.enabled != server.enabled =>
+                    {
+                        fail(format!(
+                            "changed `{}` in {}",
                             server.name,
                             config.relative_path.display()
-                        )),
-                        // Only `--overwrite` may change a command line, and nothing else.
-                        Some(kept)
-                            if (kept.transport != server.transport && !options.overwrite)
-                                || kept.env != server.env
-                                || kept.headers != server.headers
-                                || kept.enabled != server.enabled =>
-                        {
-                            fail(format!(
-                                "changed `{}` in {}",
-                                server.name,
-                                config.relative_path.display()
-                            ))
-                        }
-                        Some(_) => {}
+                        ))
                     }
+                    Some(_) => {}
                 }
             }
-            let (problems_before, problems_after) = (problems(root, &before), problems(root, &after));
-            if problems_after > problems_before {
-                fail(format!("{problems_before} problems before, {problems_after} after"));
-            }
-            let again = fix_mcp(root, &after, &check_mcp(root, &after), &options);
-            if !again.changed.is_empty() {
-                fail("a second run changed files again".to_string());
-            }
-            before_total += problems_before;
-            after_total += problems_after;
-            created += report.changed.iter().filter(|file| file.created).count();
-            edited += report.changed.iter().filter(|file| !file.created).count();
-            added += report.changed.iter().map(|file| file.added.len()).sum::<usize>();
-            updated += report.changed.iter().map(|file| file.updated.len()).sum::<usize>();
-            left += report.unfixed.len();
         }
-        totals.push(format!(
-            "{mode}: {before_total} problems before, {after_total} after; {added} servers added, {updated} command \
-             lines updated, {edited} files edited, {created} created; {left} servers not added"
-        ));
+        let (problems_before, problems_after) = (problems(root, &before), problems(root, &after));
+        if problems_after > problems_before {
+            fail(format!("{problems_before} problems before, {problems_after} after"));
+        }
+        let again = fix_mcp(root, &after, &check_mcp(root, &after));
+        if !again.changed.is_empty() {
+            fail("a second run changed files again".to_string());
+        }
+        before_total += problems_before;
+        after_total += problems_after;
+        created += report.changed.iter().filter(|file| file.created).count();
+        edited += report.changed.iter().filter(|file| !file.created).count();
+        added += report.changed.iter().map(|file| file.added.len()).sum::<usize>();
+        updated += report.changed.iter().map(|file| file.updated.len()).sum::<usize>();
+        left += report.unfixed.len();
     }
 
-    eprintln!("{} repositories", repos.len());
-    for line in &totals {
-        eprintln!("  {line}");
-    }
+    eprintln!(
+        "{} repositories; {before_total} problems before --fix, {after_total} after; {added} servers added, \
+         {updated} command lines updated, {edited} files edited, {created} created; {left} not fixed",
+        repos.len()
+    );
     assert!(
         broken.is_empty(),
         "{} broken promises:\n{}",

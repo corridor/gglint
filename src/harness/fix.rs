@@ -1,16 +1,15 @@
-//! `gglint mcp --fix`: adds each server a config file is missing.
+//! `gglint mcp --fix`: gives every agent the same servers, started the same way.
 //!
-//! It only adds. A server missing from an agent's config file is added to that file,
-//! written the way that agent writes it, from the first file where the server is turned on.
-//! Nothing already in a file is changed or removed, and comments and formatting are kept.
+//! Each server is copied from the first file where it's turned on, in the order agents are
+//! reported, and written the way each agent writes it:
 //!
-//! A config file is created only with `FixOptions::create`, for an agent that has its own
-//! directory in the repository and no config file; it gets every server turned on elsewhere.
+//! - A server missing from an agent's config file is added to that file.
+//! - An agent with its own directory and no config file gets one, with every server.
+//! - A server that runs another version of the same program, or the same program with other
+//!   arguments, gets the command and arguments of the first file. Its environment, headers
+//!   and keys only one agent has (Codex's `cwd`, for example) are kept.
 //!
-//! With `FixOptions::overwrite`, a server that runs another version of the same program, or
-//! the same program with other arguments, is changed to start as in the first file where
-//! it's turned on. Only its command and arguments are written; its environment, headers and
-//! keys only one agent has (Codex's `cwd`, for example) are kept.
+//! No server is removed, and comments and formatting are kept.
 //!
 //! Left for a person: a different program under the same name, other environment variables
 //! or headers, a server turned off in one agent, and a server whose setup can't be written
@@ -28,17 +27,6 @@ use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
 use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
-/// How `fix_mcp` may change the repository.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct FixOptions {
-    /// Create the config file of an agent that has its own directory and no config file.
-    /// Off by default: its users may not want MCP servers.
-    pub create: bool,
-    /// Change a server started with another version or other arguments to start as in the
-    /// first file where it's turned on. Off by default: such differences can be deliberate.
-    pub overwrite: bool,
-}
-
 /// What `fix_mcp` changed, and what it left.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FixReport {
@@ -54,7 +42,7 @@ pub struct ChangedFile {
     pub relative_path: PathBuf,
     /// Whether it didn't exist before.
     pub created: bool,
-    /// The servers added to it, and those whose command line `overwrite` changed.
+    /// The servers added to it, and those whose command line was changed.
     pub added: Vec<String>,
     pub updated: Vec<String>,
     /// Whether the repository's `.gitignore` leaves it out, so the change stays on this
@@ -88,8 +76,9 @@ struct Write {
     update: bool,
 }
 
-/// Adds the servers missing from the config files under `root`, as `check` lists them.
-pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &FixOptions) -> FixReport {
+/// Fixes what `check` found in the config files under `root`: adds the missing servers and
+/// config files, and starts each server the same way everywhere.
+pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixReport {
     let mut writes: Vec<Write> = Vec::new();
     let mut report = FixReport::default();
     for server in &check.servers {
@@ -100,11 +89,11 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
             if cell != Cell::Missing {
                 continue;
             }
-            let relative_path = match configs.iter().find(|config| config.harness == harness) {
-                Some(config) => config.relative_path.clone(),
-                None if options.create => PathBuf::from(harness.mcp_file()),
-                None => continue,
-            };
+            // An agent compared without a config file has its own directory: it gets one.
+            let relative_path = configs.iter().find(|config| config.harness == harness).map_or_else(
+                || PathBuf::from(harness.mcp_file()),
+                |config| config.relative_path.clone(),
+            );
             match fields(&source.server, source.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
                     harness,
@@ -120,23 +109,25 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
                 }),
             }
         }
-        if options.overwrite {
-            for target in server.setups.iter().filter(|target| needs_overwrite(target, source)) {
-                let harness = target.site.harness;
-                match command_line_fields(&source.server.transport, source.site.harness, harness) {
-                    Ok(fields) => writes.push(Write {
-                        harness,
-                        relative_path: target.site.relative_path.clone(),
-                        name: target.server.name.clone(),
-                        fields,
-                        update: true,
-                    }),
-                    Err(reason) => report.unfixed.push(Unfixed {
-                        harness,
-                        server: target.server.name.clone(),
-                        reason,
-                    }),
-                }
+        for target in server
+            .setups
+            .iter()
+            .filter(|target| needs_new_command_line(target, source))
+        {
+            let harness = target.site.harness;
+            match command_line_fields(&source.server.transport, source.site.harness, harness) {
+                Ok(fields) => writes.push(Write {
+                    harness,
+                    relative_path: target.site.relative_path.clone(),
+                    name: target.server.name.clone(),
+                    fields,
+                    update: true,
+                }),
+                Err(reason) => report.unfixed.push(Unfixed {
+                    harness,
+                    server: target.server.name.clone(),
+                    reason,
+                }),
             }
         }
     }
@@ -176,7 +167,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck, options: &F
 
 /// Whether `target` should start as `source` does: the same program, turned on, started
 /// with another version or other arguments.
-fn needs_overwrite(target: &Setup, source: &Setup) -> bool {
+fn needs_new_command_line(target: &Setup, source: &Setup) -> bool {
     target.site.harness != source.site.harness
         && target.server.enabled
         && same_program(target, source)

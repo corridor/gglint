@@ -187,11 +187,11 @@ fn mcp_draws_each_server_in_each_agent_and_every_problem() {
 
   angular-cli
     ≠ Started with different arguments: `mcp --read-only` in Codex; `mcp` in Cursor.
-      `gglint mcp --fix --overwrite` starts it everywhere as in .codex/config.toml:5
+      `gglint mcp --fix` starts it everywhere as in .codex/config.toml:5
 
   Missing config files
     ✗ Claude Code has a .claude directory but no .mcp.json.
-      `gglint mcp --fix --create` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor
+      `gglint mcp --fix` creates .mcp.json with the 2 MCP servers set up for Codex and Cursor
 "
     );
 }
@@ -227,65 +227,37 @@ fn mcp_rejects_an_unknown_option() {
 }
 
 #[test]
-fn mcp_fix_adds_the_missing_servers_and_creates_no_file() {
+fn mcp_fix_adds_servers_creates_config_files_and_aligns_command_lines() {
     let dir = ggx_like();
     let codex = std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap();
 
     let output = gglint(&["mcp".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
 
-    // `angular-cli` is still set up differently, and Claude Code still has no `.mcp.json`.
-    assert_eq!(output.status.code(), Some(1));
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(
-        stdout.starts_with(
-            "Changed 1 file:\n\
-             \x20 .cursor/mcp.json   added code-review-graph\n\
-             \n\
-             Review the changes with `git diff`.\n\
-             \n\
-             MCP servers in "
-        ),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("│ angular-cli       │      ✗      │   ✓   │   ≠    │"),
-        "{stdout}"
-    );
-    assert!(!dir.path().join(".mcp.json").exists());
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(),
-        codex
-    );
-}
-
-#[test]
-fn mcp_fix_create_also_creates_the_missing_config_file() {
-    let dir = ggx_like();
-
-    let output = gglint(&[
-        "mcp".as_ref(),
-        "--fix".as_ref(),
-        "--create".as_ref(),
-        dir.path().as_os_str(),
-    ]);
-
-    assert_eq!(output.status.code(), Some(1));
+    assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
         stdout.starts_with(
             "Changed 2 files:\n\
              \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
-             \x20 .cursor/mcp.json   added code-review-graph\n\
+             \x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n\
              \n\
              Review the changes with `git diff`.\n"
         ),
         "{stdout}"
     );
-    // Only the difference is left, reported and unchanged.
-    assert!(stdout.contains("1 problem\n"), "{stdout}");
     assert!(
-        stdout.contains("│ angular-cli       │      ✓      │   ✓   │   ≠    │"),
+        stdout.ends_with("No problems: every agent gets the same servers, set up the same way.\n"),
         "{stdout}"
+    );
+    let cursor = std::fs::read_to_string(dir.path().join(".cursor/mcp.json")).unwrap();
+    assert!(
+        cursor.contains(r#""command": "pnpm", "args": ["dlx", "@angular/cli", "mcp", "--read-only"]"#),
+        "{cursor}"
+    );
+    // Codex had every server, set up as the others now are.
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".codex/config.toml")).unwrap(),
+        codex
     );
 }
 
@@ -317,34 +289,22 @@ fn prints_the_version_and_usage() {
 }
 
 #[test]
-fn mcp_fix_overwrite_starts_each_server_the_same_way() {
+fn mcp_still_accepts_the_create_and_overwrite_flags_of_0_1_1() {
     let dir = ggx_like();
 
     let output = gglint(&[
         "mcp".as_ref(),
-        "--fix".as_ref(),
         "--create".as_ref(),
         "--overwrite".as_ref(),
         dir.path().as_os_str(),
     ]);
 
     assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stdout.starts_with(
-            "Changed 2 files:\n\
-             \x20 .mcp.json (new)    added code-review-graph, angular-cli\n\
-             \x20 .cursor/mcp.json   added code-review-graph; updated angular-cli\n"
-        ),
-        "{stdout}"
+        stderr.contains("note: --create is no longer needed: --fix does it")
+            && stderr.contains("note: --overwrite is no longer needed: --fix does it"),
+        "{stderr}"
     );
-    assert!(
-        stdout.ends_with("No problems: every agent gets the same servers, set up the same way.\n"),
-        "{stdout}"
-    );
-    let cursor = std::fs::read_to_string(dir.path().join(".cursor/mcp.json")).unwrap();
-    assert!(
-        cursor.contains(r#""command": "pnpm", "args": ["dlx", "@angular/cli", "mcp", "--read-only"]"#),
-        "{cursor}"
-    );
+    assert!(dir.path().join(".mcp.json").exists());
 }

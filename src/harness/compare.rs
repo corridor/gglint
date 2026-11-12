@@ -115,7 +115,7 @@ pub struct ServerCheck {
     /// up in it.
     pub cells: Vec<(Harness, Cell)>,
     pub findings: Vec<Finding>,
-    /// The setup a file missing the server gets, and the one `--overwrite` copies: the
+    /// The setup a file missing the server gets, and the one other setups are changed to: the
     /// first one that's turned on. `None` when the server is turned off everywhere it's set
     /// up, so it isn't missing anywhere.
     pub source: Option<Setup>,
@@ -212,7 +212,7 @@ fn missing_config(harness: Harness, servers: &[ServerCheck]) -> Option<Finding> 
         ),
         detail: format!("{name} has a {directory} directory but no {file}."),
         fix: Some(format!(
-            "`gglint mcp --fix --create` creates {file} with {count} set up for {}",
+            "`gglint mcp --fix` creates {file} with {count} set up for {}",
             names(&from, "and")
         )),
         related: Vec::new(),
@@ -614,9 +614,9 @@ impl Group<'_> {
 
         // A different version or other arguments of the same program has one fix: start it
         // the same way everywhere, as the setup missing files get it from.
-        let overwrite = source.map(|entry| {
+        let same_way = source.map(|entry| {
             format!(
-                "`gglint mcp --fix --overwrite` starts it everywhere as in {}:{}",
+                "`gglint mcp --fix` starts it everywhere as in {}:{}",
                 entry.site.relative_path.display(),
                 entry.site.location.line
             )
@@ -650,7 +650,7 @@ impl Group<'_> {
                     differ(
                         format!("`{name}` runs different versions of the {registry} package `{package}`: {versions}"),
                         format!("Runs different versions of the {registry} package `{package}`: {versions}."),
-                        overwrite.clone(),
+                        same_way.clone(),
                     );
                 }
             }
@@ -663,7 +663,7 @@ impl Group<'_> {
                 differ(
                     format!("`{name}` is started with different arguments: {args}"),
                     format!("Started with different arguments: {args}."),
-                    overwrite.clone(),
+                    same_way.clone(),
                 );
             }
         }
