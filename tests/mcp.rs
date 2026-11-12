@@ -417,8 +417,8 @@ fn an_agent_directory_without_a_config_file_is_missing_one() {
     assert_eq!(
         findings(&dir),
         [
-            ".codex/config.toml:1  missing-config  Cursor has a .cursor directory but no .cursor/mcp.json, so it gets \
-          none of the MCP server set up for Codex"
+            ".codex/config.toml:1  missing-config  Cursor has a .cursor directory but no .cursor/mcp.json, so it \
+             doesn't get the MCP server set up for Codex"
         ]
     );
 }

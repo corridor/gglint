@@ -180,16 +180,19 @@ fn missing_config(harness: Harness, servers: &[ServerCheck]) -> Option<Finding> 
             })
         })
         .collect();
-    let count = match sources.len() {
-        1 => "the MCP server".to_string(),
-        n => format!("the {n} MCP servers"),
+    let (count, gets_none_of) = match sources.len() {
+        1 => ("the MCP server".to_string(), "doesn't get the MCP server".to_string()),
+        n => (
+            format!("the {n} MCP servers"),
+            format!("gets none of the {n} MCP servers"),
+        ),
     };
     let (name, directory, file) = (harness.display_name(), harness.directory(), harness.mcp_file());
     Some(Finding {
         rule: Rule::MissingConfig,
         site: first.site.clone(),
         message: format!(
-            "{name} has a {directory} directory but no {file}, so it gets none of {count} set up for {}",
+            "{name} has a {directory} directory but no {file}, so it {gets_none_of} set up for {}",
             names(&from, "and")
         ),
         detail: format!("{name} has a {directory} directory but no {file}."),
