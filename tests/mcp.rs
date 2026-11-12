@@ -7,8 +7,8 @@ use std::path::Path;
 use common::TempDir;
 use gglint::harness::Location;
 use gglint::harness::{
-    Cell, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
-    read_mcp,
+    Cell, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, check_mcp_from,
+    compare_mcp, fix_mcp, read_mcp,
 };
 
 fn setting(name: &str, value: &[Part]) -> Setting {
@@ -1079,6 +1079,107 @@ fn fix_leaves_every_other_difference() {
     assert_eq!(read(&dir, ".mcp.json"), claude);
     assert_eq!(read(&dir, ".codex/config.toml"), codex);
     assert_eq!(left.len(), 4, "{left:?}");
+}
+
+/// `docs` at version 1 in Claude Code and 2 in Codex, and missing from Cursor.
+fn two_versions() -> TempDir {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp@1"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"docs-mcp@2\"]\ncwd = \".\"\n",
+    );
+    dir.write(".cursor/mcp.json", mcp_servers(""));
+    dir
+}
+
+/// Fixes `dir` taking each server's setup from `source`.
+fn fix_from(dir: &TempDir, source: Harness) -> FixReport {
+    let configs = read_mcp(dir.path());
+    let check = check_mcp_from(dir.path(), &configs, Some(source));
+    fix_mcp(dir.path(), &configs, &check)
+}
+
+#[test]
+fn the_first_agent_is_the_source_by_default() {
+    let dir = two_versions();
+
+    fix(&dir);
+
+    assert!(read(&dir, ".cursor/mcp.json").contains("docs-mcp@1"));
+    assert!(read(&dir, ".codex/config.toml").contains("docs-mcp@1"));
+}
+
+#[test]
+fn source_decides_the_setup_every_agent_gets() {
+    let dir = two_versions();
+
+    let check = check_mcp_from(dir.path(), &read_mcp(dir.path()), Some(Harness::Codex));
+    let fixes: Vec<Option<&str>> = check.findings().map(|finding| finding.fix.as_deref()).collect();
+    assert_eq!(
+        fixes,
+        [
+            Some("Add it to .cursor/mcp.json, as set up in .codex/config.toml:1"),
+            Some("`gglint mcp --fix` starts it everywhere as in .codex/config.toml:1"),
+        ]
+    );
+
+    let report = fix_from(&dir, Harness::Codex);
+
+    let changed: Vec<(String, Vec<String>, Vec<String>)> = report
+        .changed
+        .iter()
+        .map(|file| {
+            (
+                file.relative_path.display().to_string(),
+                file.added.clone(),
+                file.updated.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        changed,
+        [
+            (".mcp.json".to_string(), vec![], vec!["docs".to_string()]),
+            (".cursor/mcp.json".to_string(), vec!["docs".to_string()], vec![]),
+        ]
+    );
+    assert!(read(&dir, ".mcp.json").contains("docs-mcp@2"));
+    assert!(read(&dir, ".cursor/mcp.json").contains("docs-mcp@2"));
+    assert!(read(&dir, ".codex/config.toml").contains("cwd = \".\""));
+    assert!(findings(&dir).is_empty(), "{:?}", findings(&dir));
+}
+
+#[test]
+fn a_source_without_the_server_turned_on_falls_back_to_the_first_agent() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "command": "npx", "args": ["-y", "docs-mcp@1"] }"#),
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"docs-mcp@2\"]\nenabled = false\n",
+    );
+    dir.write(".cursor/mcp.json", mcp_servers(""));
+
+    fix_from(&dir, Harness::Codex);
+
+    assert!(read(&dir, ".cursor/mcp.json").contains("docs-mcp@1"));
+    // A server turned off is left as it is.
+    assert!(read(&dir, ".codex/config.toml").contains("docs-mcp@2"));
+}
+
+#[test]
+fn reads_agent_names() {
+    assert_eq!(Harness::parse("codex"), Some(Harness::Codex));
+    assert_eq!(Harness::parse("Claude-Code"), Some(Harness::ClaudeCode));
+    assert_eq!(Harness::parse("claude"), Some(Harness::ClaudeCode));
+    assert_eq!(Harness::parse("opencode"), Some(Harness::OpenCode));
+    assert_eq!(Harness::parse("vscode"), None);
 }
 
 #[test]

@@ -154,12 +154,25 @@ pub fn compared_harnesses(root: &Path, configs: &[McpConfig]) -> Vec<Harness> {
         .collect()
 }
 
-/// Checks the MCP servers in `configs`, read from the repository at `root`.
+/// Checks the MCP servers in `configs`, read from the repository at `root`. Each server's
+/// setup, the one other agents get, is taken from the first agent where it's turned on, in
+/// the order agents are reported.
 pub fn check_mcp(root: &Path, configs: &[McpConfig]) -> McpCheck {
+    check_mcp_from(root, configs, None)
+}
+
+/// Like `check_mcp`, but takes each server's setup from `source` wherever `source` has the
+/// server turned on. Other servers are taken from the first agent, as `check_mcp` does.
+pub fn check_mcp_from(root: &Path, configs: &[McpConfig], source: Option<Harness>) -> McpCheck {
     let harnesses = compared_harnesses(root, configs);
     let servers: Vec<ServerCheck> = group_servers(configs)
-        .iter()
-        .map(|group| group.check(&harnesses, configs))
+        .into_iter()
+        .map(|mut group| {
+            if let Some(source) = source {
+                group.prefer(source);
+            }
+            group.check(&harnesses, configs)
+        })
         .collect();
     let missing_configs = harnesses
         .iter()
@@ -495,6 +508,19 @@ fn group_servers(configs: &[McpConfig]) -> Vec<Group<'_>> {
 }
 
 impl Group<'_> {
+    /// Makes `harness`'s setup the one the others are compared with and get, if it has the
+    /// server turned on.
+    fn prefer(&mut self, harness: Harness) {
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.site.harness == harness && entry.server.enabled)
+        {
+            let entry = self.entries.remove(index);
+            self.entries.insert(0, entry);
+        }
+    }
+
     fn name(&self) -> &str {
         &self.entries[0].server.name
     }
@@ -578,7 +604,8 @@ impl Group<'_> {
         // one turned off everywhere isn't missing anywhere. An agent without a config file
         // gets its own `missing-config` finding instead.
         let source = self.entries.iter().find(|entry| entry.server.enabled);
-        let present: Vec<Harness> = self.entries.iter().map(|entry| entry.site.harness).collect();
+        let mut present: Vec<Harness> = self.entries.iter().map(|entry| entry.site.harness).collect();
+        present.sort();
         let missing: Vec<Harness> = harnesses
             .iter()
             .copied()

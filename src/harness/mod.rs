@@ -11,7 +11,7 @@ mod fix;
 mod mcp;
 
 pub use compare::{
-    Cell, Finding, McpCheck, Rule, ServerCheck, Setup, Site, check_mcp, compare_mcp, compared_harnesses,
+    Cell, Finding, McpCheck, Rule, ServerCheck, Setup, Site, check_mcp, check_mcp_from, compare_mcp, compared_harnesses,
 };
 pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
@@ -35,6 +35,17 @@ impl Harness {
             Harness::Codex => "codex",
             Harness::Cursor => "cursor",
             Harness::OpenCode => "opencode",
+        }
+    }
+
+    /// The harness named `name`, as `as_str` writes it; `claude` is Claude Code too.
+    pub fn parse(name: &str) -> Option<Harness> {
+        match name.to_ascii_lowercase().as_str() {
+            "claude-code" | "claude" => Some(Harness::ClaudeCode),
+            "codex" => Some(Harness::Codex),
+            "cursor" => Some(Harness::Cursor),
+            "opencode" => Some(Harness::OpenCode),
+            _ => None,
         }
     }
 

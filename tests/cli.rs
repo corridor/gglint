@@ -287,3 +287,51 @@ fn prints_the_version_and_usage() {
             .starts_with("Keep the MCP servers")
     );
 }
+
+#[test]
+fn mcp_fix_source_takes_each_server_from_that_agent() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        "{ \"mcpServers\": { \"docs\": { \"command\": \"npx\", \"args\": [\"-y\", \"docs-mcp@1\"] } } }\n",
+    );
+    dir.write(
+        ".codex/config.toml",
+        "[mcp_servers.docs]\ncommand = \"npx\"\nargs = [\"-y\", \"docs-mcp@2\"]\n",
+    );
+
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--fix".as_ref(),
+        "--source=codex".as_ref(),
+        dir.path().as_os_str(),
+    ]);
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.starts_with("Changed 1 file:\n\x20 .mcp.json   updated docs\n"),
+        "{stdout}"
+    );
+    let claude = std::fs::read_to_string(dir.path().join(".mcp.json")).unwrap();
+    assert!(claude.contains("docs-mcp@2"), "{claude}");
+}
+
+#[test]
+fn mcp_rejects_an_unknown_source() {
+    let dir = ggx_like();
+
+    let output = gglint(&[
+        "mcp".as_ref(),
+        "--source".as_ref(),
+        "vscode".as_ref(),
+        dir.path().as_os_str(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unknown agent \"vscode\" for --source; use claude-code, codex, cursor or opencode")
+    );
+}

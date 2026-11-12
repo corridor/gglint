@@ -1,7 +1,7 @@
 //! The `gglint` command.
 //!
 //! ```text
-//! gglint mcp [--fix] [--format F] [PATH]
+//! gglint mcp [--fix] [--source AGENT] [--format F] [PATH]
 //!                               compare each agent's MCP servers, and fix them
 //! gglint mcp --servers [PATH]   list every server
 //! ```
@@ -12,7 +12,8 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use gglint::harness::{
-    Cell, Finding, FixReport, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp, fix_mcp, read_mcp,
+    Cell, Finding, FixReport, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp_from,
+    fix_mcp, read_mcp,
 };
 
 const USAGE: &str = "\
@@ -21,13 +22,16 @@ Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
 Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers
   gglint mcp --fix [PATH]           give every agent the same servers, started the same way
+  gglint mcp --fix --source codex   take each server's setup from Codex where it has one
   gglint mcp --servers [PATH]       list every server, file by file
   gglint mcp --format lines [PATH]  one line per problem, for scripts and CI
 
 PATH is the repository's root, the current directory by default. `--fix` adds missing
 servers, creates the config file of an agent that has its own directory, and copies the
-command and arguments of the first agent where a server is turned on to the others. It
-never removes a server; everything else set up differently is reported only.
+command and arguments of the first agent where a server is turned on to the others, in the
+order Claude Code, Codex, Cursor, OpenCode. `--source` puts one agent first: claude-code,
+codex, cursor or opencode. `--fix` never removes a server; everything else set up
+differently is reported only.
 ";
 
 fn main() -> ExitCode {
@@ -68,6 +72,7 @@ enum McpView {
 fn mcp(args: &[String]) -> ExitCode {
     let mut view = McpView::Table;
     let mut fix = false;
+    let mut source: Option<Harness> = None;
     let mut path = ".";
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -85,6 +90,20 @@ fn mcp(args: &[String]) -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "--format" => args.next().map(String::as_str),
+            "--source" => match parse_source(args.next().map(String::as_str)) {
+                Ok(harness) => {
+                    source = Some(harness);
+                    continue;
+                }
+                Err(code) => return code,
+            },
+            other if other.starts_with("--source=") => match parse_source(other.strip_prefix("--source=")) {
+                Ok(harness) => {
+                    source = Some(harness);
+                    continue;
+                }
+                Err(code) => return code,
+            },
             other => match other.strip_prefix("--format=") {
                 Some(format) => Some(format),
                 None if other.starts_with('-') => {
@@ -123,14 +142,14 @@ fn mcp(args: &[String]) -> ExitCode {
     let mut check = if view == McpView::Servers {
         McpCheck::default()
     } else {
-        check_mcp(root, &configs)
+        check_mcp_from(root, &configs, source)
     };
     let elapsed = start.elapsed();
     // After fixing, everything below is about the files as they are now.
     let configs = if fix {
         print_fixes(&fix_mcp(root, &configs, &check));
         let configs = read_mcp(root);
-        check = check_mcp(root, &configs);
+        check = check_mcp_from(root, &configs, source);
         configs
     } else {
         configs
@@ -147,6 +166,17 @@ fn mcp(args: &[String]) -> ExitCode {
                 print_mcp_server(config, server);
             }
         }
+    }
+    if let Some(source) = source
+        && view != McpView::Servers
+        && !check.harnesses.contains(&source)
+    {
+        eprintln!(
+            "note: {} has no MCP config file or {} directory here, so --source {} changes nothing",
+            source.display_name(),
+            source.directory(),
+            source.as_str()
+        );
     }
     let problems = check.findings().count();
     match view {
@@ -193,6 +223,17 @@ fn mcp(args: &[String]) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// The agent `--source` names, or the exit code after saying why it isn't one.
+fn parse_source(name: Option<&str>) -> Result<Harness, ExitCode> {
+    name.and_then(Harness::parse).ok_or_else(|| {
+        eprintln!(
+            "error: unknown agent {:?} for --source; use claude-code, codex, cursor or opencode",
+            name.unwrap_or("")
+        );
+        ExitCode::FAILURE
+    })
 }
 
 /// What `--fix` changed, file by file, and what it left as it was.
