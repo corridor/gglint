@@ -1,6 +1,6 @@
 [package]
 name = "gglint"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
