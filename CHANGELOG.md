@@ -4,6 +4,17 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `gglint mcp --fix` now does everything `--create` and `--overwrite` did: it also creates
+  the config file of an agent that has its own directory, and starts each server with the
+  same command and arguments in every agent
+  ([#4](https://github.com/corridor/gglint/issues/4)).
+- `--create` and `--overwrite` are no longer needed. They're still accepted, print a note,
+  and do what `--fix` does.
+
 ## [0.1.1] - 2026-11-12
 
 ### Added
