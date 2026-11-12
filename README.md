@@ -74,7 +74,7 @@ cargo install --git https://github.com/corridor/gglint --locked
 ## Usage
 
 ```text
-gglint mcp [--fix] [--format table|lines] [PATH]
+gglint mcp [--fix] [--source AGENT] [--format table|lines] [PATH]
 gglint mcp --servers [PATH]
 ```
 
@@ -82,6 +82,7 @@ gglint mcp --servers [PATH]
 | ------------------- | ---------------------------------------------------------------------------------------- |
 | *(none)*            | Report every problem and draw each server in each agent.                                 |
 | `--fix`             | Add missing servers and config files, start each server the same way, then report what's left. |
+| `--source AGENT`    | Take each server's setup from `AGENT` where it has the server: `claude-code`, `codex`, `cursor` or `opencode`. |
 | `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
 | `--servers`         | List every configured server, file by file, without comparing them.                      |
 | `PATH`              | The repository's root. Defaults to the current directory.                               |
@@ -138,7 +139,9 @@ count, because it doesn't show that the agent is set up in the repository.
 ## How fixing works
 
 Every server is copied from the first config file where it's turned on, in the order
-Claude Code, Codex, Cursor, OpenCode. `--fix` never removes a server.
+Claude Code, Codex, Cursor, OpenCode. To make one agent the source of truth instead, name it
+with `--source`: `gglint mcp --fix --source codex` takes each server from Codex wherever
+Codex has it turned on, and from the first agent otherwise. `--fix` never removes a server.
 
 - A missing server is added to each config file that lacks it.
 - An agent with its own directory but no config file gets one, with every server that is

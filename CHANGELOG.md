@@ -6,6 +6,12 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--source AGENT` makes one agent the source of truth: each server's setup is taken from
+  it wherever it has the server turned on, instead of from the first agent
+  ([#3](https://github.com/corridor/gglint/issues/3)).
+
 ### Changed
 
 - `gglint mcp --fix` now does everything `--create` and `--overwrite` did: it also creates
