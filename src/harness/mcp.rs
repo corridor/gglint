@@ -14,7 +14,7 @@ use toml::de::{DeTable, DeValue};
 
 use super::Harness;
 use super::Location;
-use super::agents::AGENTS;
+use super::agents::{AGENTS, agent};
 
 /// How a file lists its MCP servers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,12 +101,7 @@ pub(super) enum Syntax {
 
 impl Syntax {
     pub(super) fn of(harness: Harness) -> Syntax {
-        match harness {
-            Harness::ClaudeCode => Syntax::Dollar,
-            Harness::Codex => Syntax::Literal,
-            Harness::Cursor => Syntax::DollarEnv,
-            Harness::OpenCode => Syntax::BraceEnv,
-        }
+        agent(harness).syntax
     }
 
     fn prefix(self) -> Option<&'static str> {
