@@ -272,11 +272,20 @@ fn prints_the_version_and_usage() {
 
     let help = gglint(&["--help".as_ref()]);
     assert!(help.status.success());
-    assert!(
-        String::from_utf8(help.stdout)
-            .unwrap()
-            .contains("gglint mcp --fix [PATH]")
-    );
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("gglint mcp --fix [PATH]"), "{help}");
+    // Every agent, with the name `--source` takes and the file it's read from.
+    for words in [
+        ["claude-code", "Claude", "Code", ".mcp.json"].as_slice(),
+        &["codex", "Codex", ".codex/config.toml"],
+        &["opencode", "OpenCode", "opencode.json"],
+    ] {
+        assert!(
+            help.lines()
+                .any(|line| line.split_whitespace().collect::<Vec<_>>() == words),
+            "{words:?} not in\n{help}"
+        );
+    }
 
     // Without a command there's nothing to do.
     let bare = gglint(&[]);
@@ -324,14 +333,14 @@ fn mcp_rejects_an_unknown_source() {
     let output = gglint(&[
         "mcp".as_ref(),
         "--source".as_ref(),
-        "vscode".as_ref(),
+        "notepad".as_ref(),
         dir.path().as_os_str(),
     ]);
 
     assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unknown agent \"vscode\" for --source; use claude-code, codex, cursor or opencode")
+        stderr.contains("unknown agent \"notepad\" for --source; use claude-code, codex, cursor or opencode"),
+        "{stderr}"
     );
 }
