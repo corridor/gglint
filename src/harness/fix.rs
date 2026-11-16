@@ -95,10 +95,13 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
                 continue;
             }
             // An agent compared without a config file has its own directory: it gets one.
-            let relative_path = configs.iter().find(|config| config.harness == harness).map_or_else(
-                || PathBuf::from(harness.mcp_file()),
-                |config| config.relative_path.clone(),
-            );
+            let relative_path = configs
+                .iter()
+                .find(|config| config.harness == harness && !config.ignored)
+                .map_or_else(
+                    || PathBuf::from(harness.mcp_file()),
+                    |config| config.relative_path.clone(),
+                );
             match fields(&source.server, source.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
                     harness,
@@ -183,7 +186,7 @@ fn keep_every_server_of_agents_reading_a_new_file(
     writes: &mut Vec<Write>,
     report: &mut FixReport,
 ) {
-    for config in configs {
+    for config in configs.iter().filter(|config| !config.ignored) {
         let Some(instead) = agent(config.harness).read_instead.map(Path::new) else {
             continue;
         };

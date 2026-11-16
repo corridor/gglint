@@ -139,10 +139,14 @@ Copilot CLI and Gemini CLI count only once they have their config file: many rep
 have an `.agents/`, `.github/` or `.gemini/` directory for other reasons, such as skills,
 workflows or Gemini Code Assist's reviews.
 
-Qoder reads Claude Code's `.mcp.json` as well as its own file. Copilot CLI reads `.mcp.json`
-instead of `.github/mcp.json` whenever `.mcp.json` exists, so gglint then warns that Copilot
-ignores `.github/mcp.json`. A server in `.mcp.json` counts as theirs, and a server missing
-from them and from `.mcp.json` is added to `.mcp.json` only.
+Qoder reads Claude Code's `.mcp.json` as well as its own file: a server there counts as
+Qoder's, and a server missing from both is added to `.mcp.json` only.
+
+Copilot CLI reads `.mcp.json` instead of `.github/mcp.json` whenever `.mcp.json` exists, so it
+gets the same servers as Claude Code, and gglint warns that `.github/mcp.json` goes unread.
+`--fix` creates a `.mcp.json` only if every server in `.github/mcp.json` is written to it.
+Copilot also skips a `.github/mcp.json` that lists no servers under `mcpServers` or at its
+top, such as one with VS Code's `servers`: gglint warns about it and leaves it alone.
 
 ## How fixing works
 

@@ -150,7 +150,9 @@ pub fn compared_harnesses(root: &Path, configs: &[McpConfig]) -> Vec<Harness> {
     HARNESSES
         .into_iter()
         .filter(|&harness| {
-            configs.iter().any(|config| config.harness == harness)
+            configs
+                .iter()
+                .any(|config| config.harness == harness && !config.ignored)
                 || harness
                     .directory()
                     .is_some_and(|directory| root.join(directory).is_dir())
@@ -182,7 +184,11 @@ pub fn check_mcp_from(root: &Path, configs: &[McpConfig], source: Option<Harness
     // compared: it has the file, or gets it.
     let missing_configs = harnesses
         .iter()
-        .filter(|&&harness| !configs.iter().any(|config| config.harness == harness))
+        .filter(|&&harness| {
+            !configs
+                .iter()
+                .any(|config| config.harness == harness && !config.ignored)
+        })
         .filter(|&&harness| shares_file_with(harness, &harnesses).is_none())
         .filter_map(|&harness| missing_config(harness, &servers))
         .collect();
@@ -623,7 +629,10 @@ impl Group<'_> {
                 .copied()
         };
         let has_config = |harness: Harness| {
-            configs.iter().any(|config| config.harness == harness) || shares_file_with(harness, harnesses).is_some()
+            configs
+                .iter()
+                .any(|config| config.harness == harness && !config.ignored)
+                || shares_file_with(harness, harnesses).is_some()
         };
         let missing: Vec<Harness> = harnesses
             .iter()
@@ -815,10 +824,13 @@ impl Group<'_> {
 /// repository, or the one of another agent compared whose file it reads too.
 fn config_file(harness: Harness, compared: &[Harness], configs: &[McpConfig]) -> String {
     let harness = shares_file_with(harness, compared).unwrap_or(harness);
-    configs.iter().find(|config| config.harness == harness).map_or_else(
-        || harness.mcp_file().to_string(),
-        |config| config.relative_path.display().to_string(),
-    )
+    configs
+        .iter()
+        .find(|config| config.harness == harness && !config.ignored)
+        .map_or_else(
+            || harness.mcp_file().to_string(),
+            |config| config.relative_path.display().to_string(),
+        )
 }
 
 fn names(harnesses: &[Harness], last: &str) -> String {

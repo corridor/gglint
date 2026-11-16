@@ -37,6 +37,9 @@ pub struct McpConfig {
     pub servers: Vec<McpServer>,
     /// What couldn't be read: the whole file, or one server.
     pub warnings: Vec<String>,
+    /// Whether the agent doesn't read servers from it: it reads another file instead, or
+    /// skips this one. It's listed for its warnings, and isn't compared or fixed.
+    pub ignored: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -235,14 +238,18 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                 relative_path: PathBuf::from(relative),
                 servers: Vec::new(),
                 warnings: Vec::new(),
+                ignored: false,
             };
             let read_instead = agent.read_instead.filter(|other| root.join(other).is_file());
             match (std::fs::read_to_string(&config.path), read_instead) {
                 // Its servers aren't the agent's while it reads another file instead.
-                (Ok(_), Some(other)) => config.warnings.push(format!(
-                    "{} doesn't read this file while {other} exists; it reads {other} instead",
-                    agent.name
-                )),
+                (Ok(_), Some(other)) => {
+                    config.warnings.push(format!(
+                        "{} doesn't read this file while {other} exists; it reads {other} instead",
+                        agent.name
+                    ));
+                    config.ignored = true;
+                }
                 (Ok(text), None) => {
                     // A byte order mark, which editors on Windows often save, isn't JSON or TOML.
                     let text = text.strip_prefix(BYTE_ORDER_MARK).unwrap_or(&text);
@@ -311,13 +318,22 @@ fn read_json(
     let Some(Value::Object(root)) = parsed.value else {
         return;
     };
-    // Copilot CLI's file can list its servers right at its top.
-    let at_top = root.get_object(key).is_none()
-        && agent(config.harness).servers_at_top
-        && root
+    // Copilot CLI's file can list its servers right at its top instead, and nothing else: it
+    // skips a file that does neither.
+    let at_top = root.get_object(key).is_none() && agent(config.harness).servers_at_top;
+    if at_top
+        && !root
             .properties
             .iter()
-            .any(|property| matches!(&property.value, Value::Object(entry) if is_server(entry)));
+            .all(|property| matches!(&property.value, Value::Object(entry) if is_server(entry)))
+    {
+        config.warnings.push(format!(
+            "{} skips this file: it lists no servers under `{key}` or at its top",
+            agent(config.harness).name
+        ));
+        config.ignored = true;
+        return;
+    }
     let mut servers = match root.get_object(key) {
         Some(servers) => servers,
         None if at_top => &root,
