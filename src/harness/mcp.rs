@@ -14,7 +14,7 @@ use toml::de::{DeTable, DeValue};
 
 use super::Harness;
 use super::Location;
-use super::agents::{AGENTS, agent};
+use super::agents::{AGENTS, Off, agent};
 
 /// How a file lists its MCP servers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,17 +237,16 @@ fn sorted(mut settings: Vec<Setting>) -> Vec<Setting> {
 }
 
 // ---------------------------------------------------------------------------
-// JSON: Claude Code, Cursor and OpenCode
+// JSON: the `mcpServers` format, and OpenCode
 // ---------------------------------------------------------------------------
 
 /// Reads the servers in the object at `key`, one entry at a time with `entry`.
 fn read_json(
     text: &str,
     key: &str,
-    entry: fn(String, Location, &Object, Syntax) -> Result<McpServer, String>,
+    entry: fn(String, Location, &Object, Harness) -> Result<McpServer, String>,
     config: &mut McpConfig,
 ) {
-    let syntax = Syntax::of(config.harness);
     // Comments and trailing commas are allowed: OpenCode's `.jsonc` files have them.
     let parsed = match jsonc_parser::parse_to_ast(text, &CollectOptions::default(), &ParseOptions::default()) {
         Ok(parsed) => parsed,
@@ -277,7 +276,7 @@ fn read_json(
             config.warnings.push(format!("`{name}` isn't an object"));
             continue;
         };
-        match entry(name, location, object, syntax) {
+        match entry(name, location, object, config.harness) {
             Ok(server) => config.servers.push(server),
             Err(warning) => config.warnings.push(warning),
         }
@@ -291,6 +290,13 @@ fn is_server(object: &Object) -> bool {
 
 fn json_string(object: &Object, key: &str) -> Option<String> {
     object.get_string(key).map(|string| string.value.to_string())
+}
+
+fn json_bool(object: &Object, key: &str) -> Option<bool> {
+    match object.get(key).map(|property| &property.value) {
+        Some(Value::BooleanLit(value)) => Some(value.value),
+        _ => None,
+    }
 }
 
 fn json_strings(array: &Array) -> Vec<String> {
@@ -318,9 +324,10 @@ fn json_settings(object: Option<&Object>, syntax: Syntax) -> Vec<Setting> {
     )
 }
 
-/// Claude Code's `.mcp.json` and Cursor's `.cursor/mcp.json`. A server is started with
-/// `command` or reached at `url`, whatever its `type` says.
-fn mcp_servers_entry(name: String, location: Location, object: &Object, syntax: Syntax) -> Result<McpServer, String> {
+/// An entry in an `mcpServers` file, such as Claude Code's `.mcp.json`. A server is started
+/// with `command` or reached at `url`, whatever its `type` says.
+fn mcp_servers_entry(name: String, location: Location, object: &Object, harness: Harness) -> Result<McpServer, String> {
+    let syntax = Syntax::of(harness);
     let transport = if let Some(command) = json_string(object, "command") {
         let args = object.get_array("args").map(json_strings).unwrap_or_default();
         Transport::Command { command, args }
@@ -335,14 +342,19 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, syntax: 
         transport,
         env: json_settings(object.get_object("env"), syntax),
         headers: json_settings(object.get_object("headers"), syntax),
-        enabled: true,
+        enabled: match agent(harness).off {
+            Off::Disabled => json_bool(object, "disabled") != Some(true),
+            Off::NotEnabled => json_bool(object, "enabled") != Some(false),
+            Off::Never => true,
+        },
         enabled_tools: None,
         disabled_tools: Vec::new(),
     })
 }
 
 /// OpenCode's `opencode.json`: `command` is one list, the program and its arguments.
-fn opencode_entry(name: String, location: Location, object: &Object, syntax: Syntax) -> Result<McpServer, String> {
+fn opencode_entry(name: String, location: Location, object: &Object, harness: Harness) -> Result<McpServer, String> {
+    let syntax = Syntax::of(harness);
     let transport = if let Some(command) = object.get_array("command") {
         let mut parts = json_strings(command).into_iter();
         let Some(command) = parts.next() else {
@@ -359,10 +371,7 @@ fn opencode_entry(name: String, location: Location, object: &Object, syntax: Syn
     } else {
         return Err(no_transport(&name));
     };
-    let enabled = match object.get("enabled").map(|property| &property.value) {
-        Some(Value::BooleanLit(enabled)) => enabled.value,
-        _ => true,
-    };
+    let enabled = json_bool(object, "enabled") != Some(false);
     Ok(McpServer {
         name,
         location,

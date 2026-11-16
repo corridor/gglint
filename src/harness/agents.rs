@@ -29,6 +29,19 @@ pub(super) struct Agent {
     /// How a file in the `mcpServers` format writes a server reached over HTTP. Codex and
     /// OpenCode have their own way, set by their format.
     pub remote: Remote,
+    /// How a server is turned off without removing it.
+    pub off: Off,
+}
+
+/// How a server is turned off in an agent's config file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Off {
+    /// It can't be: the agent turns servers off in its own settings, not in the file.
+    Never,
+    /// `"disabled": true`.
+    Disabled,
+    /// `"enabled": false`, or `enabled = false` in Codex's TOML.
+    NotEnabled,
 }
 
 /// How a server reached over HTTP is written in an `mcpServers` file.
@@ -54,6 +67,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Dollar,
         command_line_syntax: Syntax::Dollar,
         remote: Remote::TypedUrl,
+        off: Off::Never,
     },
     Agent {
         harness: Harness::Codex,
@@ -66,6 +80,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
+        off: Off::NotEnabled,
     },
     Agent {
         harness: Harness::Cursor,
@@ -78,6 +93,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::DollarEnv,
         command_line_syntax: Syntax::DollarEnv,
         remote: Remote::Url,
+        off: Off::Never,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -90,6 +106,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::BraceEnv,
         command_line_syntax: Syntax::BraceEnv,
         remote: Remote::Url,
+        off: Off::NotEnabled,
     },
     Agent {
         harness: Harness::Junie,
@@ -103,6 +120,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
+        off: Off::Never,
     },
     Agent {
         harness: Harness::Trae,
@@ -117,6 +135,21 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
+        off: Off::Never,
+    },
+    Agent {
+        harness: Harness::Kiro,
+        id: "kiro",
+        aliases: &["kiro-cli"],
+        name: "Kiro",
+        directory: ".kiro",
+        files: &[".kiro/settings/mcp.json"],
+        format: Format::McpServers,
+        // `${VAR}` in `env` and `headers`; its docs show none in a command line or URL.
+        syntax: Syntax::Dollar,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::Url,
+        off: Off::Disabled,
     },
 ];
 
