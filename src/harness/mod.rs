@@ -6,6 +6,7 @@
 //!   set up differently.
 //! - `fix.rs` adds the missing servers and config files, and starts each server the same way.
 
+mod agents;
 mod compare;
 mod fix;
 mod mcp;
@@ -30,32 +31,21 @@ pub const HARNESSES: [Harness; 4] = [Harness::ClaudeCode, Harness::Codex, Harnes
 
 impl Harness {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => "claude-code",
-            Harness::Codex => "codex",
-            Harness::Cursor => "cursor",
-            Harness::OpenCode => "opencode",
-        }
+        agents::agent(self).id
     }
 
-    /// The harness named `name`, as `as_str` writes it; `claude` is Claude Code too.
+    /// The harness named `name`, as `as_str` writes it or by another name it goes by, such
+    /// as `claude` for Claude Code.
     pub fn parse(name: &str) -> Option<Harness> {
-        match name.to_ascii_lowercase().as_str() {
-            "claude-code" | "claude" => Some(Harness::ClaudeCode),
-            "codex" => Some(Harness::Codex),
-            "cursor" => Some(Harness::Cursor),
-            "opencode" => Some(Harness::OpenCode),
-            _ => None,
-        }
+        let name = name.to_ascii_lowercase();
+        agents::AGENTS
+            .iter()
+            .find(|agent| agent.id == name || agent.aliases.contains(&name.as_str()))
+            .map(|agent| agent.harness)
     }
 
     pub fn display_name(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => "Claude Code",
-            Harness::Codex => "Codex",
-            Harness::Cursor => "Cursor",
-            Harness::OpenCode => "OpenCode",
-        }
+        agents::agent(self).name
     }
 
     /// The file it reads a repository's MCP servers from, relative to the root.
@@ -66,12 +56,7 @@ impl Harness {
     /// Its own directory in a repository. When it's there, the repository is set up for the
     /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
     pub fn directory(self) -> &'static str {
-        match self {
-            Harness::ClaudeCode => ".claude",
-            Harness::Codex => ".codex",
-            Harness::Cursor => ".cursor",
-            Harness::OpenCode => ".opencode",
-        }
+        agents::agent(self).directory
     }
 }
 
