@@ -31,6 +31,9 @@ pub(super) struct Agent {
     pub remote: Remote,
     /// How a server is turned off without removing it.
     pub off: Off,
+    /// The key of an `mcpServers` entry that names the environment variable holding a
+    /// bearer token, sent as `Authorization: Bearer <token>`. Codex's is set by its format.
+    pub bearer_token_key: Option<&'static str>,
 }
 
 /// How a server is turned off in an agent's config file.
@@ -70,6 +73,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Dollar,
         remote: Remote::TypedUrl,
         off: Off::Never,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Codex,
@@ -83,6 +87,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
         off: Off::NotEnabled,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Cursor,
@@ -96,6 +101,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::DollarEnv,
         remote: Remote::Url,
         off: Off::Never,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -109,6 +115,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::BraceEnv,
         remote: Remote::Url,
         off: Off::NotEnabled,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Junie,
@@ -123,6 +130,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
         off: Off::Never,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Trae,
@@ -138,6 +146,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
         off: Off::Never,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Kiro,
@@ -152,6 +161,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
         off: Off::Disabled,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -166,6 +176,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::TypedUrl,
         off: Off::Disabled,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::Qoder,
@@ -180,6 +191,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::TypedUrl,
         off: Off::Disabled,
+        bearer_token_key: None,
     },
     Agent {
         harness: Harness::KimiCode,
@@ -195,6 +207,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::TransportSse,
         off: Off::NotEnabled,
+        bearer_token_key: Some("bearerTokenEnvVar"),
     },
 ];
 

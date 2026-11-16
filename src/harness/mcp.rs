@@ -336,12 +336,21 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
     } else {
         return Err(no_transport(&name));
     };
+    let mut headers = json_settings(object.get_object("headers"), syntax);
+    if let Some(key) = agent(harness).bearer_token_key
+        && let Some(variable) = json_string(object, key)
+    {
+        headers.push(Setting {
+            name: "Authorization".to_string(),
+            value: vec![Part::Text("Bearer ".to_string()), Part::Env(variable)],
+        });
+    }
     Ok(McpServer {
         name,
         location,
         transport,
         env: json_settings(object.get_object("env"), syntax),
-        headers: json_settings(object.get_object("headers"), syntax),
+        headers: sorted(headers),
         enabled: match agent(harness).off {
             Off::Disabled => json_bool(object, "disabled") != Some(true),
             Off::NotEnabled => json_bool(object, "enabled") != Some(false),

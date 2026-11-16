@@ -273,7 +273,17 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             .map(Field::Map)
     };
     let env = settings(&server.env, &|name| format!("`{name}`"))?;
-    let headers = settings(&server.headers, &|name| format!("the `{name}` header"))?;
+    // `Authorization: Bearer <token>`, with the token read from the environment, goes in its
+    // own key where the agent has one.
+    let mut headers = server.headers.clone();
+    let mut bearer = None;
+    if let Some(key) = agent(harness).bearer_token_key
+        && let Some(index) = headers.iter().position(is_bearer_token)
+        && let [_, Part::Env(variable)] = headers.remove(index).value.as_slice()
+    {
+        bearer = Some((key, variable.clone()));
+    }
+    let headers = settings(&headers, &|name| format!("the `{name}` header"))?;
     match (&server.transport, format) {
         (Transport::Command { command, args }, Format::OpenCode) => {
             add("type", Field::Text("local".to_string()));
@@ -302,9 +312,19 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             }
             add("url", Field::Text(url.clone()));
             add("headers", headers);
+            if let Some((key, variable)) = bearer {
+                add(key, Field::Text(variable));
+            }
         }
     }
     Ok(fields)
+}
+
+/// Whether `setting` is `Authorization: Bearer <token>` with the token read from the
+/// environment.
+fn is_bearer_token(setting: &Setting) -> bool {
+    setting.name.eq_ignore_ascii_case("Authorization")
+        && matches!(setting.value.as_slice(), [Part::Text(prefix), Part::Env(_)] if prefix == "Bearer ")
 }
 
 /// The keys that say how `transport`, read from `source`, starts in `harness`'s file: its
