@@ -23,7 +23,7 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
-use super::agents::agent;
+use super::agents::{Remote, agent};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
 use super::mcp::{Format, Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
@@ -293,9 +293,7 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             add("headers", headers);
         }
         (Transport::Remote { url }, _) => {
-            // Claude Code starts an entry without a `type` as a command. A URL ending in
-            // `/sse` is the older SSE transport.
-            if harness == Harness::ClaudeCode {
+            if agent(harness).remote == Remote::TypedUrl {
                 let kind = if url.trim_end_matches('/').ends_with("/sse") {
                     "sse"
                 } else {
