@@ -177,16 +177,7 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
     let mut value = String::new();
     for part in parts {
         match part {
-            Part::Text(text) if ["${", "{env:", "{file:"].iter().any(|marker| text.contains(marker)) => return None,
-            // `$KEY` is a reference in the shell's syntax, even where another agent's isn't.
-            Part::Text(text)
-                if syntax == Syntax::Shell
-                    && parse_value(text, Syntax::Shell)
-                        .iter()
-                        .any(|part| matches!(part, Part::Env(_))) =>
-            {
-                return None;
-            }
+            Part::Text(text) if confusing(text, syntax).is_some() => return None,
             Part::Text(text) => value.push_str(text),
             Part::Env(name) => match syntax {
                 Syntax::Dollar | Syntax::Shell => value.push_str(&format!("${{{name}}}")),
@@ -197,6 +188,35 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
         }
     }
     Some(value)
+}
+
+/// The first part of `text` that would mean something else once written in `syntax`: what
+/// looks like a reference in any harness's syntax (`${KEY:-default}`, `{env:KEY}`), or
+/// `$KEY` in the shell's, where it's a reference even if it wasn't one where it was read.
+pub(super) fn confusing(text: &str, syntax: Syntax) -> Option<&str> {
+    let marked = ["${", "{env:", "{file:"]
+        .iter()
+        .filter_map(|marker| text.find(marker))
+        .min();
+    let dollar = || {
+        text.match_indices('$')
+            .map(|(index, _)| index)
+            .find(|&index| text[index + 1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'))
+    };
+    let (start, closed) = match (marked, syntax) {
+        (Some(start), _) => (start, true),
+        (None, Syntax::Shell) => (dollar()?, false),
+        (None, _) => return None,
+    };
+    let rest = &text[start..];
+    let length = if closed {
+        rest.find('}').map_or(rest.len(), |end| end + 1)
+    } else {
+        1 + rest[1..]
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len() - 1)
+    };
+    Some(&rest[..length])
 }
 
 /// What some editors put at the start of a UTF-8 file.
@@ -248,8 +268,10 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
         .collect()
 }
 
-fn no_transport(name: &str) -> String {
-    format!("`{name}` has neither a `command` nor a `url`")
+/// The warning for a server with neither a command nor a URL under one of `keys`.
+fn no_transport(name: &str, keys: &[&str]) -> String {
+    let keys: Vec<String> = keys.iter().map(|key| format!("`{key}`")).collect();
+    format!("`{name}` has neither a `command` nor a {}", keys.join(" or "))
 }
 
 /// The 1-based line and column of the byte at `offset`.
@@ -383,7 +405,7 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
     {
         Transport::Remote { url }
     } else {
-        return Err(no_transport(&name));
+        return Err(no_transport(&name, agent(harness).remote.keys()));
     };
     let mut headers = json_settings(object.get_object("headers"), syntax);
     if let Some(key) = agent(harness).bearer_token_key
@@ -427,7 +449,7 @@ fn opencode_entry(name: String, location: Location, object: &Object, harness: Ha
     } else if let Some(url) = json_string(object, "url") {
         Transport::Remote { url }
     } else {
-        return Err(no_transport(&name));
+        return Err(no_transport(&name, &["url"]));
     };
     let enabled = json_bool(object, "enabled") != Some(false);
     Ok(McpServer {
@@ -528,7 +550,7 @@ fn read_codex(text: &str, config: &mut McpConfig) {
         } else if let Some(url) = toml_string(table, "url") {
             Transport::Remote { url }
         } else {
-            config.warnings.push(no_transport(&name));
+            config.warnings.push(no_transport(&name, &["url"]));
             continue;
         };
 

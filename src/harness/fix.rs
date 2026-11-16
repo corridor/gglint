@@ -25,7 +25,7 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
 use super::agents::{Remote, agent, shares_file_with};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
-use super::mcp::{BYTE_ORDER_MARK, Format, Part, Setting, Syntax, parse_value, translate, write_value};
+use super::mcp::{BYTE_ORDER_MARK, Format, Part, Setting, Syntax, confusing, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
 /// What `fix_mcp` changed, and what it left.
@@ -271,7 +271,18 @@ fn written_transport(transport: &Transport, from: Harness, to: Harness) -> Resul
     let (from_syntax, to_syntax) = (Syntax::of_command_line(from), Syntax::of_command_line(to));
     let write = |text: &String, what: &str| {
         translate(text, from_syntax, to_syntax).ok_or_else(|| {
-            let variables: Vec<String> = parse_value(text, from_syntax)
+            let parts = parse_value(text, from_syntax);
+            // Text that would mean something else there, such as `$HOME` for Gemini CLI.
+            if let Some(confusing) = parts.iter().find_map(|part| match part {
+                Part::Text(text) => confusing(text, to_syntax),
+                Part::Env(_) => None,
+            }) {
+                return format!(
+                    "the {what} has `{confusing}`, which can't be written for {}",
+                    to.display_name()
+                );
+            }
+            let variables: Vec<String> = parts
                 .into_iter()
                 .filter_map(|part| match part {
                     Part::Env(name) => Some(format!("`{name}`")),
