@@ -4,38 +4,50 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-16
 
 gglint now supports 14 coding agents instead of 4
-([#10](https://github.com/corridor/gglint/issues/10)).
+([#10](https://github.com/corridor/gglint/issues/10)). Each new agent's format follows its
+documentation, and Gemini CLI, Qwen Code, Factory Droid, Qoder and Copilot CLI were also
+checked against the agents themselves.
 
 ### Added
 
 - Ten agents: Antigravity, GitHub Copilot CLI, Factory Droid, Gemini CLI, Junie, Kimi Code,
   Kiro, Qoder, Qwen Code and Trae. gglint reads each one's MCP config file in the repository,
-  and `--fix` writes servers into it the way that agent does: `httpUrl` for Gemini CLI and
-  Qwen Code, `serverUrl` for Antigravity, a `type` for Copilot CLI, Factory Droid and Qoder.
-- Servers turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder),
-  `"enabled": false` (Kimi Code), or Gemini CLI's `mcp.allowed` and `mcp.excluded` lists
-  count as turned off.
+  and `--fix` writes servers into it the way that agent expects: `httpUrl` for Gemini CLI and
+  Qwen Code, `serverUrl` for Antigravity, a `type` for Copilot CLI, Factory Droid and Qoder,
+  and `transport` and `bearerTokenEnvVar` for Kimi Code.
+- A server turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder), with
+  `"enabled": false` (Kimi Code), or by Gemini CLI's `mcp.allowed` and `mcp.excluded` lists
+  is reported as turned off.
 - Qoder reads `.mcp.json` as well as its own file, so a server there counts as Qoder's and
   isn't copied into `.qoder/settings.json`.
 - Copilot CLI reads `.mcp.json` instead of `.github/mcp.json` while it exists, and skips a
-  `.github/mcp.json` without `mcpServers`. gglint warns about such a file, leaves it alone,
-  and creates a `.mcp.json` only if Copilot keeps every server it had.
+  `.github/mcp.json` without `mcpServers`. gglint warns about such a file and leaves it
+  alone, and `--fix` creates a `.mcp.json` only if Copilot keeps every server it had.
 - `gglint --help` lists every agent, with the name `--source` takes and its config file.
-  `--source` also takes other names agents go by, such as `gemini`, `copilot` or `droid`.
+  `--source` also accepts other names an agent goes by, such as `gemini`, `copilot` or
+  `droid`.
 
 ### Changed
 
-- New agents come after Claude Code, Codex, Cursor and OpenCode, in alphabetical order, so
-  `--fix` still copies a server from those four first.
-- An agent whose directory many repositories have for other reasons (Antigravity's
-  `.agents`, Copilot CLI's `.github`, Gemini CLI's `.gemini`) counts only once it has its MCP
-  config file, and never gets one created by `--fix`.
-- A server that reads an environment variable isn't copied to an agent whose docs don't say
-  how to refer to one: Antigravity, Copilot CLI, Junie and Trae. It's listed under
-  `Not added:` instead.
+- The new agents come after Claude Code, Codex, Cursor and OpenCode, in alphabetical order,
+  so `--fix` still copies a server from those four first.
+- Antigravity, Copilot CLI and Gemini CLI count only once they have their MCP config file,
+  since many repositories have an `.agents`, `.github` or `.gemini` directory for other
+  reasons, and `--fix` never creates their config file.
+- A server that reads an environment variable isn't copied to an agent whose documentation
+  doesn't say how to refer to one: Antigravity, Copilot CLI, Junie and Trae. It's listed
+  under `Not added:` instead.
+- A reason under `Not added:` quotes the text that can't be written, such as
+  `${DB_HOST:-localhost}`, and the warning for a server without a URL names the keys that
+  agent reads, such as `serverUrl` for Antigravity.
+
+### Fixed
+
+- A config file that starts with a UTF-8 byte order mark, as some Windows editors save it,
+  couldn't be read. It's now read for every agent, and `--fix` keeps the mark.
 
 ## [0.2.0] - 2026-11-12
 
@@ -106,6 +118,7 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.3.0]: https://github.com/corridor/gglint/releases/tag/v0.3.0
 [0.2.0]: https://github.com/corridor/gglint/releases/tag/v0.2.0
 [0.1.1]: https://github.com/corridor/gglint/releases/tag/v0.1.1
 [0.1.0]: https://github.com/corridor/gglint/releases/tag/v0.1.0
