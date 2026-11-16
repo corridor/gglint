@@ -151,6 +151,20 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::Disabled,
     },
+    Agent {
+        harness: Harness::FactoryDroid,
+        id: "droid",
+        aliases: &["factory", "factory-droid"],
+        name: "Factory Droid",
+        directory: ".factory",
+        files: &[".factory/mcp.json"],
+        format: Format::McpServers,
+        // `${NAME}` in `env` and `headers`, and nowhere else.
+        syntax: Syntax::Dollar,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::TypedUrl,
+        off: Off::Disabled,
+    },
 ];
 
 /// What gglint knows about `harness`.

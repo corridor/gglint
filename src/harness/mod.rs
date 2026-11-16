@@ -27,10 +27,11 @@ pub enum Harness {
     Junie,
     Trae,
     Kiro,
+    FactoryDroid,
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 7] = [
+pub const HARNESSES: [Harness; 8] = [
     Harness::ClaudeCode,
     Harness::Codex,
     Harness::Cursor,
@@ -38,6 +39,7 @@ pub const HARNESSES: [Harness; 7] = [
     Harness::Junie,
     Harness::Trae,
     Harness::Kiro,
+    Harness::FactoryDroid,
 ];
 
 impl Harness {
