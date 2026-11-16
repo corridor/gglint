@@ -910,3 +910,76 @@ fn antigravity_gets_no_server_reached_over_sse() {
         }]
     );
 }
+
+// ---------------------------------------------------------------------------
+// GitHub Copilot CLI
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_copilot_cli_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".github/mcp.json",
+        r#"{
+  "mcpServers": {
+    "playwright": { "type": "local", "command": "npx", "args": ["@playwright/mcp@latest"], "env": {}, "tools": ["*"] },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "YOUR-API-KEY" },
+      "tools": ["*"]
+    }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::CopilotCli);
+
+    assert_eq!(config.relative_path, Path::new(".github/mcp.json"));
+    assert_eq!(
+        server(&config, "playwright").transport,
+        command("npx", &["@playwright/mcp@latest"])
+    );
+    assert_eq!(
+        server(&config, "context7").transport,
+        remote("https://mcp.context7.com/mcp")
+    );
+}
+
+#[test]
+fn a_github_directory_alone_is_not_copilot_cli() {
+    let dir = TempDir::new();
+    dir.write(".cursor/mcp.json", CURSOR);
+    dir.write(".github/workflows/ci.yml", "on: push\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn fix_gives_every_copilot_cli_server_a_type() {
+    let dir = TempDir::new();
+    dir.write(".cursor/mcp.json", CURSOR);
+    dir.write(".github/mcp.json", "{}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert_eq!(
+        read(&dir, ".github/mcp.json"),
+        CLAUDE_CODE_AS_TYPED_URL.replace(
+            "\"command\": \"npx\"",
+            "\"type\": \"local\",\n      \"command\": \"npx\""
+        )
+    );
+}
+
+#[test]
+fn copilot_names_copilot_cli() {
+    assert_eq!(Harness::parse("copilot"), Some(Harness::CopilotCli));
+    assert_eq!(Harness::parse("copilot-cli"), Some(Harness::CopilotCli));
+}

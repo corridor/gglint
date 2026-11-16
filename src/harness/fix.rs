@@ -293,6 +293,9 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             add("environment", env);
         }
         (Transport::Command { command, args }, _) => {
+            if let Some(kind) = agent(harness).command_type {
+                add("type", Field::Text(kind.to_string()));
+            }
             add("command", Field::Text(command.clone()));
             add("args", Field::List(args.clone()));
             add("env", env);

@@ -33,10 +33,11 @@ pub enum Harness {
     GeminiCli,
     QwenCode,
     Antigravity,
+    CopilotCli,
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 13] = [
+pub const HARNESSES: [Harness; 14] = [
     Harness::ClaudeCode,
     Harness::Codex,
     Harness::Cursor,
@@ -50,6 +51,7 @@ pub const HARNESSES: [Harness; 13] = [
     Harness::GeminiCli,
     Harness::QwenCode,
     Harness::Antigravity,
+    Harness::CopilotCli,
 ];
 
 impl Harness {

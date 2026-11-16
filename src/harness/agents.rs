@@ -36,6 +36,8 @@ pub(super) struct Agent {
     /// The key of an `mcpServers` entry that names the environment variable holding a
     /// bearer token, sent as `Authorization: Bearer <token>`. Codex's is set by its format.
     pub bearer_token_key: Option<&'static str>,
+    /// The `type` an `mcpServers` entry started as a command has, when the agent gives it one.
+    pub command_type: Option<&'static str>,
 }
 
 /// How a server is turned off in an agent's config file.
@@ -91,6 +93,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TypedUrl,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Codex,
@@ -105,6 +108,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::NotEnabled,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Cursor,
@@ -119,6 +123,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -133,6 +138,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::NotEnabled,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Junie,
@@ -148,6 +154,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Trae,
@@ -164,6 +171,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Kiro,
@@ -179,6 +187,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::Url,
         off: Off::Disabled,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -194,6 +203,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TypedUrl,
         off: Off::Disabled,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Qoder,
@@ -209,6 +219,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TypedUrl,
         off: Off::Disabled,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::KimiCode,
@@ -225,6 +236,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TransportSse,
         off: Off::NotEnabled,
         bearer_token_key: Some("bearerTokenEnvVar"),
+        command_type: None,
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -241,6 +253,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::HttpUrl,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::QwenCode,
@@ -256,6 +269,7 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::HttpUrl,
         off: Off::Never,
         bearer_token_key: None,
+        command_type: None,
     },
     Agent {
         harness: Harness::Antigravity,
@@ -272,6 +286,24 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::ServerUrl,
         off: Off::Disabled,
         bearer_token_key: None,
+        command_type: None,
+    },
+    Agent {
+        harness: Harness::CopilotCli,
+        id: "copilot-cli",
+        aliases: &["copilot", "github-copilot-cli"],
+        name: "Copilot CLI",
+        // Nearly every repository has a `.github` directory, so it doesn't count alone.
+        directory: None,
+        files: &[".github/mcp.json"],
+        format: Format::McpServers,
+        // Its docs don't say how a value refers to an environment variable.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::TypedUrl,
+        off: Off::Never,
+        bearer_token_key: None,
+        command_type: Some("local"),
     },
 ];
 
