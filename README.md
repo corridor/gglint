@@ -128,6 +128,7 @@ secrets.
 | Kimi Code   | `.kimi-code/mcp.json`             | `.kimi-code/`   | JSON, `mcpServers`                             |
 | Gemini CLI  | `.gemini/settings.json`           | —               | JSON, `mcpServers`                             |
 | Qwen Code   | `.qwen/settings.json`             | `.qwen/`        | JSON, `mcpServers`                             |
+| Antigravity | `.agents/mcp_config.json`         | —               | JSON, `mcpServers`                             |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't

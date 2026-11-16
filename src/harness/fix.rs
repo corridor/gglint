@@ -312,6 +312,13 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
                 Remote::TransportSse => {}
                 Remote::HttpUrl if !sse => url_key = "httpUrl",
                 Remote::HttpUrl => {}
+                Remote::ServerUrl if sse => {
+                    return Err(format!(
+                        "it's reached over SSE, and {} only reaches remote servers over streamable HTTP",
+                        harness.display_name()
+                    ));
+                }
+                Remote::ServerUrl => url_key = "serverUrl",
             }
             add(url_key, Field::Text(url.clone()));
             add("headers", headers);
