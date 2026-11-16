@@ -40,6 +40,8 @@ pub(super) struct Agent {
     pub command_type: Option<&'static str>,
     /// The agents whose config files it reads too: every server in them is one it gets.
     pub also_reads: &'static [Harness],
+    /// Whether its `mcpServers` file can list servers right at its top instead.
+    pub servers_at_top: bool,
 }
 
 /// The agent whose config file `harness` reads too and gets a server from, among those
@@ -107,6 +109,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Codex,
@@ -123,6 +126,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Cursor,
@@ -139,6 +143,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -155,6 +160,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Junie,
@@ -172,6 +178,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Trae,
@@ -190,6 +197,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Kiro,
@@ -207,6 +215,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -224,6 +233,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Qoder,
@@ -242,6 +252,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[Harness::ClaudeCode],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::KimiCode,
@@ -260,6 +271,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: Some("bearerTokenEnvVar"),
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -278,6 +290,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::QwenCode,
@@ -295,6 +308,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::Antigravity,
@@ -313,6 +327,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],
+        servers_at_top: false,
     },
     Agent {
         harness: Harness::CopilotCli,
@@ -332,6 +347,7 @@ pub(super) const AGENTS: &[Agent] = &[
         bearer_token_key: None,
         command_type: Some("local"),
         also_reads: &[Harness::ClaudeCode],
+        servers_at_top: true,
     },
 ];
 

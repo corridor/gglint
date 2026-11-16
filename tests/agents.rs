@@ -1070,3 +1070,41 @@ fn a_server_only_copilot_cli_has_is_added_to_mcp_json() {
     assert_eq!(report.changed.len(), 1);
     assert_eq!(report.changed[0].relative_path, Path::new(".mcp.json"));
 }
+
+#[test]
+fn reads_copilot_cli_servers_listed_without_mcp_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".github/mcp.json",
+        r#"{ "playwright": { "type": "local", "command": "npx", "args": ["@playwright/mcp@latest"] } }"#,
+    );
+
+    let config = config_of(&dir, Harness::CopilotCli);
+
+    assert_eq!(
+        server(&config, "playwright").transport,
+        command("npx", &["@playwright/mcp@latest"])
+    );
+}
+
+#[test]
+fn fix_adds_to_a_copilot_cli_file_without_mcp_servers_at_its_top() {
+    let dir = TempDir::new();
+    dir.write(
+        ".cursor/mcp.json",
+        r#"{ "mcpServers": { "docs": { "url": "https://docs.example.com/mcp" } } }"#,
+    );
+    dir.write(
+        ".github/mcp.json",
+        "{\n  \"docs-old\": { \"type\": \"local\", \"command\": \"uvx\", \"args\": [\"docs-mcp\"] }\n}\n",
+    );
+
+    let (report, _) = fix(&dir);
+
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert_eq!(
+        read(&dir, ".github/mcp.json"),
+        "{\n  \"docs-old\": { \"type\": \"local\", \"command\": \"uvx\", \"args\": [\"docs-mcp\"] },\n  \
+         \"docs\": {\n    \"type\": \"http\",\n    \"url\": \"https://docs.example.com/mcp\"\n  }\n}\n"
+    );
+}
