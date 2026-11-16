@@ -533,3 +533,65 @@ fn fix_keeps_the_other_settings_in_a_qoder_settings_file() {
         "{settings}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Kimi Code
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_kimi_code_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".kimi-code/mcp.json",
+        r#"{
+  "mcpServers": {
+    "context7": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"] },
+    "linear": { "url": "https://mcp.linear.app/mcp" },
+    "legacy-events": { "transport": "sse", "url": "https://mcp.example.com/sse", "enabled": false }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::KimiCode);
+
+    assert_eq!(config.relative_path, Path::new(".kimi-code/mcp.json"));
+    assert_eq!(
+        server(&config, "context7").transport,
+        command("npx", &["-y", "@upstash/context7-mcp"])
+    );
+    assert_eq!(
+        server(&config, "linear").transport,
+        remote("https://mcp.linear.app/mcp")
+    );
+    let events = server(&config, "legacy-events");
+    assert_eq!(events.transport, remote("https://mcp.example.com/sse"));
+    assert!(!events.enabled, "`enabled: false` turns it off");
+}
+
+#[test]
+fn fix_creates_a_kimi_code_config() {
+    assert_eq!(
+        created_from_claude_code(".kimi-code/skills/review/SKILL.md", ".kimi-code/mcp.json"),
+        CLAUDE_CODE_AS_URL
+    );
+}
+
+#[test]
+fn fix_marks_an_sse_server_for_kimi_code() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "linear": { "type": "sse", "url": "https://mcp.linear.app/sse" } } }"#,
+    );
+    dir.write(".kimi-code/mcp.json", "{}\n");
+
+    let (_, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(
+        read(&dir, ".kimi-code/mcp.json"),
+        "{\n  \"mcpServers\": {\n    \"linear\": {\n      \"transport\": \"sse\",\n      \
+         \"url\": \"https://mcp.linear.app/sse\"\n    }\n  }\n}\n"
+    );
+}

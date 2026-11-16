@@ -293,13 +293,12 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             add("headers", headers);
         }
         (Transport::Remote { url }, _) => {
-            if agent(harness).remote == Remote::TypedUrl {
-                let kind = if url.trim_end_matches('/').ends_with("/sse") {
-                    "sse"
-                } else {
-                    "http"
-                };
-                add("type", Field::Text(kind.to_string()));
+            let sse = url.trim_end_matches('/').ends_with("/sse");
+            match agent(harness).remote {
+                Remote::Url => {}
+                Remote::TypedUrl => add("type", Field::Text(if sse { "sse" } else { "http" }.to_string())),
+                Remote::TransportSse if sse => add("transport", Field::Text("sse".to_string())),
+                Remote::TransportSse => {}
             }
             add("url", Field::Text(url.clone()));
             add("headers", headers);

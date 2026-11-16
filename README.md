@@ -125,6 +125,7 @@ secrets.
 | Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
 | Factory Droid | `.factory/mcp.json`           | `.factory/`     | JSON, `mcpServers`                             |
 | Qoder       | `.qoder/settings.json`            | `.qoder/`       | JSON, `mcpServers`                             |
+| Kimi Code   | `.kimi-code/mcp.json`             | `.kimi-code/`   | JSON, `mcpServers`                             |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't
