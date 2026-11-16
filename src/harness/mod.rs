@@ -48,9 +48,10 @@ impl Harness {
         agents::agent(self).name
     }
 
-    /// The file it reads a repository's MCP servers from, relative to the root.
+    /// The file it reads a repository's MCP servers from, relative to the root: the one
+    /// created when it has none.
     pub fn mcp_file(self) -> &'static str {
-        mcp::mcp_file(self)
+        agents::agent(self).files[0]
     }
 
     /// Its own directory in a repository. When it's there, the repository is set up for the

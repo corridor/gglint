@@ -2,6 +2,7 @@
 //! with a row in `AGENTS`.
 
 use super::Harness;
+use super::mcp::Format;
 
 /// One coding agent, as gglint sees it.
 pub(super) struct Agent {
@@ -14,6 +15,12 @@ pub(super) struct Agent {
     /// Its own directory in a repository. When it's there, the repository is set up for the
     /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
     pub directory: &'static str,
+    /// The files it reads a repository's MCP servers from, relative to its root. A new
+    /// config file is created at the first. Codex only reads `.codex/config.toml` in
+    /// projects the user has trusted.
+    pub files: &'static [&'static str],
+    /// How those files list the servers.
+    pub format: Format,
 }
 
 /// Every agent, in the order they're reported: the order of `Harness`.
@@ -24,6 +31,8 @@ pub(super) const AGENTS: &[Agent] = &[
         aliases: &["claude"],
         name: "Claude Code",
         directory: ".claude",
+        files: &[".mcp.json"],
+        format: Format::McpServers,
     },
     Agent {
         harness: Harness::Codex,
@@ -31,6 +40,8 @@ pub(super) const AGENTS: &[Agent] = &[
         aliases: &[],
         name: "Codex",
         directory: ".codex",
+        files: &[".codex/config.toml"],
+        format: Format::Codex,
     },
     Agent {
         harness: Harness::Cursor,
@@ -38,6 +49,8 @@ pub(super) const AGENTS: &[Agent] = &[
         aliases: &[],
         name: "Cursor",
         directory: ".cursor",
+        files: &[".cursor/mcp.json"],
+        format: Format::McpServers,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -45,6 +58,8 @@ pub(super) const AGENTS: &[Agent] = &[
         aliases: &[],
         name: "OpenCode",
         directory: ".opencode",
+        files: &["opencode.json", "opencode.jsonc"],
+        format: Format::OpenCode,
     },
 ];
 
