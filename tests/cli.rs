@@ -340,7 +340,7 @@ fn mcp_rejects_an_unknown_source() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("unknown agent \"notepad\" for --source; use claude-code, codex, cursor or opencode"),
+        stderr.contains("unknown agent \"notepad\" for --source; use claude-code, codex, cursor, opencode"),
         "{stderr}"
     );
 }

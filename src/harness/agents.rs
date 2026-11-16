@@ -84,6 +84,18 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::BraceEnv,
         remote: Remote::Url,
     },
+    Agent {
+        harness: Harness::Junie,
+        id: "junie",
+        aliases: &[],
+        name: "Junie",
+        directory: ".junie",
+        files: &[".junie/mcp/mcp.json"],
+        format: Format::McpServers,
+        // Its docs don't say how a value refers to an environment variable.
+        syntax: Syntax::Literal,
+        remote: Remote::Url,
+    },
 ];
 
 /// What gglint knows about `harness`.

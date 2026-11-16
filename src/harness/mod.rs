@@ -24,10 +24,17 @@ pub enum Harness {
     Codex,
     Cursor,
     OpenCode,
+    Junie,
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 4] = [Harness::ClaudeCode, Harness::Codex, Harness::Cursor, Harness::OpenCode];
+pub const HARNESSES: [Harness; 5] = [
+    Harness::ClaudeCode,
+    Harness::Codex,
+    Harness::Cursor,
+    Harness::OpenCode,
+    Harness::Junie,
+];
 
 impl Harness {
     pub fn as_str(self) -> &'static str {
