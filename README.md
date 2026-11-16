@@ -6,7 +6,8 @@
 
 Keep the MCP servers of every coding agent in your repository in sync.
 
-Claude Code, Codex, Cursor and OpenCode each read MCP servers from their own config file, in
+Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and the other coding agents in
+[Supported agents](#supported-agents) each read MCP servers from their own config file, in
 their own format. In a repository set up for more than one of them, those files drift apart:
 a server is added to `.mcp.json` but not to `.cursor/mcp.json`, a version is pinned in one
 file and not the other, or an agent has no MCP config at all. gglint finds every difference
@@ -39,7 +40,7 @@ in this table, on hover:
   prints one problem per line.
 
 In November 2026 we checked the 258 most-starred GitHub repositories set up for two or more
-of these agents. Of the 179 that configure MCP servers, 128 (72%) had at least one of the
+of Claude Code, Codex, Cursor and OpenCode. Of the 179 that configure MCP servers, 128 (72%) had at least one of the
 problems gglint reports.
 
 ## Quick start
@@ -71,7 +72,7 @@ uvx gglint mcp --servers [PATH]
 | ------------------- | ---------------------------------------------------------------------------------------- |
 | *(none)*            | Report every problem and draw each server in each agent.                                 |
 | `--fix`             | Add missing servers and config files, start each server the same way, then report what's left. |
-| `--source AGENT`    | Take each server's setup from `AGENT` where it has the server: `claude-code`, `codex`, `cursor` or `opencode`. |
+| `--source AGENT`    | Take each server's setup from `AGENT` where it has the server, named as in [Supported agents](#supported-agents): `claude-code`, `gemini-cli`. |
 | `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
 | `--servers`         | List every configured server, file by file, without comparing them.                      |
 | `PATH`              | The repository's root. Defaults to the current directory.                               |
@@ -114,31 +115,37 @@ secrets.
 
 ## Supported agents
 
-| Agent       | MCP config file                   | Agent directory | Format                                         |
-| ----------- | --------------------------------- | --------------- | ---------------------------------------------- |
-| Claude Code | `.mcp.json`                       | `.claude/`      | JSON, `mcpServers`                             |
-| Codex       | `.codex/config.toml`              | `.codex/`       | TOML, `[mcp_servers.<name>]`                   |
-| Cursor      | `.cursor/mcp.json`                | `.cursor/`      | JSON, `mcpServers`                             |
-| OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp`     |
-| Antigravity | `.agents/mcp_config.json`         | —               | JSON, `mcpServers`                             |
-| Copilot CLI | `.github/mcp.json`                | —               | JSON, `mcpServers`                             |
-| Factory Droid | `.factory/mcp.json`           | `.factory/`     | JSON, `mcpServers`                             |
-| Gemini CLI  | `.gemini/settings.json`           | —               | JSON, `mcpServers`                             |
-| Junie       | `.junie/mcp/mcp.json`             | `.junie/`       | JSON, `mcpServers`                             |
-| Kimi Code   | `.kimi-code/mcp.json`             | `.kimi-code/`   | JSON, `mcpServers`                             |
-| Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
-| Qoder       | `.qoder/settings.json`            | `.qoder/`       | JSON, `mcpServers`                             |
-| Qwen Code   | `.qwen/settings.json`             | `.qwen/`        | JSON, `mcpServers`                             |
-| Trae        | `.trae/mcp.json`                  | `.trae/`        | JSON, `mcpServers`                             |
+| Agent         | `--source`    | MCP config file                     | Agent directory | Format                                     |
+| ------------- | ------------- | ----------------------------------- | --------------- | ------------------------------------------ |
+| Claude Code   | `claude-code` | `.mcp.json`                         | `.claude/`      | JSON, `mcpServers`                         |
+| Codex         | `codex`       | `.codex/config.toml`                | `.codex/`       | TOML, `[mcp_servers.<name>]`               |
+| Cursor        | `cursor`      | `.cursor/mcp.json`                  | `.cursor/`      | JSON, `mcpServers`                         |
+| OpenCode      | `opencode`    | `opencode.json`, `opencode.jsonc`   | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp` |
+| Antigravity   | `antigravity` | `.agents/mcp_config.json`           | none            | JSON, `mcpServers`                         |
+| Copilot CLI   | `copilot-cli` | `.github/mcp.json`, `.mcp.json`     | none            | JSON, `mcpServers` or servers at the top   |
+| Factory Droid | `droid`       | `.factory/mcp.json`                 | `.factory/`     | JSON, `mcpServers`                         |
+| Gemini CLI    | `gemini-cli`  | `.gemini/settings.json`             | none            | JSON, `mcpServers` among other settings    |
+| Junie         | `junie`       | `.junie/mcp/mcp.json`               | `.junie/`       | JSON, `mcpServers`                         |
+| Kimi Code     | `kimi-code`   | `.kimi-code/mcp.json`               | `.kimi-code/`   | JSON, `mcpServers`                         |
+| Kiro          | `kiro`        | `.kiro/settings/mcp.json`           | `.kiro/`        | JSON, `mcpServers`                         |
+| Qoder         | `qoder`       | `.qoder/settings.json`, `.mcp.json` | `.qoder/`       | JSON, `mcpServers` among other settings    |
+| Qwen Code     | `qwen-code`   | `.qwen/settings.json`               | `.qwen/`        | JSON, `mcpServers` among other settings    |
+| Trae          | `trae`        | `.trae/mcp.json`                    | `.trae/`        | JSON, `mcpServers`                         |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't
-count, because it doesn't show that the agent is set up in the repository.
+count, because it doesn't show that the agent is set up in the repository. Antigravity,
+Copilot CLI and Gemini CLI count only once they have their config file: many repositories
+have an `.agents/`, `.github/` or `.gemini/` directory for other reasons, such as skills,
+workflows or Gemini Code Assist's reviews.
+
+Copilot CLI and Qoder also read Claude Code's `.mcp.json`. A server there counts as theirs,
+and a server missing from them and from `.mcp.json` is added to `.mcp.json` only.
 
 ## How fixing works
 
-Every server is copied from the first config file where it's turned on, in the order
-Claude Code, Codex, Cursor, OpenCode. To make one agent the source of truth instead, name it
+Every server is copied from the first config file where it's turned on, in the order of the
+table in [Supported agents](#supported-agents). To make one agent the source of truth instead, name it
 with `--source`: `uvx gglint mcp --fix --source codex` takes each server from Codex wherever
 Codex has it turned on, and from the first agent otherwise. `--fix` never removes a server.
 
@@ -159,21 +166,29 @@ Codex has it turned on, and from the first agent otherwise. `--fix` never remove
 References to environment variables are rewritten in each agent's syntax, in values and in
 command lines:
 
-| Agent       | Environment variable `KEY`                                                                  |
-| ----------- | ------------------------------------------------------------------------------------------- |
-| Claude Code | `${KEY}`                                                                                    |
-| Cursor      | `${env:KEY}`                                                                                |
-| OpenCode    | `{env:KEY}`                                                                                 |
-| Codex       | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
+| Agent                                        | Environment variable `KEY`                                                                      |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Claude Code                                  | `${KEY}`                                                                                        |
+| Cursor                                       | `${env:KEY}`                                                                                    |
+| OpenCode                                     | `{env:KEY}`                                                                                     |
+| Gemini CLI, Qwen Code                        | `$KEY` or `${KEY}`, written `${KEY}`                                                            |
+| Kiro, Factory Droid                          | `${KEY}`, in environment variables and headers only                                             |
+| Codex                                        | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
+| Kimi Code                                    | `bearerTokenEnvVar` for `Authorization: Bearer`                                                 |
+| Antigravity, Copilot CLI, Junie, Qoder, Trae | None: their docs don't say how a value refers to an environment variable                        |
 
-Remote servers get `"type": "http"` in Claude Code, or `"sse"` for a URL ending in `/sse`.
-OpenCode servers get `"type": "local"` or `"remote"`, with the command and its arguments in
-one list.
+Remote servers get `"type": "http"`, or `"sse"` for a URL ending in `/sse`, in Claude Code,
+Copilot CLI, Factory Droid and Qoder. Gemini CLI and Qwen Code get the URL as `httpUrl`, or
+as `url` for SSE; Kimi Code gets `"transport": "sse"` for SSE; Antigravity gets `serverUrl`,
+and no server reached over SSE, which it doesn't support. Copilot CLI's local servers get
+`"type": "local"`. OpenCode servers get `"type": "local"` or `"remote"`, with the command and
+its arguments in one list.
 
 A server is skipped, and listed under `Not added:`, when its setup can't be expressed in the
 other agent's format: for example Claude Code's `${KEY:-default}`, Cursor's
-`${workspaceFolder}`, or an environment variable inside a command line, which Codex doesn't
-expand.
+`${workspaceFolder}`, an environment variable inside a command line, which Codex, Kiro and
+Factory Droid don't expand, or any environment variable for an agent whose docs don't say how
+to refer to one.
 
 ### Example
 
@@ -272,9 +287,14 @@ jobs:
 - User-level settings such as `~/.claude.json` or `~/.codex/config.toml` aren't read.
 - Only config files at the repository's root are read, so each package of a monorepo is
   checked separately.
-- VS Code and GitHub Copilot (`.vscode/mcp.json`) and Gemini CLI (`.gemini/settings.json`)
-  aren't supported yet.
-- Codex only reads `.codex/config.toml` in projects you have marked as trusted.
+- VS Code and GitHub Copilot in VS Code (`.vscode/mcp.json`), Zed, Kilo Code, Crush, Amp,
+  Continue and Mistral Vibe aren't supported yet
+  ([#10](https://github.com/corridor/gglint/issues/10)).
+- Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
+  nothing in a repository to compare.
+- Codex only reads `.codex/config.toml`, and Qoder `.qoder/settings.json`, in projects you
+  have marked as trusted. Trae reads `.trae/mcp.json` once project MCP is turned on in its
+  settings.
 
 ## Development
 
@@ -297,8 +317,9 @@ GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --n
 ```
 
 The code lives in [`src/harness/`](https://github.com/corridor/gglint/tree/main/src/harness):
-`mcp.rs` reads each agent's config, `compare.rs` finds the problems, and `fix.rs` writes the
-fixes.
+`agents.rs` describes each agent in one table, `mcp.rs` reads each agent's config,
+`compare.rs` finds the problems, and `fix.rs` writes the fixes. Supporting another agent
+starts with a row in `agents.rs`.
 
 ### Releasing
 
