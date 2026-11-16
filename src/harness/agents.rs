@@ -96,6 +96,19 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Literal,
         remote: Remote::Url,
     },
+    Agent {
+        harness: Harness::Trae,
+        id: "trae",
+        aliases: &["trae-cn"],
+        name: "Trae",
+        directory: ".trae",
+        // Read once "Enable Project MCP" is turned on in Trae's settings.
+        files: &[".trae/mcp.json"],
+        format: Format::McpServers,
+        // Its docs don't say how a value refers to an environment variable.
+        syntax: Syntax::Literal,
+        remote: Remote::Url,
+    },
 ];
 
 /// What gglint knows about `harness`.
