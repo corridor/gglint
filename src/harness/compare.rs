@@ -1,7 +1,7 @@
 //! How the MCP setups of the coding agents in a repository differ.
 //!
 //! The agents compared are those with an MCP config file in the repository, or with their
-//! own directory (`.claude/`, `.codex/`, `.cursor/`, `.opencode/`). Three kinds of problem
+//! own directory (`.claude/`, `.codex/`, `.cursor/`, `.kiro/`...). Three kinds of problem
 //! are reported:
 //!
 //! - a server set up in one config file and missing from another (`missing-server`);

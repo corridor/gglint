@@ -1,7 +1,8 @@
 //! The MCP config files of the coding agents (harnesses) in a repository.
 //!
-//! - `mcp.rs` reads the MCP servers Claude Code, Codex, Cursor and OpenCode are each set up
-//!   to use.
+//! - `agents.rs` says what differs between agents: where each keeps its MCP servers, and how
+//!   it writes them.
+//! - `mcp.rs` reads the MCP servers each agent is set up to use.
 //! - `compare.rs` finds how they differ: missing servers, missing config files, and servers
 //!   set up differently.
 //! - `fix.rs` adds the missing servers and config files, and starts each server the same way.
