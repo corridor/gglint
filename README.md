@@ -296,6 +296,9 @@ jobs:
 - VS Code and GitHub Copilot in VS Code (`.vscode/mcp.json`), Zed, Kilo Code, Crush, Amp,
   Continue and Mistral Vibe aren't supported yet
   ([#10](https://github.com/corridor/gglint/issues/10)).
+- Gemini CLI loads only the servers in `mcp.allowed`, when its settings have that list, and
+  none of those in `mcp.excluded`; gglint counts the others as turned off. `--fix` doesn't
+  add a server to `mcp.allowed`, so a server it adds there stays off until you do.
 - Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
   nothing in a repository to compare.
 - Codex only reads `.codex/config.toml`, and Qoder `.qoder/settings.json`, in projects you

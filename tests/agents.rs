@@ -1295,3 +1295,32 @@ fn copilot_cli_skips_a_file_without_mcp_servers_and_fix_leaves_it() {
         assert_eq!(read(&dir, ".github/mcp.json"), github);
     }
 }
+
+#[test]
+fn a_server_gemini_cli_excludes_or_does_not_allow_is_turned_off() {
+    // Gemini CLI loads only the servers in `mcp.allowed`, when there is one, even an empty
+    // one, and never those in `mcp.excluded`.
+    let servers = r#""a": { "command": "a-mcp" }, "b": { "command": "b-mcp" }, "c": { "command": "c-mcp" }"#;
+    for (lists, on) in [
+        (r#"{ "excluded": ["b"] }"#, vec!["a", "c"]),
+        (r#"{ "allowed": ["a", "b"], "excluded": ["b"] }"#, vec!["a"]),
+        (r#"{ "allowed": [] }"#, vec![]),
+        (r#"{ "serverCommand": "x" }"#, vec!["a", "b", "c"]),
+    ] {
+        let dir = TempDir::new();
+        dir.write(
+            ".gemini/settings.json",
+            format!("{{ \"mcp\": {lists}, \"mcpServers\": {{ {servers} }} }}"),
+        );
+
+        let config = config_of(&dir, Harness::GeminiCli);
+
+        let enabled: Vec<&str> = config
+            .servers
+            .iter()
+            .filter(|server| server.enabled)
+            .map(|server| server.name.as_str())
+            .collect();
+        assert_eq!(enabled, on, "{lists}");
+    }
+}

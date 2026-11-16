@@ -66,6 +66,9 @@ pub(super) enum Off {
     Disabled,
     /// `"enabled": false`, or `enabled = false` in Codex's TOML.
     NotEnabled,
+    /// Left out of the file's `mcp.allowed` list, when it has one, even an empty one, or
+    /// named in its `mcp.excluded` list: Gemini CLI.
+    Lists,
 }
 
 /// How a server reached over HTTP is written in an `mcpServers` file.
@@ -242,7 +245,7 @@ pub(super) const AGENTS: &[Agent] = &[
         syntax: Syntax::Shell,
         command_line_syntax: Syntax::Shell,
         remote: Remote::HttpUrl,
-        off: Off::Never,
+        off: Off::Lists,
         bearer_token_key: None,
         command_type: None,
         also_reads: &[],

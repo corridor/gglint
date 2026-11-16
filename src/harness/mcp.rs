@@ -363,6 +363,19 @@ fn read_json(
             Err(warning) => config.warnings.push(warning),
         }
     }
+    if agent(config.harness).off == Off::Lists
+        && let Some(lists) = root.get_object("mcp")
+    {
+        let list = |key: &str| lists.get_array(key).map(json_strings);
+        let (allowed, excluded) = (list("allowed"), list("excluded").unwrap_or_default());
+        for server in &mut config.servers {
+            if excluded.contains(&server.name)
+                || allowed.as_ref().is_some_and(|allowed| !allowed.contains(&server.name))
+            {
+                server.enabled = false;
+            }
+        }
+    }
 }
 
 /// Whether `object` is a server's entry rather than a group of them.
@@ -441,7 +454,8 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
         enabled: match agent(harness).off {
             Off::Disabled => json_bool(object, "disabled") != Some(true),
             Off::NotEnabled => json_bool(object, "enabled") != Some(false),
-            Off::Never => true,
+            // Read from the whole file in `read_json`.
+            Off::Lists | Off::Never => true,
         },
         enabled_tools: None,
         disabled_tools: Vec::new(),
