@@ -761,7 +761,7 @@ fn gemini_cli_gets_no_text_it_would_read_as_an_environment_variable() {
         [Unfixed {
             harness: Harness::GeminiCli,
             server: "files".to_string(),
-            reason: "the command line can't be written for Gemini CLI".to_string(),
+            reason: "the command line has `$HOME`, which can't be written for Gemini CLI".to_string(),
         }]
     );
 }
@@ -1227,5 +1227,44 @@ fn fix_creates_mcp_json_with_every_server_copilot_cli_had() {
     assert_eq!(
         check.servers[0].cells,
         [(Harness::ClaudeCode, Cell::Same), (Harness::CopilotCli, Cell::Same)]
+    );
+}
+
+#[test]
+fn fix_names_the_text_it_cannot_write_for_an_agent() {
+    // Gemini CLI fills in `${DB_USER}`, but not a default such as `${DB_HOST:-localhost}`.
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "db": { "command": "sh", "args": ["-c", "psql postgresql://${DB_USER}@${DB_HOST:-localhost}/app"] } } }"#,
+    );
+    dir.write(".gemini/settings.json", "{}\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::GeminiCli,
+            server: "db".to_string(),
+            reason: "the command line has `${DB_HOST:-localhost}`, which can't be written for Gemini CLI".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn a_server_without_a_url_antigravity_reads_names_the_keys_it_reads() {
+    // Antigravity doesn't read Gemini CLI's `httpUrl`.
+    let dir = TempDir::new();
+    dir.write(
+        ".agents/mcp_config.json",
+        r#"{ "mcpServers": { "context7": { "httpUrl": "https://mcp.context7.com/mcp" } } }"#,
+    );
+
+    let configs = read_mcp(dir.path());
+
+    assert_eq!(
+        configs[0].warnings,
+        ["`context7` has neither a `command` nor a `serverUrl` or `url`"]
     );
 }
