@@ -4,13 +4,25 @@ build-backend = "maturin"
 
 [project]
 name = "gglint"
-description = "Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync"
+description = "Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync"
 readme = "README.md"
 # The wheels hold a compiled program, not Python code, so any Python 3 can install them.
 requires-python = ">=3.8"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES"]
-keywords = ["mcp", "model-context-protocol", "claude-code", "codex", "cursor", "opencode", "linter"]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "cursor",
+    "opencode",
+    "gemini-cli",
+    "copilot",
+    "kiro",
+    "junie",
+    "linter",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
