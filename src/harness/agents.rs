@@ -38,6 +38,18 @@ pub(super) struct Agent {
     pub bearer_token_key: Option<&'static str>,
     /// The `type` an `mcpServers` entry started as a command has, when the agent gives it one.
     pub command_type: Option<&'static str>,
+    /// The agents whose config files it reads too: every server in them is one it gets.
+    pub also_reads: &'static [Harness],
+}
+
+/// The agent whose config file `harness` reads too and gets a server from, among those
+/// compared, if there's one. A server missing there and from `harness` is added there.
+pub(super) fn shares_file_with(harness: Harness, compared: &[Harness]) -> Option<Harness> {
+    agent(harness)
+        .also_reads
+        .iter()
+        .copied()
+        .find(|other| compared.contains(other))
 }
 
 /// How a server is turned off in an agent's config file.
@@ -94,6 +106,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Codex,
@@ -109,6 +122,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::NotEnabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Cursor,
@@ -124,6 +138,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::OpenCode,
@@ -139,6 +154,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::NotEnabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Junie,
@@ -155,6 +171,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Trae,
@@ -172,6 +189,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Kiro,
@@ -188,6 +206,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Disabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -204,6 +223,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Disabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Qoder,
@@ -211,6 +231,7 @@ pub(super) const AGENTS: &[Agent] = &[
         aliases: &["qoder-cli"],
         name: "Qoder",
         directory: Some(".qoder"),
+        // It reads `.mcp.json` too, in `also_reads`.
         files: &[".qoder/settings.json"],
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
@@ -220,6 +241,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Disabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[Harness::ClaudeCode],
     },
     Agent {
         harness: Harness::KimiCode,
@@ -237,6 +259,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::NotEnabled,
         bearer_token_key: Some("bearerTokenEnvVar"),
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -254,6 +277,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::QwenCode,
@@ -270,6 +294,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::Antigravity,
@@ -287,6 +312,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Disabled,
         bearer_token_key: None,
         command_type: None,
+        also_reads: &[],
     },
     Agent {
         harness: Harness::CopilotCli,
@@ -295,6 +321,7 @@ pub(super) const AGENTS: &[Agent] = &[
         name: "Copilot CLI",
         // Nearly every repository has a `.github` directory, so it doesn't count alone.
         directory: None,
+        // It reads `.mcp.json` too, in `also_reads`.
         files: &[".github/mcp.json"],
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
@@ -304,6 +331,7 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
         command_type: Some("local"),
+        also_reads: &[Harness::ClaudeCode],
     },
 ];
 

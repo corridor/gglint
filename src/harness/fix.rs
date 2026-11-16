@@ -23,7 +23,7 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
-use super::agents::{Remote, agent};
+use super::agents::{Remote, agent, shares_file_with};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
 use super::mcp::{Format, Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
@@ -87,7 +87,9 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
             continue;
         };
         for &(harness, cell) in &server.cells {
-            if cell != Cell::Missing {
+            // An agent that reads another's config file gets the server where it's added
+            // for that agent, such as Copilot CLI from `.mcp.json`.
+            if cell != Cell::Missing || shares_file_with(harness, &check.harnesses).is_some() {
                 continue;
             }
             // An agent compared without a config file has its own directory: it gets one.
