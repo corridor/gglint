@@ -441,8 +441,8 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
     };
     let new_text = match agent(harness).format {
         Format::Codex => write_toml(&text, writes)?,
-        Format::McpServers => write_json(&text, "mcpServers", None, writes)?,
-        Format::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), writes)?,
+        Format::McpServers => write_json(&text, "mcpServers", None, agent(harness).servers_at_top, writes)?,
+        Format::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), false, writes)?,
     };
     if new_text == text {
         return Ok(None);
@@ -468,7 +468,9 @@ fn json_value(field: &Field) -> CstInputValue {
 
 /// Adds the servers to the object at `key`, keeping the rest of the file as it is. A new
 /// file starts with `schema`, when the agent has one.
-fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) -> Result<String, String> {
+/// With `at_top`, a file that already lists servers right at its top gets the new ones
+/// there too.
+fn write_json(text: &str, key: &str, schema: Option<&str>, at_top: bool, writes: &[&Write]) -> Result<String, String> {
     let root =
         CstRootNode::parse(text, &ParseOptions::default()).map_err(|error| format!("couldn't parse it: {error}"))?;
     let object = root.object_value_or_set();
@@ -477,11 +479,21 @@ fn write_json(text: &str, key: &str, schema: Option<&str>, writes: &[&Write]) ->
     {
         object.append("$schema", schema.into());
     }
-    let mut servers = object.object_value_or_set(key);
+    let is_server = |entry: &CstObject| ["type", "command", "url"].iter().any(|key| entry.get(key).is_some());
+    let servers_at_top = at_top
+        && object.get(key).is_none()
+        && object
+            .properties()
+            .iter()
+            .any(|property| property.object_value().is_some_and(|entry| is_server(&entry)));
+    let mut servers = if servers_at_top {
+        object
+    } else {
+        object.object_value_or_set(key)
+    };
     // OpenCode: write where the file keeps its servers, under `mcp.servers` in its current
     // layout or right under `mcp` in the older one. A file with none gets the current one.
     if key == "mcp" {
-        let is_server = |entry: &CstObject| ["type", "command", "url"].iter().any(|key| entry.get(key).is_some());
         match servers.object_value("servers") {
             Some(nested) if !is_server(&nested) => servers = nested,
             Some(_) => {}

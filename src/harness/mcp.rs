@@ -276,8 +276,17 @@ fn read_json(
     let Some(Value::Object(root)) = parsed.value else {
         return;
     };
-    let Some(mut servers) = root.get_object(key) else {
-        return;
+    // Copilot CLI's file can list its servers right at its top.
+    let at_top = root.get_object(key).is_none()
+        && agent(config.harness).servers_at_top
+        && root
+            .properties
+            .iter()
+            .any(|property| matches!(&property.value, Value::Object(entry) if is_server(entry)));
+    let mut servers = match root.get_object(key) {
+        Some(servers) => servers,
+        None if at_top => &root,
+        None => return,
     };
     // OpenCode's current layout keeps servers one level down, under `mcp.servers`. In the
     // older one they're right under `mcp`, so a server there can be called `servers`.
@@ -288,6 +297,10 @@ fn read_json(
         servers = nested;
     }
     for property in &servers.properties {
+        // At the top of a file, only an object is a server.
+        if at_top && !matches!(property.value, Value::Object(_)) {
+            continue;
+        }
         let name = property.name.as_str().to_string();
         let location = location(text, property.range.start);
         let Value::Object(object) = &property.value else {
