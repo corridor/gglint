@@ -21,8 +21,11 @@ pub(super) struct Agent {
     pub files: &'static [&'static str],
     /// How those files list the servers.
     pub format: Format,
-    /// How it refers to an environment variable inside a value.
+    /// How it refers to an environment variable inside the value of an environment
+    /// variable or header.
     pub syntax: Syntax,
+    /// How it refers to one inside a command, its arguments or a URL.
+    pub command_line_syntax: Syntax,
     /// How a file in the `mcpServers` format writes a server reached over HTTP. Codex and
     /// OpenCode have their own way, set by their format.
     pub remote: Remote,
@@ -49,6 +52,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::Dollar,
+        command_line_syntax: Syntax::Dollar,
         remote: Remote::TypedUrl,
     },
     Agent {
@@ -60,6 +64,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".codex/config.toml"],
         format: Format::Codex,
         syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
     },
     Agent {
@@ -71,6 +76,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".cursor/mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::DollarEnv,
+        command_line_syntax: Syntax::DollarEnv,
         remote: Remote::Url,
     },
     Agent {
@@ -82,6 +88,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &["opencode.json", "opencode.jsonc"],
         format: Format::OpenCode,
         syntax: Syntax::BraceEnv,
+        command_line_syntax: Syntax::BraceEnv,
         remote: Remote::Url,
     },
     Agent {
@@ -94,6 +101,7 @@ pub(super) const AGENTS: &[Agent] = &[
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
     },
     Agent {
@@ -107,6 +115,7 @@ pub(super) const AGENTS: &[Agent] = &[
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
     },
 ];

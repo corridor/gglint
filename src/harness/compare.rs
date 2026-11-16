@@ -308,7 +308,7 @@ impl Launch {
     /// What `transport`, as `harness` writes it, runs. References to the environment are
     /// rewritten in one syntax, so `${ROOT}` and Cursor's `${env:ROOT}` are the same argument.
     fn of(transport: &Transport, harness: Harness) -> Launch {
-        let from = Syntax::of(harness);
+        let from = Syntax::of_command_line(harness);
         let common = |text: &String| translate(text, from, Syntax::Dollar).unwrap_or_else(|| text.clone());
         match transport {
             Transport::Command { command, args } => {

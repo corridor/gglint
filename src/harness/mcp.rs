@@ -100,8 +100,14 @@ pub(super) enum Syntax {
 }
 
 impl Syntax {
+    /// How `harness` writes a reference in the value of an environment variable or header.
     pub(super) fn of(harness: Harness) -> Syntax {
         agent(harness).syntax
+    }
+
+    /// How `harness` writes a reference in a command, its arguments or a URL.
+    pub(super) fn of_command_line(harness: Harness) -> Syntax {
+        agent(harness).command_line_syntax
     }
 
     fn prefix(self) -> Option<&'static str> {

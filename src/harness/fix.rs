@@ -205,7 +205,7 @@ fn ignored_by_git(root: &Path, relative_path: &Path) -> bool {
 /// `transport`'s command line or URL, with references to the environment written the way
 /// `to` writes them, or why it can't be.
 fn written_transport(transport: &Transport, from: Harness, to: Harness) -> Result<Transport, String> {
-    let (from_syntax, to_syntax) = (Syntax::of(from), Syntax::of(to));
+    let (from_syntax, to_syntax) = (Syntax::of_command_line(from), Syntax::of_command_line(to));
     let write = |text: &String, what: &str| {
         translate(text, from_syntax, to_syntax).ok_or_else(|| {
             let variables: Vec<String> = parse_value(text, from_syntax)
