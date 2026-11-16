@@ -52,6 +52,8 @@ pub(super) enum Remote {
     /// `url` with a `type`: `"sse"` for a URL ending in `/sse`, the older SSE transport, and
     /// `"http"` otherwise. Claude Code starts an entry without a `type` as a command.
     TypedUrl,
+    /// `url`, with `"transport": "sse"` for a URL ending in `/sse`.
+    TransportSse,
 }
 
 /// Every agent, in the order they're reported: the order of `Harness`.
@@ -178,6 +180,21 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Literal,
         remote: Remote::TypedUrl,
         off: Off::Disabled,
+    },
+    Agent {
+        harness: Harness::KimiCode,
+        id: "kimi-code",
+        aliases: &["kimi"],
+        name: "Kimi Code",
+        directory: ".kimi-code",
+        files: &[".kimi-code/mcp.json"],
+        format: Format::McpServers,
+        // Values are literal: a bearer token is read from the environment with
+        // `bearerTokenEnvVar`.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::TransportSse,
+        off: Off::NotEnabled,
     },
 ];
 
