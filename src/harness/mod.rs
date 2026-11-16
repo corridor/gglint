@@ -77,8 +77,9 @@ impl Harness {
     }
 
     /// Its own directory in a repository. When it's there, the repository is set up for the
-    /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
-    pub fn directory(self) -> &'static str {
+    /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`. `None` for an agent
+    /// that counts only once it has an MCP config file.
+    pub fn directory(self) -> Option<&'static str> {
         agents::agent(self).directory
     }
 }

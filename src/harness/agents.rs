@@ -13,8 +13,10 @@ pub(super) struct Agent {
     pub aliases: &'static [&'static str],
     pub name: &'static str,
     /// Its own directory in a repository. When it's there, the repository is set up for the
-    /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
-    pub directory: &'static str,
+    /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`. `None` when the
+    /// directory is in many repositories for other reasons (`.github`, `.vscode`), so the
+    /// agent counts only once it has an MCP config file.
+    pub directory: Option<&'static str>,
     /// The files it reads a repository's MCP servers from, relative to its root. A new
     /// config file is created at the first. Codex only reads `.codex/config.toml` in
     /// projects the user has trusted.
@@ -66,7 +68,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "claude-code",
         aliases: &["claude"],
         name: "Claude Code",
-        directory: ".claude",
+        directory: Some(".claude"),
         files: &[".mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::Dollar,
@@ -80,7 +82,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "codex",
         aliases: &[],
         name: "Codex",
-        directory: ".codex",
+        directory: Some(".codex"),
         files: &[".codex/config.toml"],
         format: Format::Codex,
         syntax: Syntax::Literal,
@@ -94,7 +96,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "cursor",
         aliases: &[],
         name: "Cursor",
-        directory: ".cursor",
+        directory: Some(".cursor"),
         files: &[".cursor/mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::DollarEnv,
@@ -108,7 +110,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "opencode",
         aliases: &[],
         name: "OpenCode",
-        directory: ".opencode",
+        directory: Some(".opencode"),
         files: &["opencode.json", "opencode.jsonc"],
         format: Format::OpenCode,
         syntax: Syntax::BraceEnv,
@@ -122,7 +124,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "junie",
         aliases: &[],
         name: "Junie",
-        directory: ".junie",
+        directory: Some(".junie"),
         files: &[".junie/mcp/mcp.json"],
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
@@ -137,7 +139,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "trae",
         aliases: &["trae-cn"],
         name: "Trae",
-        directory: ".trae",
+        directory: Some(".trae"),
         // Read once "Enable Project MCP" is turned on in Trae's settings.
         files: &[".trae/mcp.json"],
         format: Format::McpServers,
@@ -153,7 +155,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "kiro",
         aliases: &["kiro-cli"],
         name: "Kiro",
-        directory: ".kiro",
+        directory: Some(".kiro"),
         files: &[".kiro/settings/mcp.json"],
         format: Format::McpServers,
         // `${VAR}` in `env` and `headers`; its docs show none in a command line or URL.
@@ -168,7 +170,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "droid",
         aliases: &["factory", "factory-droid"],
         name: "Factory Droid",
-        directory: ".factory",
+        directory: Some(".factory"),
         files: &[".factory/mcp.json"],
         format: Format::McpServers,
         // `${NAME}` in `env` and `headers`, and nowhere else.
@@ -183,7 +185,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "qoder",
         aliases: &["qoder-cli"],
         name: "Qoder",
-        directory: ".qoder",
+        directory: Some(".qoder"),
         files: &[".qoder/settings.json"],
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
@@ -198,7 +200,7 @@ pub(super) const AGENTS: &[Agent] = &[
         id: "kimi-code",
         aliases: &["kimi"],
         name: "Kimi Code",
-        directory: ".kimi-code",
+        directory: Some(".kimi-code"),
         files: &[".kimi-code/mcp.json"],
         format: Format::McpServers,
         // Values are literal: a bearer token is read from the environment with

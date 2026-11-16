@@ -149,7 +149,10 @@ pub fn compared_harnesses(root: &Path, configs: &[McpConfig]) -> Vec<Harness> {
     HARNESSES
         .into_iter()
         .filter(|&harness| {
-            configs.iter().any(|config| config.harness == harness) || root.join(harness.directory()).is_dir()
+            configs.iter().any(|config| config.harness == harness)
+                || harness
+                    .directory()
+                    .is_some_and(|directory| root.join(directory).is_dir())
         })
         .collect()
 }
@@ -215,7 +218,7 @@ fn missing_config(harness: Harness, servers: &[ServerCheck]) -> Option<Finding> 
             format!("gets none of the {n} MCP servers"),
         ),
     };
-    let (name, directory, file) = (harness.display_name(), harness.directory(), harness.mcp_file());
+    let (name, directory, file) = (harness.display_name(), harness.directory()?, harness.mcp_file());
     Some(Finding {
         rule: Rule::MissingConfig,
         site: first.site.clone(),

@@ -20,8 +20,9 @@ use gglint::harness::{HARNESSES, McpConfig, check_mcp, fix_mcp, read_mcp};
 fn copy(repo: &Path) -> TempDir {
     let dir = TempDir::new();
     for harness in HARNESSES {
-        let directory = harness.directory();
-        if repo.join(directory).is_dir() {
+        if let Some(directory) = harness.directory()
+            && repo.join(directory).is_dir()
+        {
             std::fs::create_dir_all(dir.path().join(directory)).unwrap();
         }
         for file in harness.mcp_files() {
@@ -87,12 +88,16 @@ fn fix_keeps_its_promises_on_real_repositories() {
             .iter()
             .filter(|config| !before.iter().any(|old| old.relative_path == config.relative_path))
         {
-            if !root.join(config.harness.directory()).is_dir() {
-                fail(format!(
-                    "created {} without a {} directory",
-                    config.relative_path.display(),
-                    config.harness.directory()
-                ));
+            match config.harness.directory() {
+                Some(directory) if root.join(directory).is_dir() => {}
+                Some(directory) => fail(format!(
+                    "created {} without a {directory} directory",
+                    config.relative_path.display()
+                )),
+                None => fail(format!(
+                    "created {}, which only the agent's own setup should create",
+                    config.relative_path.display()
+                )),
             }
         }
         for config in &before {
