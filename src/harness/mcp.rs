@@ -213,14 +213,20 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                 servers: Vec::new(),
                 warnings: Vec::new(),
             };
-            match std::fs::read_to_string(&config.path) {
-                Ok(text) => match agent.format {
+            let read_instead = agent.read_instead.filter(|other| root.join(other).is_file());
+            match (std::fs::read_to_string(&config.path), read_instead) {
+                // Its servers aren't the agent's while it reads another file instead.
+                (Ok(_), Some(other)) => config.warnings.push(format!(
+                    "{} doesn't read this file while {other} exists; it reads {other} instead",
+                    agent.name
+                )),
+                (Ok(text), None) => match agent.format {
                     Format::McpServers => read_json(&text, "mcpServers", mcp_servers_entry, &mut config),
                     Format::Codex => read_codex(&text, &mut config),
                     Format::OpenCode => read_json(&text, "mcp", opencode_entry, &mut config),
                 },
                 // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
-                Err(error)
+                (Err(error), _)
                     if matches!(
                         error.kind(),
                         std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
@@ -228,7 +234,7 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                 {
                     return None;
                 }
-                Err(error) => config.warnings.push(format!("couldn't read: {error}")),
+                (Err(error), _) => config.warnings.push(format!("couldn't read: {error}")),
             }
             Some(config)
         })
