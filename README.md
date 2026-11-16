@@ -6,12 +6,12 @@
 
 Keep the MCP servers of every coding agent in your repository in sync.
 
-Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and the other coding agents in
-[Supported agents](#supported-agents) each read MCP servers from their own config file, in
-their own format. In a repository set up for more than one of them, those files drift apart:
-a server is added to `.mcp.json` but not to `.cursor/mcp.json`, a version is pinned in one
-file and not the other, or an agent has no MCP config at all. gglint finds every difference
-and fixes it for you, written in each agent's own format.
+Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and nine other coding agents each read
+MCP servers from their own config file, in their own format (see
+[Supported agents](#supported-agents)). In a repository set up for more than one of them,
+those files drift apart: a server is added to `.mcp.json` but not to `.cursor/mcp.json`, a
+version is pinned in one file and not the other, or an agent has no MCP config at all.
+gglint finds every difference and fixes it for you, written in each agent's own format.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg"><img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="A terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%"></a>
@@ -34,14 +34,16 @@ in this table, on hover:
   same way in every agent. It never removes a server, and keeps your comments and formatting.
 - **Each agent's own format.** A server is translated between JSON and TOML, between each
   agent's syntax for environment variables, and between local and remote server types.
-- **Fast and read-only by default.** gglint reads a handful of files at fixed paths and
+- **Fast and read-only by default.** gglint reads a few files at fixed paths and typically
   finishes in under a millisecond. It never starts a server or downloads anything.
 - **Built for CI.** It exits with status 1 when it finds a problem, and `--format lines`
   prints one problem per line.
 
 In November 2026 we checked the 258 most-starred GitHub repositories set up for two or more
-of Claude Code, Codex, Cursor and OpenCode. Of the 179 that configure MCP servers, 128 (72%) had at least one of the
-problems gglint reports.
+of Claude Code, Codex, Cursor and OpenCode. Of the 179 that configure MCP servers, 128 (72%)
+had at least one of the problems gglint reports. Among the 166 active repositories with 30 or
+more stars that set up a newer agent, such as Gemini CLI, Kiro or Junie, 83 of the 162 with
+MCP servers (51%) had at least one problem.
 
 ## Quick start
 
@@ -72,7 +74,7 @@ uvx gglint mcp --servers [PATH]
 | ------------------- | ---------------------------------------------------------------------------------------- |
 | *(none)*            | Report every problem and draw each server in each agent.                                 |
 | `--fix`             | Add missing servers and config files, start each server the same way, then report what's left. |
-| `--source AGENT`    | Take each server's setup from `AGENT` where it has the server, named as in [Supported agents](#supported-agents): `claude-code`, `gemini-cli`. |
+| `--source AGENT`    | Take each server's setup from `AGENT` where it has the server. `AGENT` is a name from the `--source` column of [Supported agents](#supported-agents), such as `claude-code` or `gemini-cli`. |
 | `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
 | `--servers`         | List every configured server, file by file, without comparing them.                      |
 | `PATH`              | The repository's root. Defaults to the current directory.                               |
@@ -108,7 +110,8 @@ launched doesn't count as a difference:
 - `uvx pkg`, `uv tool run pkg` and `pipx run pkg` all run the PyPI package `pkg`.
 - `npx mcp-remote <url>` reaches the remote server at `<url>`.
 - No version and `latest` both mean the newest version.
-- `${KEY}` in Claude Code and `${env:KEY}` in Cursor refer to the same environment variable.
+- `${KEY}` in Claude Code, `${env:KEY}` in Cursor and `$KEY` in Gemini CLI refer to the same
+  environment variable.
 
 Environment variables and headers are compared by name only, since their values can be
 secrets.
@@ -151,9 +154,10 @@ top, such as one with VS Code's `servers`: gglint warns about it and leaves it a
 ## How fixing works
 
 Every server is copied from the first config file where it's turned on, in the order of the
-table in [Supported agents](#supported-agents). To make one agent the source of truth instead, name it
-with `--source`: `uvx gglint mcp --fix --source codex` takes each server from Codex wherever
-Codex has it turned on, and from the first agent otherwise. `--fix` never removes a server.
+table in [Supported agents](#supported-agents). To make one agent the source of truth
+instead, name it with `--source`: `uvx gglint mcp --fix --source codex` takes each server from
+Codex wherever Codex has it turned on, and from the first agent otherwise. `--fix` never
+removes a server.
 
 - A missing server is added to each config file that lacks it.
 - An agent with its own directory but no config file gets one, with every server that is
@@ -181,14 +185,20 @@ command lines:
 | Kiro, Factory Droid                          | `${KEY}`, in environment variables and headers only                                             |
 | Codex                                        | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
 | Kimi Code                                    | `bearerTokenEnvVar` for `Authorization: Bearer`                                                 |
-| Antigravity, Copilot CLI, Junie, Trae        | None: their docs don't say how a value refers to an environment variable                        |
+| Antigravity, Copilot CLI, Junie, Trae        | None documented, so a server that reads the environment isn't copied to them                    |
 
-Remote servers get `"type": "http"`, or `"sse"` for a URL ending in `/sse`, in Claude Code,
-Copilot CLI, Factory Droid and Qoder. Gemini CLI and Qwen Code get the URL as `httpUrl`, or
-as `url` for SSE; Kimi Code gets `"transport": "sse"` for SSE; Antigravity gets `serverUrl`,
-and no server reached over SSE, which it doesn't support. Copilot CLI's local servers get
-`"type": "local"`. OpenCode servers get `"type": "local"` or `"remote"`, with the command and
-its arguments in one list.
+Each server is written the way its agent expects:
+
+- Remote servers get `"type": "http"`, or `"sse"` for a URL ending in `/sse`, in Claude Code,
+  Copilot CLI, Factory Droid and Qoder.
+- Gemini CLI and Qwen Code get the URL as `httpUrl`, or as `url` for SSE.
+- Kimi Code gets `"transport": "sse"` for SSE, and a bearer token read from the environment
+  as `bearerTokenEnvVar`.
+- Antigravity gets the URL as `serverUrl`. It reaches remote servers over streamable HTTP
+  only, so a server reached over SSE isn't added.
+- Copilot CLI's local servers get `"type": "local"`.
+- OpenCode servers get `"type": "local"` or `"remote"`, with the command and its arguments in
+  one list.
 
 A server is skipped, and listed under `Not added:`, when its setup can't be expressed in the
 other agent's format: for example Claude Code's `${KEY:-default}`, Cursor's
@@ -296,14 +306,15 @@ jobs:
 - VS Code and GitHub Copilot in VS Code (`.vscode/mcp.json`), Zed, Kilo Code, Crush, Amp,
   Continue and Mistral Vibe aren't supported yet
   ([#10](https://github.com/corridor/gglint/issues/10)).
-- Gemini CLI loads only the servers in `mcp.allowed`, when its settings have that list, and
-  none of those in `mcp.excluded`; gglint counts the others as turned off. `--fix` doesn't
-  add a server to `mcp.allowed`, so a server it adds there stays off until you do.
+- Gemini CLI loads only the servers listed in `mcp.allowed`, when its settings have that
+  list, and never those in `mcp.excluded`; gglint reports the servers these lists leave out
+  as turned off. `--fix` doesn't edit the lists, so a server it adds while `mcp.allowed` is
+  set stays off until you add it there.
 - Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
   nothing in a repository to compare.
-- Codex only reads `.codex/config.toml`, and Qoder `.qoder/settings.json`, in projects you
-  have marked as trusted. Trae reads `.trae/mcp.json` once project MCP is turned on in its
-  settings.
+- Codex, Copilot CLI, Gemini CLI, Qoder and Qwen Code load a repository's MCP servers only
+  once you trust the project or approve its servers. Trae reads `.trae/mcp.json` once project
+  MCP is turned on in its settings.
 
 ## Development
 
@@ -319,7 +330,8 @@ cargo test
 `tests/corpus.rs` runs `--fix` against a directory of real repositories and checks that no
 server is removed, that no environment variable, header or on/off state changes, that a
 config file is created only in an agent's own directory, that no file becomes unreadable,
-that problems never increase, and that a second run changes nothing:
+that the number of missing servers and differences never grows, and that a second run changes
+nothing:
 
 ```sh
 GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --nocapture
