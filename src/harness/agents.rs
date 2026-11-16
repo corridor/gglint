@@ -2,7 +2,7 @@
 //! with a row in `AGENTS`.
 
 use super::Harness;
-use super::mcp::Format;
+use super::mcp::{Format, Syntax};
 
 /// One coding agent, as gglint sees it.
 pub(super) struct Agent {
@@ -21,6 +21,8 @@ pub(super) struct Agent {
     pub files: &'static [&'static str],
     /// How those files list the servers.
     pub format: Format,
+    /// How it refers to an environment variable inside a value.
+    pub syntax: Syntax,
 }
 
 /// Every agent, in the order they're reported: the order of `Harness`.
@@ -33,6 +35,7 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: ".claude",
         files: &[".mcp.json"],
         format: Format::McpServers,
+        syntax: Syntax::Dollar,
     },
     Agent {
         harness: Harness::Codex,
@@ -42,6 +45,7 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: ".codex",
         files: &[".codex/config.toml"],
         format: Format::Codex,
+        syntax: Syntax::Literal,
     },
     Agent {
         harness: Harness::Cursor,
@@ -51,6 +55,7 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: ".cursor",
         files: &[".cursor/mcp.json"],
         format: Format::McpServers,
+        syntax: Syntax::DollarEnv,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -60,6 +65,7 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: ".opencode",
         files: &["opencode.json", "opencode.jsonc"],
         format: Format::OpenCode,
+        syntax: Syntax::BraceEnv,
     },
 ];
 
