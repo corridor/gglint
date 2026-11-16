@@ -283,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.2.0 mcp --format lines
+      - run: uvx gglint@0.3.0 mcp --format lines
 ```
 
 ## Security
@@ -346,7 +346,7 @@ starts with a row in `agents.rs`.
 
 1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
 2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.2.0`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.3.0`.
 
 The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
 builds and tests every wheel, publishes them to PyPI, and attaches them to the release.
