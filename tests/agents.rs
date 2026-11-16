@@ -7,7 +7,7 @@ use std::path::Path;
 
 use common::TempDir;
 use gglint::harness::{
-    FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
+    Cell, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
     read_mcp,
 };
 
@@ -982,4 +982,91 @@ fn fix_gives_every_copilot_cli_server_a_type() {
 fn copilot_names_copilot_cli() {
     assert_eq!(Harness::parse("copilot"), Some(Harness::CopilotCli));
     assert_eq!(Harness::parse("copilot-cli"), Some(Harness::CopilotCli));
+}
+
+// ---------------------------------------------------------------------------
+// Agents that also read Claude Code's `.mcp.json`: Copilot CLI and Qoder
+// ---------------------------------------------------------------------------
+
+#[test]
+fn copilot_cli_gets_the_servers_in_mcp_json() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".github/mcp.json", "{}\n");
+
+    let configs = read_mcp(dir.path());
+    let check = check_mcp(dir.path(), &configs);
+
+    assert_eq!(check.harnesses, [Harness::ClaudeCode, Harness::CopilotCli]);
+    assert_eq!(check.findings().count(), 0, "{:?}", findings(&dir));
+    for server in &check.servers {
+        assert_eq!(
+            server.cells,
+            [(Harness::ClaudeCode, Cell::Same), (Harness::CopilotCli, Cell::Same)]
+        );
+    }
+    assert!(fix(&dir).0.changed.is_empty());
+}
+
+#[test]
+fn a_server_missing_from_mcp_json_is_added_there_for_copilot_cli_too() {
+    let dir = TempDir::new();
+    dir.write(".cursor/mcp.json", CURSOR);
+    dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
+    dir.write(".github/mcp.json", "{}\n");
+
+    let before = compare_mcp(dir.path(), &read_mcp(dir.path()));
+    let (report, left) = fix(&dir);
+
+    assert_eq!(
+        before[0].message,
+        "`playwright` is set up for Cursor but not for Claude Code (.mcp.json) or Copilot CLI (.mcp.json)"
+    );
+    assert_eq!(
+        before[0].fix.as_deref(),
+        Some("Add it to .mcp.json, as set up in .cursor/mcp.json:3")
+    );
+    assert!(left.is_empty(), "{left:?}");
+    let changed: Vec<String> = report
+        .changed
+        .iter()
+        .map(|changed| changed.relative_path.display().to_string())
+        .collect();
+    assert_eq!(changed, [".mcp.json"]);
+    assert_eq!(read(&dir, ".github/mcp.json"), "{}\n");
+}
+
+#[test]
+fn qoder_needs_no_config_file_of_its_own_beside_mcp_json() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".cursor/mcp.json", "{ \"mcpServers\": {} }\n");
+    dir.write(".qoder/rules/style.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    let changed: Vec<String> = report
+        .changed
+        .iter()
+        .map(|changed| changed.relative_path.display().to_string())
+        .collect();
+    assert_eq!(changed, [".cursor/mcp.json"]);
+    assert!(!dir.path().join(".qoder/settings.json").exists());
+}
+
+#[test]
+fn a_server_only_copilot_cli_has_is_added_to_mcp_json() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
+    dir.write(
+        ".github/mcp.json",
+        r#"{ "mcpServers": { "context7": { "type": "http", "url": "https://mcp.context7.com/mcp" } } }"#,
+    );
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(report.changed.len(), 1);
+    assert_eq!(report.changed[0].relative_path, Path::new(".mcp.json"));
 }

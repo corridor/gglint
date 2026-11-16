@@ -19,6 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use super::Location;
+use super::agents::{agent, shares_file_with};
 use super::mcp::{Syntax, translate};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
@@ -177,9 +178,12 @@ pub fn check_mcp_from(root: &Path, configs: &[McpConfig], source: Option<Harness
             group.check(&harnesses, configs)
         })
         .collect();
+    // An agent that reads another's config file needs none of its own while that one is
+    // compared: it has the file, or gets it.
     let missing_configs = harnesses
         .iter()
         .filter(|&&harness| !configs.iter().any(|config| config.harness == harness))
+        .filter(|&&harness| shares_file_with(harness, &harnesses).is_none())
         .filter_map(|&harness| missing_config(harness, &servers))
         .collect();
     McpCheck {
@@ -609,20 +613,43 @@ impl Group<'_> {
         let source = self.entries.iter().find(|entry| entry.server.enabled);
         let mut present: Vec<Harness> = self.entries.iter().map(|entry| entry.site.harness).collect();
         present.sort();
+        // An agent gets a server from another's config file it reads, such as Copilot CLI
+        // from `.mcp.json`, and has a config file when that one does.
+        let borrowed = |harness: Harness| {
+            agent(harness)
+                .also_reads
+                .iter()
+                .find(|&&other| self.has(other))
+                .copied()
+        };
+        let has_config = |harness: Harness| {
+            configs.iter().any(|config| config.harness == harness) || shares_file_with(harness, harnesses).is_some()
+        };
         let missing: Vec<Harness> = harnesses
             .iter()
             .copied()
-            .filter(|harness| !present.contains(harness) && configs.iter().any(|config| config.harness == *harness))
+            .filter(|&harness| !present.contains(&harness) && borrowed(harness).is_none() && has_config(harness))
             .collect();
         if let Some(source) = source
             && !missing.is_empty()
         {
-            let files: Vec<String> = missing.iter().map(|&harness| config_file(harness, configs)).collect();
             let with_files: Vec<String> = missing
                 .iter()
-                .zip(&files)
-                .map(|(harness, file)| format!("{} ({file})", harness.display_name()))
+                .map(|&harness| {
+                    format!(
+                        "{} ({})",
+                        harness.display_name(),
+                        config_file(harness, harnesses, configs)
+                    )
+                })
                 .collect();
+            let mut files: Vec<String> = Vec::new();
+            for &harness in &missing {
+                let file = config_file(harness, harnesses, configs);
+                if !files.contains(&file) {
+                    files.push(file);
+                }
+            }
             let mut finding = self.finding_at(
                 source.site.harness,
                 Rule::MissingServer,
@@ -751,16 +778,17 @@ impl Group<'_> {
             ));
         }
 
+        let cell = |harness: Harness| match self.entry(harness) {
+            None => Cell::Missing,
+            Some(entry) if !entry.server.enabled => Cell::Off,
+            Some(_) if different.contains(&harness) => Cell::Different,
+            Some(_) => Cell::Same,
+        };
         let cells = harnesses
             .iter()
-            .map(|&harness| {
-                let cell = match self.entry(harness) {
-                    None => Cell::Missing,
-                    Some(entry) if !entry.server.enabled => Cell::Off,
-                    Some(_) if different.contains(&harness) => Cell::Different,
-                    Some(_) => Cell::Same,
-                };
-                (harness, cell)
+            .map(|&harness| match (cell(harness), borrowed(harness)) {
+                (Cell::Missing, Some(other)) => (harness, cell(other)),
+                (cell, _) => (harness, cell),
             })
             .collect();
         ServerCheck {
@@ -783,8 +811,10 @@ impl Group<'_> {
     }
 }
 
-/// The config file `harness` has in the repository.
-fn config_file(harness: Harness, configs: &[McpConfig]) -> String {
+/// The config file a server missing from `harness` is added to: the one it has in the
+/// repository, or the one of another agent compared whose file it reads too.
+fn config_file(harness: Harness, compared: &[Harness], configs: &[McpConfig]) -> String {
+    let harness = shares_file_with(harness, compared).unwrap_or(harness);
     configs.iter().find(|config| config.harness == harness).map_or_else(
         || harness.mcp_file().to_string(),
         |config| config.relative_path.display().to_string(),
