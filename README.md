@@ -171,11 +171,11 @@ command lines:
 | Claude Code                                  | `${KEY}`                                                                                        |
 | Cursor                                       | `${env:KEY}`                                                                                    |
 | OpenCode                                     | `{env:KEY}`                                                                                     |
-| Gemini CLI, Qwen Code                        | `$KEY` or `${KEY}`, written `${KEY}`                                                            |
+| Gemini CLI, Qoder, Qwen Code                 | `$KEY` or `${KEY}`, written `${KEY}`                                                            |
 | Kiro, Factory Droid                          | `${KEY}`, in environment variables and headers only                                             |
 | Codex                                        | `env_vars = ["KEY"]`, `env_http_headers`, or `bearer_token_env_var` for `Authorization: Bearer` |
 | Kimi Code                                    | `bearerTokenEnvVar` for `Authorization: Bearer`                                                 |
-| Antigravity, Copilot CLI, Junie, Qoder, Trae | None: their docs don't say how a value refers to an environment variable                        |
+| Antigravity, Copilot CLI, Junie, Trae        | None: their docs don't say how a value refers to an environment variable                        |
 
 Remote servers get `"type": "http"`, or `"sse"` for a URL ending in `/sse`, in Claude Code,
 Copilot CLI, Factory Droid and Qoder. Gemini CLI and Qwen Code get the URL as `httpUrl`, or

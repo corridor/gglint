@@ -30,7 +30,7 @@ gglint now supports 14 coding agents instead of 4
   `.agents`, Copilot CLI's `.github`, Gemini CLI's `.gemini`) counts only once it has its MCP
   config file, and never gets one created by `--fix`.
 - A server that reads an environment variable isn't copied to an agent whose docs don't say
-  how to refer to one: Antigravity, Copilot CLI, Junie, Qoder and Trae. It's listed under
+  how to refer to one: Antigravity, Copilot CLI, Junie and Trae. It's listed under
   `Not added:` instead.
 
 ## [0.2.0] - 2026-11-12
