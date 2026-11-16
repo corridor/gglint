@@ -197,10 +197,13 @@ fn mcp(args: &[String]) -> ExitCode {
         && view != McpView::Servers
         && !check.harnesses.contains(&source)
     {
+        let what = match source.directory() {
+            Some(directory) => format!("no MCP config file or {directory} directory"),
+            None => format!("no {}", source.mcp_file()),
+        };
         eprintln!(
-            "note: {} has no MCP config file or {} directory here, so --source {} changes nothing",
+            "note: {} has {what} here, so --source {} changes nothing",
             source.display_name(),
-            source.directory(),
             source.as_str()
         );
     }
