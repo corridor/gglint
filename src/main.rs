@@ -12,12 +12,12 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use gglint::harness::{
-    Cell, Finding, FixReport, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport, check_mcp_from,
-    fix_mcp, read_mcp,
+    Cell, Finding, FixReport, HARNESSES, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport,
+    check_mcp_from, fix_mcp, read_mcp,
 };
 
 const USAGE: &str = "\
-Keep the MCP servers of Claude Code, Codex, Cursor and OpenCode in sync.
+Keep the MCP servers of every coding agent in a repository in sync.
 
 Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers
@@ -29,10 +29,36 @@ Usage:
 PATH is the repository's root, the current directory by default. `--fix` adds missing
 servers, creates the config file of an agent that has its own directory, and copies the
 command and arguments of the first agent where a server is turned on to the others, in the
-order Claude Code, Codex, Cursor, OpenCode. `--source` puts one agent first: claude-code,
-codex, cursor or opencode. `--fix` never removes a server; everything else set up
-differently is reported only.
+order of the agents below. `--source` puts one agent first, named as below. `--fix` never
+removes a server; everything else set up differently is reported only.
 ";
+
+/// What `gglint --help` prints: `USAGE`, then every agent with the name `--source` takes and
+/// the file its servers are read from.
+fn usage() -> String {
+    let id_width = HARNESSES
+        .iter()
+        .map(|harness| harness.as_str().len())
+        .max()
+        .unwrap_or(0);
+    let name_width = HARNESSES
+        .iter()
+        .map(|harness| harness.display_name().len())
+        .max()
+        .unwrap_or(0);
+    let agents: String = HARNESSES
+        .iter()
+        .map(|harness| {
+            format!(
+                "  {:<id_width$}  {:<name_width$}  {}\n",
+                harness.as_str(),
+                harness.display_name(),
+                harness.mcp_file()
+            )
+        })
+        .collect();
+    format!("{USAGE}\nAgents:\n{agents}")
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -43,16 +69,16 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("--help" | "-h" | "help") => {
-            print!("{USAGE}");
+            print!("{}", usage());
             ExitCode::SUCCESS
         }
         None => {
-            eprint!("{USAGE}");
+            eprint!("{}", usage());
             ExitCode::FAILURE
         }
         Some(other) => {
             eprintln!("error: unknown command {other:?}\n");
-            eprint!("{USAGE}");
+            eprint!("{}", usage());
             ExitCode::FAILURE
         }
     }
@@ -86,7 +112,7 @@ fn mcp(args: &[String]) -> ExitCode {
                 continue;
             }
             "--help" | "-h" => {
-                print!("{USAGE}");
+                print!("{}", usage());
                 return ExitCode::SUCCESS;
             }
             "--format" => args.next().map(String::as_str),
@@ -228,10 +254,12 @@ fn mcp(args: &[String]) -> ExitCode {
 /// The agent `--source` names, or the exit code after saying why it isn't one.
 fn parse_source(name: Option<&str>) -> Result<Harness, ExitCode> {
     name.and_then(Harness::parse).ok_or_else(|| {
-        eprintln!(
-            "error: unknown agent {:?} for --source; use claude-code, codex, cursor or opencode",
-            name.unwrap_or("")
-        );
+        let ids: Vec<&str> = HARNESSES.iter().map(|harness| harness.as_str()).collect();
+        let ids = match ids.as_slice() {
+            [rest @ .., last] if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => ids.join(""),
+        };
+        eprintln!("error: unknown agent {:?} for --source; use {ids}", name.unwrap_or(""));
         ExitCode::FAILURE
     })
 }
