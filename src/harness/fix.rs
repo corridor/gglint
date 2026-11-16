@@ -304,13 +304,16 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
         }
         (Transport::Remote { url }, _) => {
             let sse = url.trim_end_matches('/').ends_with("/sse");
+            let mut url_key = "url";
             match agent(harness).remote {
                 Remote::Url => {}
                 Remote::TypedUrl => add("type", Field::Text(if sse { "sse" } else { "http" }.to_string())),
                 Remote::TransportSse if sse => add("transport", Field::Text("sse".to_string())),
                 Remote::TransportSse => {}
+                Remote::HttpUrl if !sse => url_key = "httpUrl",
+                Remote::HttpUrl => {}
             }
-            add("url", Field::Text(url.clone()));
+            add(url_key, Field::Text(url.clone()));
             add("headers", headers);
             if let Some((key, variable)) = bearer {
                 add(key, Field::Text(variable));

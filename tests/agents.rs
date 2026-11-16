@@ -631,3 +631,137 @@ fn fix_gives_kimi_code_a_bearer_token_from_the_environment() {
          \"bearerTokenEnvVar\": \"LINEAR_TOKEN\"\n    }\n  }\n}\n"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Gemini CLI
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_gemini_cli_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".gemini/settings.json",
+        r#"{
+  "theme": "GitHub",
+  "mcpServers": {
+    "pythonTools": {
+      "command": "python",
+      "args": ["-m", "my_mcp_server", "--root", "${PWD}"],
+      "env": { "DATABASE_URL": "$DB_CONNECTION_STRING", "API_KEY": "${EXTERNAL_API_KEY}" },
+      "timeout": 15000
+    },
+    "httpServer": { "httpUrl": "http://localhost:3000/mcp", "headers": { "Authorization": "Bearer $TOKEN" } },
+    "sseServer": { "url": "http://localhost:8080/sse" }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::GeminiCli);
+
+    assert_eq!(config.relative_path, Path::new(".gemini/settings.json"));
+    let python = server(&config, "pythonTools");
+    assert_eq!(
+        python.transport,
+        command("python", &["-m", "my_mcp_server", "--root", "${PWD}"])
+    );
+    assert_eq!(
+        python.env,
+        [
+            setting("API_KEY", &[env("EXTERNAL_API_KEY")]),
+            setting("DATABASE_URL", &[env("DB_CONNECTION_STRING")]),
+        ]
+    );
+    let http = server(&config, "httpServer");
+    assert_eq!(http.transport, remote("http://localhost:3000/mcp"));
+    assert_eq!(
+        http.headers,
+        [setting("Authorization", &[text("Bearer "), env("TOKEN")])]
+    );
+    assert_eq!(
+        server(&config, "sseServer").transport,
+        remote("http://localhost:8080/sse")
+    );
+}
+
+#[test]
+fn a_gemini_directory_alone_is_not_gemini_cli() {
+    // Gemini Code Assist keeps its review settings in `.gemini` too.
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".gemini/styleguide.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn fix_writes_gemini_cli_servers_next_to_its_settings() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{
+  "mcpServers": {
+    "docs": { "type": "http", "url": "https://docs.example.com/mcp", "headers": { "Authorization": "Bearer ${DOCS_KEY}" } },
+    "linear": { "type": "sse", "url": "https://mcp.linear.app/sse" },
+    "files": { "command": "npx", "args": ["-y", "files-mcp", "${ROOT}"], "env": { "CI": "1" } }
+  }
+}
+"#,
+    );
+    dir.write(".gemini/settings.json", "{\n  \"theme\": \"GitHub\"\n}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert_eq!(
+        read(&dir, ".gemini/settings.json"),
+        r#"{
+  "theme": "GitHub",
+  "mcpServers": {
+    "docs": {
+      "httpUrl": "https://docs.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_KEY}"
+      }
+    },
+    "linear": {
+      "url": "https://mcp.linear.app/sse"
+    },
+    "files": {
+      "command": "npx",
+      "args": ["-y", "files-mcp", "${ROOT}"],
+      "env": {
+        "CI": "1"
+      }
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn gemini_cli_gets_no_text_it_would_read_as_an_environment_variable() {
+    // Claude Code leaves `$HOME` as it is; Gemini CLI would fill it in.
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "files": { "command": "npx", "args": ["files-mcp", "$HOME"] } } }"#,
+    );
+    dir.write(".gemini/settings.json", "{}\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::GeminiCli,
+            server: "files".to_string(),
+            reason: "the command line can't be written for Gemini CLI".to_string(),
+        }]
+    );
+}

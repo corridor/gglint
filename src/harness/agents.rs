@@ -59,6 +59,18 @@ pub(super) enum Remote {
     TypedUrl,
     /// `url`, with `"transport": "sse"` for a URL ending in `/sse`.
     TransportSse,
+    /// `httpUrl`, or `url` for a URL ending in `/sse`: Gemini CLI reaches a `url` over SSE.
+    HttpUrl,
+}
+
+impl Remote {
+    /// The keys an entry's URL can be read from, in the order they're looked for.
+    pub fn keys(self) -> &'static [&'static str] {
+        match self {
+            Remote::Url | Remote::TypedUrl | Remote::TransportSse => &["url"],
+            Remote::HttpUrl => &["httpUrl", "url"],
+        }
+    }
 }
 
 /// Every agent, in the order they're reported: the order of `Harness`.
@@ -210,6 +222,22 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TransportSse,
         off: Off::NotEnabled,
         bearer_token_key: Some("bearerTokenEnvVar"),
+    },
+    Agent {
+        harness: Harness::GeminiCli,
+        id: "gemini-cli",
+        aliases: &["gemini"],
+        name: "Gemini CLI",
+        // `.gemini` also holds Gemini Code Assist's review settings, so it doesn't count alone.
+        directory: None,
+        files: &[".gemini/settings.json"],
+        format: Format::McpServers,
+        // `$VAR` or `${VAR}` in any string of settings.json.
+        syntax: Syntax::Shell,
+        command_line_syntax: Syntax::Shell,
+        remote: Remote::HttpUrl,
+        off: Off::Never,
+        bearer_token_key: None,
     },
 ];
 

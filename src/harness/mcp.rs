@@ -95,6 +95,8 @@ pub(super) enum Syntax {
     DollarEnv,
     /// `{env:KEY}`: OpenCode.
     BraceEnv,
+    /// `$KEY` or `${KEY}`, written `${KEY}`: Gemini CLI.
+    Shell,
     /// It doesn't: Codex reads a whole value from the environment with other keys.
     Literal,
 }
@@ -115,6 +117,7 @@ impl Syntax {
             Syntax::Dollar => Some("${"),
             Syntax::DollarEnv => Some("${env:"),
             Syntax::BraceEnv => Some("{env:"),
+            Syntax::Shell => Some("$"),
             Syntax::Literal => None,
         }
     }
@@ -129,18 +132,24 @@ pub(super) fn parse_value(text: &str, syntax: Syntax) -> Vec<Part> {
     if let Some(prefix) = syntax.prefix() {
         while let Some(start) = rest.find(prefix) {
             let after = &rest[start + prefix.len()..];
-            let length = after
+            // In the shell's syntax, the braces around the name are optional.
+            let (body, braced) = match (syntax, after.strip_prefix('{')) {
+                (Syntax::Shell, Some(body)) => (body, true),
+                (Syntax::Shell, None) => (after, false),
+                _ => (after, true),
+            };
+            let length = body
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                .unwrap_or(after.len());
-            let name = &after[..length];
+                .unwrap_or(body.len());
+            let name = &body[..length];
             let starts_well = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
-            if starts_well && after[length..].starts_with('}') {
+            if starts_well && (!braced || body[length..].starts_with('}')) {
                 plain.push_str(&rest[..start]);
                 if !plain.is_empty() {
                     parts.push(Part::Text(std::mem::take(&mut plain)));
                 }
                 parts.push(Part::Env(name.to_string()));
-                rest = &after[length + 1..];
+                rest = &body[length + usize::from(braced)..];
             } else {
                 plain.push_str(&rest[..start + prefix.len()]);
                 rest = after;
@@ -169,9 +178,18 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
     for part in parts {
         match part {
             Part::Text(text) if ["${", "{env:", "{file:"].iter().any(|marker| text.contains(marker)) => return None,
+            // `$KEY` is a reference in the shell's syntax, even where another agent's isn't.
+            Part::Text(text)
+                if syntax == Syntax::Shell
+                    && parse_value(text, Syntax::Shell)
+                        .iter()
+                        .any(|part| matches!(part, Part::Env(_))) =>
+            {
+                return None;
+            }
             Part::Text(text) => value.push_str(text),
             Part::Env(name) => match syntax {
-                Syntax::Dollar => value.push_str(&format!("${{{name}}}")),
+                Syntax::Dollar | Syntax::Shell => value.push_str(&format!("${{{name}}}")),
                 Syntax::DollarEnv => value.push_str(&format!("${{env:{name}}}")),
                 Syntax::BraceEnv => value.push_str(&format!("{{env:{name}}}")),
                 Syntax::Literal => return None,
@@ -331,7 +349,12 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
     let transport = if let Some(command) = json_string(object, "command") {
         let args = object.get_array("args").map(json_strings).unwrap_or_default();
         Transport::Command { command, args }
-    } else if let Some(url) = json_string(object, "url") {
+    } else if let Some(url) = agent(harness)
+        .remote
+        .keys()
+        .iter()
+        .find_map(|key| json_string(object, key))
+    {
         Transport::Remote { url }
     } else {
         return Err(no_transport(&name));
