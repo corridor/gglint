@@ -199,6 +199,9 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
     Some(value)
 }
 
+/// What some editors put at the start of a UTF-8 file.
+pub(super) const BYTE_ORDER_MARK: char = '\u{feff}';
+
 /// Reads every harness's MCP config file found under `root`, in the order they're reported.
 pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
     AGENTS
@@ -220,11 +223,15 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                     "{} doesn't read this file while {other} exists; it reads {other} instead",
                     agent.name
                 )),
-                (Ok(text), None) => match agent.format {
-                    Format::McpServers => read_json(&text, "mcpServers", mcp_servers_entry, &mut config),
-                    Format::Codex => read_codex(&text, &mut config),
-                    Format::OpenCode => read_json(&text, "mcp", opencode_entry, &mut config),
-                },
+                (Ok(text), None) => {
+                    // A byte order mark, which editors on Windows often save, isn't JSON or TOML.
+                    let text = text.strip_prefix(BYTE_ORDER_MARK).unwrap_or(&text);
+                    match agent.format {
+                        Format::McpServers => read_json(text, "mcpServers", mcp_servers_entry, &mut config),
+                        Format::Codex => read_codex(text, &mut config),
+                        Format::OpenCode => read_json(text, "mcp", opencode_entry, &mut config),
+                    }
+                }
                 // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
                 (Err(error), _)
                     if matches!(

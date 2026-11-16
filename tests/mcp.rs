@@ -1419,3 +1419,35 @@ fn a_missing_server_names_the_file_the_harness_already_has() {
         [".mcp.json:1  missing-server  `docs` is set up for Claude Code but not for OpenCode (opencode.jsonc)"]
     );
 }
+
+#[test]
+fn reads_and_writes_a_file_that_starts_with_a_byte_order_mark() {
+    // Editors on Windows often save JSON with one.
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        mcp_servers(r#""docs": { "type": "http", "url": "https://docs.example.com/mcp" }"#),
+    );
+    dir.write(
+        ".cursor/mcp.json",
+        format!(
+            "\u{feff}{}",
+            mcp_servers(r#""linear": { "url": "https://mcp.linear.app/sse" }"#)
+        ),
+    );
+
+    let configs = read_mcp(dir.path());
+    let (report, left) = fix(&dir);
+
+    assert!(
+        configs.iter().all(|config| config.warnings.is_empty()),
+        "{:?}",
+        configs[1].warnings
+    );
+    assert_eq!(configs[1].servers[0].name, "linear");
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    let cursor = read(&dir, ".cursor/mcp.json");
+    assert!(cursor.starts_with('\u{feff}'), "the byte order mark is kept");
+    assert!(cursor.contains("\"docs\""), "{cursor}");
+}

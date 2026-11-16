@@ -25,7 +25,7 @@ use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
 use super::agents::{Remote, agent, shares_file_with};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
-use super::mcp::{Format, Part, Setting, Syntax, parse_value, translate, write_value};
+use super::mcp::{BYTE_ORDER_MARK, Format, Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
 /// What `fix_mcp` changed, and what it left.
@@ -500,14 +500,20 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
         Err(error) => return Err(format!("couldn't read it: {error}")),
     };
+    // A byte order mark is kept, but the file is edited without it.
+    let (mark, text) = match text.strip_prefix(BYTE_ORDER_MARK) {
+        Some(rest) => (BYTE_ORDER_MARK.to_string(), rest),
+        None => (String::new(), text.as_str()),
+    };
     let new_text = match agent(harness).format {
-        Format::Codex => write_toml(&text, writes)?,
-        Format::McpServers => write_json(&text, "mcpServers", None, agent(harness).servers_at_top, writes)?,
-        Format::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), false, writes)?,
+        Format::Codex => write_toml(text, writes)?,
+        Format::McpServers => write_json(text, "mcpServers", None, agent(harness).servers_at_top, writes)?,
+        Format::OpenCode => write_json(text, "mcp", Some("https://opencode.ai/config.json"), false, writes)?,
     };
     if new_text == text {
         return Ok(None);
     }
+    let new_text = mark + &new_text;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| format!("couldn't create its directory: {error}"))?;
     }
