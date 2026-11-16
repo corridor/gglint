@@ -13,30 +13,21 @@ mod common;
 use std::path::Path;
 
 use common::TempDir;
-use gglint::harness::{McpConfig, check_mcp, fix_mcp, read_mcp};
+use gglint::harness::{HARNESSES, McpConfig, check_mcp, fix_mcp, read_mcp};
 
-const FILES: &[&str] = &[
-    ".mcp.json",
-    ".codex/config.toml",
-    ".cursor/mcp.json",
-    "opencode.json",
-    "opencode.jsonc",
-];
-/// The agents' own directories: `--fix` creates a config file only where one is.
-const DIRECTORIES: &[&str] = &[".claude", ".codex", ".cursor", ".opencode"];
-
-/// A scratch copy of what `gglint mcp` reads in `repo`: its MCP files and, empty, the
-/// agents' directories.
+/// A scratch copy of what `gglint mcp` reads in `repo`: every agent's MCP files and, empty,
+/// the agents' own directories, where `--fix` may create a config file.
 fn copy(repo: &Path) -> TempDir {
     let dir = TempDir::new();
-    for directory in DIRECTORIES {
+    for harness in HARNESSES {
+        let directory = harness.directory();
         if repo.join(directory).is_dir() {
             std::fs::create_dir_all(dir.path().join(directory)).unwrap();
         }
-    }
-    for file in FILES {
-        if let Ok(text) = std::fs::read(repo.join(file)) {
-            dir.write(file, text);
+        for file in harness.mcp_files() {
+            if let Ok(text) = std::fs::read(repo.join(file)) {
+                dir.write(file, text);
+            }
         }
     }
     dir
