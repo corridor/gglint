@@ -15,8 +15,9 @@ gglint now supports 14 coding agents instead of 4
   Kiro, Qoder, Qwen Code and Trae. gglint reads each one's MCP config file in the repository,
   and `--fix` writes servers into it the way that agent does: `httpUrl` for Gemini CLI and
   Qwen Code, `serverUrl` for Antigravity, a `type` for Copilot CLI, Factory Droid and Qoder.
-- Servers turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder) or
-  `"enabled": false` (Kimi Code) count as turned off.
+- Servers turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder),
+  `"enabled": false` (Kimi Code), or Gemini CLI's `mcp.allowed` and `mcp.excluded` lists
+  count as turned off.
 - Qoder reads `.mcp.json` as well as its own file, so a server there counts as Qoder's and
   isn't copied into `.qoder/settings.json`.
 - Copilot CLI reads `.mcp.json` instead of `.github/mcp.json` while it exists, and skips a
