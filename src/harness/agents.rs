@@ -302,9 +302,10 @@ pub(super) const AGENTS: &[Agent] = &[
         // It reads `.mcp.json` too, in `also_reads`.
         files: &[".qoder/settings.json"],
         format: Format::McpServers,
-        // Its docs don't say how a value refers to an environment variable.
-        syntax: Syntax::Literal,
-        command_line_syntax: Syntax::Literal,
+        // Its docs don't say, but Qoder CLI 1.1.89 fills in `$VAR` and `${VAR}` in `env`, `args`
+        // and `headers`, as Gemini CLI does.
+        syntax: Syntax::Shell,
+        command_line_syntax: Syntax::Shell,
         remote: Remote::TypedUrl,
         off: Off::Disabled,
         bearer_token_key: None,

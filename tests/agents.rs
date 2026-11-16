@@ -1108,3 +1108,47 @@ fn fix_adds_to_a_copilot_cli_file_without_mcp_servers_at_its_top() {
          \"docs\": {\n    \"type\": \"http\",\n    \"url\": \"https://docs.example.com/mcp\"\n  }\n}\n"
     );
 }
+
+#[test]
+fn qoder_gets_values_and_command_lines_that_read_the_environment() {
+    // Qoder CLI 1.1.89 fills in `$VAR` and `${VAR}` in `env`, `args` and `headers`, though its
+    // docs don't say so.
+    let dir = TempDir::new();
+    dir.write(
+        ".cursor/mcp.json",
+        r#"{ "mcpServers": {
+  "search": { "command": "uvx", "args": ["search-mcp", "--root", "${env:ROOT}"], "env": { "TOKEN": "${env:TOKEN}" } },
+  "docs": { "url": "https://docs.example.com/mcp", "headers": { "Authorization": "Bearer ${env:DOCS_KEY}" } }
+} }"#,
+    );
+    dir.write(".qoder/settings.json", "{}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    let settings = read(&dir, ".qoder/settings.json");
+    for written in [
+        r#""args": ["search-mcp", "--root", "${ROOT}"]"#,
+        r#""TOKEN": "${TOKEN}""#,
+        r#""Authorization": "Bearer ${DOCS_KEY}""#,
+    ] {
+        assert!(settings.contains(written), "{written} not in {settings}");
+    }
+}
+
+#[test]
+fn reads_the_environment_variables_a_qoder_server_takes() {
+    let dir = TempDir::new();
+    dir.write(
+        ".qoder/settings.json",
+        r#"{ "mcpServers": { "db": { "command": "db-mcp", "env": { "URL": "$DB_URL", "KEY": "${DB_KEY}" } } } }"#,
+    );
+
+    let config = config_of(&dir, Harness::Qoder);
+
+    assert_eq!(
+        server(&config, "db").env,
+        [setting("KEY", &[env("DB_KEY")]), setting("URL", &[env("DB_URL")])]
+    );
+}
