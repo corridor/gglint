@@ -188,3 +188,52 @@ fn junie_gets_no_server_that_reads_the_environment() {
         }]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Trae
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_trae_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".trae/mcp.json",
+        r#"{
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
+    "docs": { "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer xxxx" } }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Trae);
+
+    assert_eq!(config.relative_path, Path::new(".trae/mcp.json"));
+    assert_eq!(
+        server(&config, "github").transport,
+        command("npx", &["-y", "@modelcontextprotocol/server-github"])
+    );
+    assert_eq!(server(&config, "docs").transport, remote("https://example.com/mcp"));
+}
+
+#[test]
+fn fix_creates_a_trae_config() {
+    assert_eq!(
+        created_from_claude_code(".trae/rules/project_rules.md", ".trae/mcp.json"),
+        CLAUDE_CODE_AS_URL
+    );
+}
+
+#[test]
+fn trae_gets_no_server_that_reads_the_environment() {
+    let unfixed = unfixed_env_reference(".trae/rules/project_rules.md");
+
+    assert_eq!(unfixed.len(), 1, "{unfixed:?}");
+    assert_eq!(unfixed[0].harness, Harness::Trae);
+}
+
+#[test]
+fn trae_cn_is_trae() {
+    assert_eq!(Harness::parse("trae-cn"), Some(Harness::Trae));
+}
