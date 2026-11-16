@@ -22,6 +22,10 @@ fn text(text: &str) -> Part {
     Part::Text(text.to_string())
 }
 
+fn env(name: &str) -> Part {
+    Part::Env(name.to_string())
+}
+
 fn command(command: &str, args: &[&str]) -> Transport {
     Transport::Command {
         command: command.to_string(),
@@ -236,4 +240,119 @@ fn trae_gets_no_server_that_reads_the_environment() {
 #[test]
 fn trae_cn_is_trae() {
     assert_eq!(Harness::parse("trae-cn"), Some(Harness::Trae));
+}
+
+// ---------------------------------------------------------------------------
+// Kiro
+// ---------------------------------------------------------------------------
+
+const KIRO: &str = r#"{
+  "mcpServers": {
+    "web-search": {
+      "command": "uvx",
+      "args": ["web-search-mcp"],
+      "env": { "API_KEY": "${YOUR_API_KEY}", "DEBUG": "true" },
+      "autoApprove": ["search"]
+    },
+    "api-server": {
+      "url": "https://api.example.com/mcp",
+      "headers": { "Authorization": "Bearer ${API_TOKEN}" },
+      "disabled": true
+    }
+  }
+}
+"#;
+
+#[test]
+fn reads_kiro_servers() {
+    let dir = TempDir::new();
+    dir.write(".kiro/settings/mcp.json", KIRO);
+
+    let config = config_of(&dir, Harness::Kiro);
+
+    assert_eq!(config.relative_path, Path::new(".kiro/settings/mcp.json"));
+    let search = server(&config, "web-search");
+    assert_eq!(search.transport, command("uvx", &["web-search-mcp"]));
+    assert_eq!(
+        search.env,
+        [
+            setting("API_KEY", &[env("YOUR_API_KEY")]),
+            setting("DEBUG", &[text("true")])
+        ]
+    );
+    assert!(search.enabled);
+    let api = server(&config, "api-server");
+    assert_eq!(api.transport, remote("https://api.example.com/mcp"));
+    assert_eq!(
+        api.headers,
+        [setting("Authorization", &[text("Bearer "), env("API_TOKEN")])]
+    );
+    assert!(!api.enabled, "`disabled: true` turns it off");
+}
+
+#[test]
+fn fix_creates_a_kiro_config() {
+    assert_eq!(
+        created_from_claude_code(".kiro/steering/product.md", ".kiro/settings/mcp.json"),
+        CLAUDE_CODE_AS_URL
+    );
+}
+
+#[test]
+fn kiro_gets_values_that_read_the_environment() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "search": { "command": "uvx", "args": ["search-mcp"], "env": { "TOKEN": "${TOKEN}" } } } }"#,
+    );
+    dir.write(".kiro/steering/product.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert!(
+        read(&dir, ".kiro/settings/mcp.json").contains(r#""TOKEN": "${TOKEN}""#),
+        "{}",
+        read(&dir, ".kiro/settings/mcp.json")
+    );
+}
+
+#[test]
+fn kiro_gets_no_command_line_that_reads_the_environment() {
+    // Kiro's docs show `${VAR}` in `env` and `headers` only.
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "files": { "command": "npx", "args": ["files-mcp", "${ROOT}"] } } }"#,
+    );
+    dir.write(".kiro/steering/product.md", "Be brief.\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::Kiro,
+            server: "files".to_string(),
+            reason: "the command line uses the environment variable `ROOT`, which Kiro can't fill in".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn a_server_disabled_in_kiro_is_turned_off() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "api-server": { "type": "http", "url": "https://api.example.com/mcp", "headers": { "Authorization": "Bearer ${API_TOKEN}" } } } }"#,
+    );
+    dir.write(".kiro/settings/mcp.json", KIRO);
+
+    let found = findings(&dir);
+
+    assert!(
+        found.contains(&"different-server  `api-server` is turned off in Kiro but not in Claude Code".to_string()),
+        "{found:?}"
+    );
 }

@@ -122,6 +122,7 @@ secrets.
 | OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp`     |
 | Junie       | `.junie/mcp/mcp.json`             | `.junie/`       | JSON, `mcpServers`                             |
 | Trae        | `.trae/mcp.json`                  | `.trae/`        | JSON, `mcpServers`                             |
+| Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't

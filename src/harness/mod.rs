@@ -26,16 +26,18 @@ pub enum Harness {
     OpenCode,
     Junie,
     Trae,
+    Kiro,
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 6] = [
+pub const HARNESSES: [Harness; 7] = [
     Harness::ClaudeCode,
     Harness::Codex,
     Harness::Cursor,
     Harness::OpenCode,
     Harness::Junie,
     Harness::Trae,
+    Harness::Kiro,
 ];
 
 impl Harness {
