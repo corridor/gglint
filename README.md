@@ -120,16 +120,16 @@ secrets.
 | Codex       | `.codex/config.toml`              | `.codex/`       | TOML, `[mcp_servers.<name>]`                   |
 | Cursor      | `.cursor/mcp.json`                | `.cursor/`      | JSON, `mcpServers`                             |
 | OpenCode    | `opencode.json`, `opencode.jsonc` | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp`     |
-| Junie       | `.junie/mcp/mcp.json`             | `.junie/`       | JSON, `mcpServers`                             |
-| Trae        | `.trae/mcp.json`                  | `.trae/`        | JSON, `mcpServers`                             |
-| Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
-| Factory Droid | `.factory/mcp.json`           | `.factory/`     | JSON, `mcpServers`                             |
-| Qoder       | `.qoder/settings.json`            | `.qoder/`       | JSON, `mcpServers`                             |
-| Kimi Code   | `.kimi-code/mcp.json`             | `.kimi-code/`   | JSON, `mcpServers`                             |
-| Gemini CLI  | `.gemini/settings.json`           | —               | JSON, `mcpServers`                             |
-| Qwen Code   | `.qwen/settings.json`             | `.qwen/`        | JSON, `mcpServers`                             |
 | Antigravity | `.agents/mcp_config.json`         | —               | JSON, `mcpServers`                             |
 | Copilot CLI | `.github/mcp.json`                | —               | JSON, `mcpServers`                             |
+| Factory Droid | `.factory/mcp.json`           | `.factory/`     | JSON, `mcpServers`                             |
+| Gemini CLI  | `.gemini/settings.json`           | —               | JSON, `mcpServers`                             |
+| Junie       | `.junie/mcp/mcp.json`             | `.junie/`       | JSON, `mcpServers`                             |
+| Kimi Code   | `.kimi-code/mcp.json`             | `.kimi-code/`   | JSON, `mcpServers`                             |
+| Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
+| Qoder       | `.qoder/settings.json`            | `.qoder/`       | JSON, `mcpServers`                             |
+| Qwen Code   | `.qwen/settings.json`             | `.qwen/`        | JSON, `mcpServers`                             |
+| Trae        | `.trae/mcp.json`                  | `.trae/`        | JSON, `mcpServers`                             |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't
