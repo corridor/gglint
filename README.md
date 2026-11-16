@@ -123,6 +123,7 @@ secrets.
 | Junie       | `.junie/mcp/mcp.json`             | `.junie/`       | JSON, `mcpServers`                             |
 | Trae        | `.trae/mcp.json`                  | `.trae/`        | JSON, `mcpServers`                             |
 | Kiro        | `.kiro/settings/mcp.json`         | `.kiro/`        | JSON, `mcpServers`                             |
+| Factory Droid | `.factory/mcp.json`           | `.factory/`     | JSON, `mcpServers`                             |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't

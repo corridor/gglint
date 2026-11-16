@@ -356,3 +356,104 @@ fn a_server_disabled_in_kiro_is_turned_off() {
         "{found:?}"
     );
 }
+
+/// `CLAUDE_CODE`'s servers, written in the `mcpServers` format of an agent that gives a
+/// remote server a `type`, as Claude Code does.
+const CLAUDE_CODE_AS_TYPED_URL: &str = r#"{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.78"],
+      "env": {
+        "CI": "1"
+      }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "X-Team": "web"
+      }
+    }
+  }
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Factory Droid
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_factory_droid_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".factory/mcp.json",
+        r#"{
+  "mcpServers": {
+    "playwright": { "type": "stdio", "command": "npx", "args": ["-y", "@playwright/mcp@latest"], "env": { "TOKEN": "${PW_TOKEN}" } },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": { "CONTEXT7_API_KEY": "${CONTEXT7_API_KEY}" },
+      "disabled": true
+    }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::FactoryDroid);
+
+    assert_eq!(config.relative_path, Path::new(".factory/mcp.json"));
+    let playwright = server(&config, "playwright");
+    assert_eq!(playwright.transport, command("npx", &["-y", "@playwright/mcp@latest"]));
+    assert_eq!(playwright.env, [setting("TOKEN", &[env("PW_TOKEN")])]);
+    let context7 = server(&config, "context7");
+    assert_eq!(context7.transport, remote("https://mcp.context7.com/mcp"));
+    assert_eq!(
+        context7.headers,
+        [setting("CONTEXT7_API_KEY", &[env("CONTEXT7_API_KEY")])]
+    );
+    assert!(!context7.enabled);
+}
+
+#[test]
+fn fix_creates_a_factory_droid_config_with_typed_remote_servers() {
+    assert_eq!(
+        created_from_claude_code(".factory/droids/reviewer.md", ".factory/mcp.json"),
+        CLAUDE_CODE_AS_TYPED_URL
+    );
+}
+
+#[test]
+fn factory_droid_gets_values_but_not_command_lines_that_read_the_environment() {
+    // Its docs: `${NAME}` is filled in in `env` and `headers`, not `command`, `args` or `url`.
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": {
+  "search": { "command": "uvx", "args": ["search-mcp"], "env": { "TOKEN": "${TOKEN}" } },
+  "files": { "command": "npx", "args": ["files-mcp", "${ROOT}"] }
+} }"#,
+    );
+    dir.write(".factory/droids/reviewer.md", "Be brief.\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::FactoryDroid,
+            server: "files".to_string(),
+            reason: "the command line uses the environment variable `ROOT`, which Factory Droid can't fill in"
+                .to_string(),
+        }]
+    );
+    assert!(read(&dir, ".factory/mcp.json").contains(r#""TOKEN": "${TOKEN}""#));
+}
+
+#[test]
+fn droid_and_factory_are_factory_droid() {
+    assert_eq!(Harness::parse("droid"), Some(Harness::FactoryDroid));
+    assert_eq!(Harness::parse("factory"), Some(Harness::FactoryDroid));
+}
