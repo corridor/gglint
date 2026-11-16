@@ -1163,3 +1163,69 @@ fn reads_the_environment_variables_a_qoder_server_takes() {
         [setting("KEY", &[env("DB_KEY")]), setting("URL", &[env("DB_URL")])]
     );
 }
+
+#[test]
+fn fix_creates_no_mcp_json_that_would_lose_a_copilot_cli_server() {
+    // Once `.mcp.json` exists, Copilot CLI reads it instead of `.github/mcp.json`, so it has to
+    // get every server Copilot has, or Copilot loses one.
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    let github = r#"{ "mcpServers": {
+  "sentry": { "type": "local", "command": "npx", "args": ["-y", "@sentry/mcp-server"], "env": { "SENTRY_ACCESS_TOKEN": "${SENTRY_ACCESS_TOKEN}" } },
+  "docs": { "type": "local", "command": "uvx", "args": ["docs-mcp"] }
+} }"#;
+    dir.write(".github/mcp.json", github);
+
+    let (report, left) = fix(&dir);
+
+    assert!(!dir.path().join(".mcp.json").exists());
+    assert_eq!(read(&dir, ".github/mcp.json"), github);
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+    let reasons: Vec<(&str, &str)> = report
+        .unfixed
+        .iter()
+        .map(|unfixed| (unfixed.server.as_str(), unfixed.reason.as_str()))
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            (
+                "sentry",
+                "the value of `SENTRY_ACCESS_TOKEN` can't be written for Claude Code"
+            ),
+            (
+                "docs",
+                "creating .mcp.json would make Copilot CLI read it instead of .github/mcp.json, without `sentry`"
+            ),
+        ]
+    );
+    assert_eq!(left.len(), 1, "{left:?}");
+}
+
+#[test]
+fn fix_creates_mcp_json_with_every_server_copilot_cli_had() {
+    let dir = TempDir::new();
+    dir.write(".claude/settings.json", "{}\n");
+    dir.write(
+        ".github/mcp.json",
+        r#"{ "mcpServers": { "docs": { "type": "local", "command": "uvx", "args": ["docs-mcp"] } } }"#,
+    );
+
+    let (report, left) = fix(&dir);
+    let configs = read_mcp(dir.path());
+    let copilot = configs
+        .iter()
+        .find(|config| config.harness == Harness::CopilotCli)
+        .unwrap();
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(report.changed.len(), 1);
+    assert!(read(&dir, ".mcp.json").contains("\"docs\""));
+    // Copilot CLI reads `.mcp.json` now, and gets the server there.
+    assert_eq!(copilot.warnings.len(), 1, "{:?}", copilot.warnings);
+    let check = check_mcp(dir.path(), &configs);
+    assert_eq!(
+        check.servers[0].cells,
+        [(Harness::ClaudeCode, Cell::Same), (Harness::CopilotCli, Cell::Same)]
+    );
+}

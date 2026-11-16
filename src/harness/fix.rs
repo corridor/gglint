@@ -75,6 +75,8 @@ struct Write {
     fields: Vec<(&'static str, Field)>,
     /// Whether it's already in the file, so only the keys in `fields` are written.
     update: bool,
+    /// The server's place in `McpCheck::servers`.
+    server: usize,
 }
 
 /// Fixes what `check` found in the config files under `root`: adds the missing servers and
@@ -82,7 +84,7 @@ struct Write {
 pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixReport {
     let mut writes: Vec<Write> = Vec::new();
     let mut report = FixReport::default();
-    for server in &check.servers {
+    for (index, server) in check.servers.iter().enumerate() {
         let Some(source) = &server.source else {
             continue;
         };
@@ -104,6 +106,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
                     name: source.server.name.clone(),
                     fields,
                     update: false,
+                    server: index,
                 }),
                 Err(reason) => report.unfixed.push(Unfixed {
                     harness,
@@ -125,6 +128,7 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
                     name: target.server.name.clone(),
                     fields,
                     update: true,
+                    server: index,
                 }),
                 Err(reason) => report.unfixed.push(Unfixed {
                     harness,
@@ -134,6 +138,8 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
             }
         }
     }
+
+    keep_every_server_of_agents_reading_a_new_file(configs, check, &mut writes, &mut report);
 
     // One file at a time, in the order agents are reported.
     let mut files: Vec<(Harness, PathBuf)> = Vec::new();
@@ -166,6 +172,61 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
         }
     }
     report
+}
+
+/// Drops the writes that create a file an agent would read instead of its own, such as a new
+/// `.mcp.json` Copilot CLI reads instead of `.github/mcp.json`, unless every server the agent
+/// has is written there: it would lose the others.
+fn keep_every_server_of_agents_reading_a_new_file(
+    configs: &[McpConfig],
+    check: &McpCheck,
+    writes: &mut Vec<Write>,
+    report: &mut FixReport,
+) {
+    for config in configs {
+        let Some(instead) = agent(config.harness).read_instead.map(Path::new) else {
+            continue;
+        };
+        if configs.iter().any(|other| other.relative_path == instead) {
+            continue;
+        }
+        let written = |index: usize| {
+            writes
+                .iter()
+                .any(|write| write.server == index && write.relative_path == instead)
+        };
+        let lost: Vec<String> = check
+            .servers
+            .iter()
+            .enumerate()
+            .filter(|(_, server)| {
+                server.setups.iter().any(|setup| {
+                    setup.site.harness == config.harness && setup.site.relative_path == config.relative_path
+                })
+            })
+            .filter(|&(index, _)| !written(index))
+            .map(|(_, server)| format!("`{}`", server.name))
+            .collect();
+        if lost.is_empty() || !writes.iter().any(|write| write.relative_path == instead) {
+            continue;
+        }
+        let reason = format!(
+            "creating {} would make {} read it instead of {}, without {}",
+            instead.display(),
+            config.harness.display_name(),
+            config.relative_path.display(),
+            lost.join(", ")
+        );
+        let (dropped, kept): (Vec<Write>, Vec<Write>) = std::mem::take(writes)
+            .into_iter()
+            .partition(|write| write.relative_path == instead);
+        *writes = kept;
+        report.unfixed.extend(dropped.into_iter().map(|write| Unfixed {
+            harness: write.harness,
+            server: write.name,
+            reason: reason.clone(),
+        }));
+    }
 }
 
 /// Whether `target` should start as `source` does: the same program, turned on, started
