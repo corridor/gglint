@@ -765,3 +765,58 @@ fn gemini_cli_gets_no_text_it_would_read_as_an_environment_variable() {
         }]
     );
 }
+
+// ---------------------------------------------------------------------------
+// Qwen Code
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_qwen_code_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".qwen/settings.json",
+        r#"{
+  "mcpServers": {
+    "myDatabaseServer": { "command": "/path/to/db-server", "args": ["--port", "5432"], "env": { "DATABASE_URL": "$DB_CONNECTION_STRING" } },
+    "httpServer": { "httpUrl": "http://localhost:3000/mcp" }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::QwenCode);
+
+    assert_eq!(config.relative_path, Path::new(".qwen/settings.json"));
+    let database = server(&config, "myDatabaseServer");
+    assert_eq!(database.transport, command("/path/to/db-server", &["--port", "5432"]));
+    assert_eq!(database.env, [setting("DATABASE_URL", &[env("DB_CONNECTION_STRING")])]);
+    assert_eq!(
+        server(&config, "httpServer").transport,
+        remote("http://localhost:3000/mcp")
+    );
+}
+
+#[test]
+fn fix_creates_a_qwen_code_config() {
+    assert_eq!(
+        created_from_claude_code(".qwen/commands/review.md", ".qwen/settings.json"),
+        r#"{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.78"],
+      "env": {
+        "CI": "1"
+      }
+    },
+    "docs": {
+      "httpUrl": "https://docs.example.com/mcp",
+      "headers": {
+        "X-Team": "web"
+      }
+    }
+  }
+}
+"#
+    );
+}
