@@ -85,6 +85,12 @@ impl Harness {
         agents::agent(self).files
     }
 
+    /// A file it reads instead of its own while that one exists: Copilot CLI reads
+    /// `.mcp.json` instead of `.github/mcp.json`.
+    pub fn reads_instead(self) -> Option<&'static str> {
+        agents::agent(self).read_instead
+    }
+
     /// Its own directory in a repository. When it's there, the repository is set up for the
     /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`. `None` for an agent
     /// that counts only once it has an MCP config file.

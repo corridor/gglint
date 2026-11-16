@@ -13,7 +13,7 @@ mod common;
 use std::path::Path;
 
 use common::TempDir;
-use gglint::harness::{HARNESSES, McpConfig, check_mcp, fix_mcp, read_mcp};
+use gglint::harness::{Cell, HARNESSES, McpConfig, Rule, check_mcp, fix_mcp, read_mcp};
 
 /// A scratch copy of what `gglint mcp` reads in `repo`: every agent's MCP files and, empty,
 /// the agents' own directories, where `--fix` may create a config file.
@@ -48,8 +48,33 @@ fn warnings(configs: &[McpConfig]) -> Vec<String> {
     all
 }
 
+/// What's wrong, counted so that fixing part of a problem never counts as more: each server
+/// missing from an agent, whether from its config file or for want of one, and each
+/// difference between setups.
 fn problems(root: &Path, configs: &[McpConfig]) -> usize {
-    check_mcp(root, configs).findings().count()
+    let check = check_mcp(root, configs);
+    let missing: usize = check
+        .servers
+        .iter()
+        .filter(|server| server.source.is_some())
+        .map(|server| server.cells.iter().filter(|(_, cell)| *cell == Cell::Missing).count())
+        .sum();
+    let different = check
+        .findings()
+        .filter(|finding| matches!(finding.rule, Rule::DifferentServer | Rule::RenamedServer))
+        .count();
+    missing + different
+}
+
+/// The file `config`'s agent reads instead of it, if `--fix` created that file: the agent's
+/// servers are in that file now.
+fn read_instead<'a>(config: &McpConfig, before: &[McpConfig], after: &'a [McpConfig]) -> Option<&'a McpConfig> {
+    let other = config.harness.reads_instead()?;
+    let is_other = |candidate: &&McpConfig| candidate.relative_path == Path::new(other);
+    if before.iter().any(|candidate| is_other(&candidate)) {
+        return None;
+    }
+    after.iter().find(is_other)
 }
 
 #[test]
@@ -77,9 +102,10 @@ fn fix_keeps_its_promises_on_real_repositories() {
         let after = read_mcp(root);
         let mut fail = |what: String| broken.push(format!("{name}: {what}"));
 
+        // A file its agent now reads another one instead of says so; that isn't unreadable.
         let new_warnings: Vec<_> = warnings(&after)
             .into_iter()
-            .filter(|w| !warnings(&before).contains(w))
+            .filter(|w| !warnings(&before).contains(w) && !w.contains("doesn't read this file while"))
             .collect();
         if !new_warnings.is_empty() {
             fail(format!("left a config it can't read: {new_warnings:?}"));
@@ -101,6 +127,20 @@ fn fix_keeps_its_promises_on_real_repositories() {
             }
         }
         for config in &before {
+            if let Some(instead) = read_instead(config, &before, &after) {
+                for server in &config.servers {
+                    if !instead.servers.iter().any(|other| other.name == server.name) {
+                        fail(format!(
+                            "{} now reads {} instead of {}, which lacks `{}`",
+                            config.harness.display_name(),
+                            instead.relative_path.display(),
+                            config.relative_path.display(),
+                            server.name
+                        ));
+                    }
+                }
+                continue;
+            }
             let Some(now) = after.iter().find(|other| other.relative_path == config.relative_path) else {
                 fail(format!("{} disappeared", config.relative_path.display()));
                 continue;
