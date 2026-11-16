@@ -14,7 +14,7 @@ pub(super) struct Agent {
     pub name: &'static str,
     /// Its own directory in a repository. When it's there, the repository is set up for the
     /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`. `None` when the
-    /// directory is in many repositories for other reasons (`.github`, `.vscode`), so the
+    /// directory is in many repositories for other reasons (`.github`, `.gemini`), so the
     /// agent counts only once it has an MCP config file.
     pub directory: Option<&'static str>,
     /// The files it reads a repository's MCP servers from, relative to its root. A new
