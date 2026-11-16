@@ -109,8 +109,29 @@ const CLAUDE_CODE_AS_URL: &str = r#"{
 /// Fixes a repository with `CLAUDE_CODE` and the agent's directory, and returns the config
 /// file `--fix` created at `file`.
 fn created_from_claude_code(directory_file: &str, file: &str) -> String {
+    created_from(".mcp.json", CLAUDE_CODE, directory_file, file)
+}
+
+/// `CLAUDE_CODE`'s servers, as Cursor writes them.
+const CURSOR: &str = r#"{
+  "mcpServers": {
+    "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@0.0.78"], "env": { "CI": "1" } },
+    "docs": { "url": "https://docs.example.com/mcp", "headers": { "X-Team": "web" } }
+  }
+}
+"#;
+
+/// Fixes a repository with `CLAUDE_CODE`'s servers in Cursor's config, and the agent's
+/// directory, and returns the config file `--fix` created at `file`.
+fn created_from_cursor(directory_file: &str, file: &str) -> String {
+    created_from(".cursor/mcp.json", CURSOR, directory_file, file)
+}
+
+/// Fixes a repository with `source_text` at `source_file`, and the agent's directory, and
+/// returns the config file `--fix` created at `file`.
+fn created_from(source_file: &str, source_text: &str, directory_file: &str, file: &str) -> String {
     let dir = TempDir::new();
-    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(source_file, source_text);
     dir.write(directory_file, "Be brief.\n");
 
     let (report, left) = fix(&dir);
@@ -456,4 +477,59 @@ fn factory_droid_gets_values_but_not_command_lines_that_read_the_environment() {
 fn droid_and_factory_are_factory_droid() {
     assert_eq!(Harness::parse("droid"), Some(Harness::FactoryDroid));
     assert_eq!(Harness::parse("factory"), Some(Harness::FactoryDroid));
+}
+
+// ---------------------------------------------------------------------------
+// Qoder
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_qoder_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".qoder/settings.json",
+        r#"{
+  "model": "auto",
+  "mcpServers": {
+    "my-server": { "command": "node", "args": ["./mcp-server.js"], "env": { "API_KEY": "..." }, "cwd": "tools" },
+    "remote": { "type": "http", "url": "https://mcp.example.com/mcp", "disabled": true }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Qoder);
+
+    assert_eq!(config.relative_path, Path::new(".qoder/settings.json"));
+    assert_eq!(
+        server(&config, "my-server").transport,
+        command("node", &["./mcp-server.js"])
+    );
+    let remote_server = server(&config, "remote");
+    assert_eq!(remote_server.transport, remote("https://mcp.example.com/mcp"));
+    assert!(!remote_server.enabled);
+}
+
+#[test]
+fn fix_creates_a_qoder_config_with_typed_remote_servers() {
+    assert_eq!(
+        created_from_cursor(".qoder/rules/style.md", ".qoder/settings.json"),
+        CLAUDE_CODE_AS_TYPED_URL
+    );
+}
+
+#[test]
+fn fix_keeps_the_other_settings_in_a_qoder_settings_file() {
+    let dir = TempDir::new();
+    dir.write(".cursor/mcp.json", CURSOR);
+    dir.write(".qoder/settings.json", "{\n  \"model\": \"auto\"\n}\n");
+
+    let (_, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    let settings = read(&dir, ".qoder/settings.json");
+    assert!(
+        settings.starts_with("{\n  \"model\": \"auto\",\n  \"mcpServers\": {"),
+        "{settings}"
+    );
 }

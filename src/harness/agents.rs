@@ -165,6 +165,20 @@ pub(super) const AGENTS: &[Agent] = &[
         remote: Remote::TypedUrl,
         off: Off::Disabled,
     },
+    Agent {
+        harness: Harness::Qoder,
+        id: "qoder",
+        aliases: &["qoder-cli"],
+        name: "Qoder",
+        directory: ".qoder",
+        files: &[".qoder/settings.json"],
+        format: Format::McpServers,
+        // Its docs don't say how a value refers to an environment variable.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::TypedUrl,
+        off: Off::Disabled,
+    },
 ];
 
 /// What gglint knows about `harness`.
