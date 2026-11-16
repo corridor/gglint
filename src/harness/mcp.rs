@@ -14,35 +14,17 @@ use toml::de::{DeTable, DeValue};
 
 use super::Harness;
 use super::Location;
+use super::agents::AGENTS;
 
 /// How a file lists its MCP servers.
-#[derive(Clone, Copy)]
-enum Format {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Format {
     /// JSON: `"mcpServers": {name: {command, args, env} or {url, headers}}`.
     McpServers,
     /// TOML: `[mcp_servers.<name>]` tables.
     Codex,
     /// JSON with comments: `"mcp": {name: {command: [...], environment} or {url, headers}}`.
     OpenCode,
-}
-
-/// Where each harness reads a repository's MCP servers from, relative to its root, in the
-/// order they're reported. Codex only reads `.codex/config.toml` in projects the user
-/// has trusted.
-const MCP_FILES: &[(Harness, &str, Format)] = &[
-    (Harness::ClaudeCode, ".mcp.json", Format::McpServers),
-    (Harness::Codex, ".codex/config.toml", Format::Codex),
-    (Harness::Cursor, ".cursor/mcp.json", Format::McpServers),
-    (Harness::OpenCode, "opencode.json", Format::OpenCode),
-    (Harness::OpenCode, "opencode.jsonc", Format::OpenCode),
-];
-
-/// The file `harness` reads a repository's MCP servers from.
-pub(super) fn mcp_file(harness: Harness) -> &'static str {
-    MCP_FILES
-        .iter()
-        .find(|(candidate, _, _)| *candidate == harness)
-        .map_or("", |(_, path, _)| path)
 }
 
 /// One harness's MCP config file.
@@ -198,21 +180,22 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
     Some(value)
 }
 
-/// Reads every harness's MCP config file found under `root`.
+/// Reads every harness's MCP config file found under `root`, in the order they're reported.
 pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
-    MCP_FILES
+    AGENTS
         .iter()
-        .filter_map(|&(harness, relative, format)| {
+        .flat_map(|agent| agent.files.iter().map(move |&relative| (agent, relative)))
+        .filter_map(|(agent, relative)| {
             let path = root.join(relative);
             let mut config = McpConfig {
-                harness,
+                harness: agent.harness,
                 path,
                 relative_path: PathBuf::from(relative),
                 servers: Vec::new(),
                 warnings: Vec::new(),
             };
             match std::fs::read_to_string(&config.path) {
-                Ok(text) => match format {
+                Ok(text) => match agent.format {
                     Format::McpServers => read_json(&text, "mcpServers", mcp_servers_entry, &mut config),
                     Format::Codex => read_codex(&text, &mut config),
                     Format::OpenCode => read_json(&text, "mcp", opencode_entry, &mut config),
