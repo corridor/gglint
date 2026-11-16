@@ -23,6 +23,19 @@ pub(super) struct Agent {
     pub format: Format,
     /// How it refers to an environment variable inside a value.
     pub syntax: Syntax,
+    /// How a file in the `mcpServers` format writes a server reached over HTTP. Codex and
+    /// OpenCode have their own way, set by their format.
+    pub remote: Remote,
+}
+
+/// How a server reached over HTTP is written in an `mcpServers` file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Remote {
+    /// `url` alone.
+    Url,
+    /// `url` with a `type`: `"sse"` for a URL ending in `/sse`, the older SSE transport, and
+    /// `"http"` otherwise. Claude Code starts an entry without a `type` as a command.
+    TypedUrl,
 }
 
 /// Every agent, in the order they're reported: the order of `Harness`.
@@ -36,6 +49,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::Dollar,
+        remote: Remote::TypedUrl,
     },
     Agent {
         harness: Harness::Codex,
@@ -46,6 +60,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".codex/config.toml"],
         format: Format::Codex,
         syntax: Syntax::Literal,
+        remote: Remote::Url,
     },
     Agent {
         harness: Harness::Cursor,
@@ -56,6 +71,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &[".cursor/mcp.json"],
         format: Format::McpServers,
         syntax: Syntax::DollarEnv,
+        remote: Remote::Url,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -66,6 +82,7 @@ pub(super) const AGENTS: &[Agent] = &[
         files: &["opencode.json", "opencode.jsonc"],
         format: Format::OpenCode,
         syntax: Syntax::BraceEnv,
+        remote: Remote::Url,
     },
 ];
 
