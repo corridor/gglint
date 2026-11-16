@@ -4,6 +4,35 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+gglint now supports 14 coding agents instead of 4
+([#10](https://github.com/corridor/gglint/issues/10)).
+
+### Added
+
+- Ten agents: Antigravity, GitHub Copilot CLI, Factory Droid, Gemini CLI, Junie, Kimi Code,
+  Kiro, Qoder, Qwen Code and Trae. gglint reads each one's MCP config file in the repository,
+  and `--fix` writes servers into it the way that agent does: `httpUrl` for Gemini CLI and
+  Qwen Code, `serverUrl` for Antigravity, a `type` for Copilot CLI, Factory Droid and Qoder.
+- Servers turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder) or
+  `"enabled": false` (Kimi Code) count as turned off.
+- Copilot CLI and Qoder also read `.mcp.json`, so a server there counts as theirs and isn't
+  copied into their own file.
+- `gglint --help` lists every agent, with the name `--source` takes and its config file.
+  `--source` also takes other names agents go by, such as `gemini`, `copilot` or `droid`.
+
+### Changed
+
+- New agents come after Claude Code, Codex, Cursor and OpenCode, in alphabetical order, so
+  `--fix` still copies a server from those four first.
+- An agent whose directory many repositories have for other reasons (Antigravity's
+  `.agents`, Copilot CLI's `.github`, Gemini CLI's `.gemini`) counts only once it has its MCP
+  config file, and never gets one created by `--fix`.
+- A server that reads an environment variable isn't copied to an agent whose docs don't say
+  how to refer to one: Antigravity, Copilot CLI, Junie, Qoder and Trae. It's listed under
+  `Not added:` instead.
+
 ## [0.2.0] - 2026-11-12
 
 `--fix` is now the only fix flag, and `--source` chooses the agent servers are copied from.
