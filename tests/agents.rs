@@ -7,7 +7,7 @@ use std::path::Path;
 
 use common::TempDir;
 use gglint::harness::{
-    Cell, FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
+    FixReport, Harness, McpConfig, McpServer, Part, Setting, Transport, Unfixed, check_mcp, compare_mcp, fix_mcp,
     read_mcp,
 };
 
@@ -989,7 +989,8 @@ fn copilot_names_copilot_cli() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn copilot_cli_gets_the_servers_in_mcp_json() {
+fn copilot_cli_is_not_compared_while_it_reads_mcp_json() {
+    // It reads `.mcp.json` then, so it gets the same servers as Claude Code.
     let dir = TempDir::new();
     dir.write(".mcp.json", CLAUDE_CODE);
     dir.write(".github/mcp.json", "{}\n");
@@ -997,19 +998,19 @@ fn copilot_cli_gets_the_servers_in_mcp_json() {
     let configs = read_mcp(dir.path());
     let check = check_mcp(dir.path(), &configs);
 
-    assert_eq!(check.harnesses, [Harness::ClaudeCode, Harness::CopilotCli]);
+    assert_eq!(check.harnesses, [Harness::ClaudeCode]);
     assert_eq!(check.findings().count(), 0, "{:?}", findings(&dir));
-    for server in &check.servers {
-        assert_eq!(
-            server.cells,
-            [(Harness::ClaudeCode, Cell::Same), (Harness::CopilotCli, Cell::Same)]
-        );
-    }
+    assert!(
+        configs
+            .iter()
+            .any(|config| config.harness == Harness::CopilotCli && config.ignored)
+    );
     assert!(fix(&dir).0.changed.is_empty());
 }
 
 #[test]
 fn a_server_missing_from_mcp_json_is_added_there_for_copilot_cli_too() {
+    // Copilot CLI reads `.mcp.json` instead of `.github/mcp.json`, so it isn't compared.
     let dir = TempDir::new();
     dir.write(".cursor/mcp.json", CURSOR);
     dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
@@ -1020,7 +1021,7 @@ fn a_server_missing_from_mcp_json_is_added_there_for_copilot_cli_too() {
 
     assert_eq!(
         before[0].message,
-        "`playwright` is set up for Cursor but not for Claude Code (.mcp.json) or Copilot CLI (.mcp.json)"
+        "`playwright` is set up for Cursor but not for Claude Code (.mcp.json)"
     );
     assert_eq!(
         before[0].fix.as_deref(),
@@ -1222,12 +1223,8 @@ fn fix_creates_mcp_json_with_every_server_copilot_cli_had() {
     assert_eq!(report.changed.len(), 1);
     assert!(read(&dir, ".mcp.json").contains("\"docs\""));
     // Copilot CLI reads `.mcp.json` now, and gets the server there.
+    assert!(copilot.ignored);
     assert_eq!(copilot.warnings.len(), 1, "{:?}", copilot.warnings);
-    let check = check_mcp(dir.path(), &configs);
-    assert_eq!(
-        check.servers[0].cells,
-        [(Harness::ClaudeCode, Cell::Same), (Harness::CopilotCli, Cell::Same)]
-    );
 }
 
 #[test]
@@ -1267,4 +1264,34 @@ fn a_server_without_a_url_antigravity_reads_names_the_keys_it_reads() {
         configs[0].warnings,
         ["`context7` has neither a `command` nor a `serverUrl` or `url`"]
     );
+}
+
+#[test]
+fn copilot_cli_skips_a_file_without_mcp_servers_and_fix_leaves_it() {
+    // Copilot CLI 1.x rejects such a file: "mcpServers: Required". Some repositories have VS
+    // Code's `servers` here, or a package manifest.
+    for github in [
+        r#"{ "servers": { "docs": { "type": "stdio", "command": "uvx", "args": ["docs-mcp"] } } }"#,
+        r#"{ "name": "pdf-reader-mcp", "version": "0.1.0", "categories": ["mcp"] }"#,
+    ] {
+        let dir = TempDir::new();
+        dir.write(".cursor/mcp.json", CURSOR);
+        dir.write(".github/mcp.json", github);
+
+        let configs = read_mcp(dir.path());
+        let copilot = configs
+            .iter()
+            .find(|config| config.harness == Harness::CopilotCli)
+            .unwrap();
+        let (report, left) = fix(&dir);
+
+        assert!(copilot.ignored);
+        assert_eq!(
+            copilot.warnings,
+            ["Copilot CLI skips this file: it lists no servers under `mcpServers` or at its top"]
+        );
+        assert!(left.is_empty(), "{left:?}");
+        assert!(report.changed.is_empty(), "{:?}", report.changed);
+        assert_eq!(read(&dir, ".github/mcp.json"), github);
+    }
 }
