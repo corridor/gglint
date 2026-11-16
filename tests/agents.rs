@@ -820,3 +820,93 @@ fn fix_creates_a_qwen_code_config() {
 "#
     );
 }
+
+// ---------------------------------------------------------------------------
+// Antigravity
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_antigravity_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".agents/mcp_config.json",
+        r#"{
+  "mcpServers": {
+    "sqlite": { "command": "uvx", "args": ["mcp-server-sqlite"], "env": { "SQLITE_DB_PATH": "/var/data/app.db" } },
+    "my-remote-server": {
+      "serverUrl": "https://api.example.com/mcp/",
+      "headers": { "Authorization": "Bearer YOUR_API_TOKEN" },
+      "timeoutSeconds": 600
+    },
+    "older": { "url": "https://older.example.com/mcp", "disabled": true }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Antigravity);
+
+    assert_eq!(config.relative_path, Path::new(".agents/mcp_config.json"));
+    assert_eq!(
+        server(&config, "sqlite").transport,
+        command("uvx", &["mcp-server-sqlite"])
+    );
+    assert_eq!(
+        server(&config, "my-remote-server").transport,
+        remote("https://api.example.com/mcp/")
+    );
+    let older = server(&config, "older");
+    assert_eq!(older.transport, remote("https://older.example.com/mcp"));
+    assert!(!older.enabled);
+}
+
+#[test]
+fn an_agents_directory_alone_is_not_antigravity() {
+    // `.agents/skills` is where many agents look for skills.
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".agents/skills/review/SKILL.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn fix_writes_antigravity_servers_with_server_url() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".agents/mcp_config.json", "{}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert_eq!(
+        read(&dir, ".agents/mcp_config.json"),
+        CLAUDE_CODE_AS_URL.replace("\"url\"", "\"serverUrl\"")
+    );
+}
+
+#[test]
+fn antigravity_gets_no_server_reached_over_sse() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "linear": { "type": "sse", "url": "https://mcp.linear.app/sse" } } }"#,
+    );
+    dir.write(".agents/mcp_config.json", "{}\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::Antigravity,
+            server: "linear".to_string(),
+            reason: "it's reached over SSE, and Antigravity only reaches remote servers over streamable HTTP"
+                .to_string(),
+        }]
+    );
+}

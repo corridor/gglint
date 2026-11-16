@@ -61,6 +61,8 @@ pub(super) enum Remote {
     TransportSse,
     /// `httpUrl`, or `url` for a URL ending in `/sse`: Gemini CLI reaches a `url` over SSE.
     HttpUrl,
+    /// `serverUrl`, over streamable HTTP only: a URL ending in `/sse` can't be written.
+    ServerUrl,
 }
 
 impl Remote {
@@ -69,6 +71,7 @@ impl Remote {
         match self {
             Remote::Url | Remote::TypedUrl | Remote::TransportSse => &["url"],
             Remote::HttpUrl => &["httpUrl", "url"],
+            Remote::ServerUrl => &["serverUrl", "url"],
         }
     }
 }
@@ -252,6 +255,22 @@ pub(super) const AGENTS: &[Agent] = &[
         command_line_syntax: Syntax::Shell,
         remote: Remote::HttpUrl,
         off: Off::Never,
+        bearer_token_key: None,
+    },
+    Agent {
+        harness: Harness::Antigravity,
+        id: "antigravity",
+        aliases: &[],
+        name: "Antigravity",
+        // `.agents` is also where many agents look for skills, so it doesn't count alone.
+        directory: None,
+        files: &[".agents/mcp_config.json"],
+        format: Format::McpServers,
+        // Its docs don't say how a value refers to an environment variable.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::ServerUrl,
+        off: Off::Disabled,
         bearer_token_key: None,
     },
 ];
