@@ -239,6 +239,21 @@ pub(super) const AGENTS: &[Agent] = &[
         off: Off::Never,
         bearer_token_key: None,
     },
+    Agent {
+        harness: Harness::QwenCode,
+        id: "qwen-code",
+        aliases: &["qwen"],
+        name: "Qwen Code",
+        directory: Some(".qwen"),
+        files: &[".qwen/settings.json"],
+        format: Format::McpServers,
+        // As in Gemini CLI, which it's built on: `$VAR` or `${VAR}` in any string.
+        syntax: Syntax::Shell,
+        command_line_syntax: Syntax::Shell,
+        remote: Remote::HttpUrl,
+        off: Off::Never,
+        bearer_token_key: None,
+    },
 ];
 
 /// What gglint knows about `harness`.
