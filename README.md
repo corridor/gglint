@@ -122,7 +122,7 @@ secrets.
 | Cursor        | `cursor`      | `.cursor/mcp.json`                  | `.cursor/`      | JSON, `mcpServers`                         |
 | OpenCode      | `opencode`    | `opencode.json`, `opencode.jsonc`   | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp` |
 | Antigravity   | `antigravity` | `.agents/mcp_config.json`           | none            | JSON, `mcpServers`                         |
-| Copilot CLI   | `copilot-cli` | `.github/mcp.json`, `.mcp.json`     | none            | JSON, `mcpServers` or servers at the top   |
+| Copilot CLI   | `copilot-cli` | `.github/mcp.json`, or `.mcp.json`  | none            | JSON, `mcpServers` or servers at the top   |
 | Factory Droid | `droid`       | `.factory/mcp.json`                 | `.factory/`     | JSON, `mcpServers`                         |
 | Gemini CLI    | `gemini-cli`  | `.gemini/settings.json`             | none            | JSON, `mcpServers` among other settings    |
 | Junie         | `junie`       | `.junie/mcp/mcp.json`               | `.junie/`       | JSON, `mcpServers`                         |
@@ -139,8 +139,10 @@ Copilot CLI and Gemini CLI count only once they have their config file: many rep
 have an `.agents/`, `.github/` or `.gemini/` directory for other reasons, such as skills,
 workflows or Gemini Code Assist's reviews.
 
-Copilot CLI and Qoder also read Claude Code's `.mcp.json`. A server there counts as theirs,
-and a server missing from them and from `.mcp.json` is added to `.mcp.json` only.
+Qoder reads Claude Code's `.mcp.json` as well as its own file. Copilot CLI reads `.mcp.json`
+instead of `.github/mcp.json` whenever `.mcp.json` exists, so gglint then warns that Copilot
+ignores `.github/mcp.json`. A server in `.mcp.json` counts as theirs, and a server missing
+from them and from `.mcp.json` is added to `.mcp.json` only.
 
 ## How fixing works
 

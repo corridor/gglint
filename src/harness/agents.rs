@@ -42,6 +42,9 @@ pub(super) struct Agent {
     pub also_reads: &'static [Harness],
     /// Whether its `mcpServers` file can list servers right at its top instead.
     pub servers_at_top: bool,
+    /// A file it reads instead of its own while that one exists, so its own file's servers
+    /// aren't its servers then.
+    pub read_instead: Option<&'static str>,
 }
 
 /// The agent whose config file `harness` reads too and gets a server from, among those
@@ -110,6 +113,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Codex,
@@ -127,6 +131,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Cursor,
@@ -144,6 +149,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::OpenCode,
@@ -161,6 +167,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Antigravity,
@@ -180,6 +187,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::CopilotCli,
@@ -188,7 +196,7 @@ pub(super) const AGENTS: &[Agent] = &[
         name: "Copilot CLI",
         // Nearly every repository has a `.github` directory, so it doesn't count alone.
         directory: None,
-        // It reads `.mcp.json` too, in `also_reads`.
+        // Copilot CLI 1.x reads `.mcp.json` instead while it exists: see `read_instead`.
         files: &[".github/mcp.json"],
         format: Format::McpServers,
         // Its docs don't say how a value refers to an environment variable.
@@ -200,6 +208,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: Some("local"),
         also_reads: &[Harness::ClaudeCode],
         servers_at_top: true,
+        read_instead: Some(".mcp.json"),
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -218,6 +227,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -237,6 +247,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Junie,
@@ -255,6 +266,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::KimiCode,
@@ -274,6 +286,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Kiro,
@@ -292,6 +305,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Qoder,
@@ -312,6 +326,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[Harness::ClaudeCode],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::QwenCode,
@@ -330,6 +345,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
     Agent {
         harness: Harness::Trae,
@@ -349,6 +365,7 @@ pub(super) const AGENTS: &[Agent] = &[
         command_type: None,
         also_reads: &[],
         servers_at_top: false,
+        read_instead: None,
     },
 ];
 

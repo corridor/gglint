@@ -17,8 +17,9 @@ gglint now supports 14 coding agents instead of 4
   Qwen Code, `serverUrl` for Antigravity, a `type` for Copilot CLI, Factory Droid and Qoder.
 - Servers turned off with `"disabled": true` (Antigravity, Factory Droid, Kiro, Qoder) or
   `"enabled": false` (Kimi Code) count as turned off.
-- Copilot CLI and Qoder also read `.mcp.json`, so a server there counts as theirs and isn't
-  copied into their own file.
+- Qoder reads `.mcp.json` as well as its own file, and Copilot CLI reads `.mcp.json` instead
+  of `.github/mcp.json` while it exists, so a server there counts as theirs and isn't copied
+  into their own file. gglint warns about a `.github/mcp.json` that Copilot ignores.
 - `gglint --help` lists every agent, with the name `--source` takes and its config file.
   `--source` also takes other names agents go by, such as `gemini`, `copilot` or `droid`.
 

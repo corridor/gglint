@@ -1056,7 +1056,9 @@ fn qoder_needs_no_config_file_of_its_own_beside_mcp_json() {
 }
 
 #[test]
-fn a_server_only_copilot_cli_has_is_added_to_mcp_json() {
+fn copilot_cli_ignores_its_own_file_while_mcp_json_exists() {
+    // Copilot CLI 1.x reads `.mcp.json` instead of `.github/mcp.json` whenever `.mcp.json` is
+    // there, even with no servers in it.
     let dir = TempDir::new();
     dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
     dir.write(
@@ -1064,11 +1066,20 @@ fn a_server_only_copilot_cli_has_is_added_to_mcp_json() {
         r#"{ "mcpServers": { "context7": { "type": "http", "url": "https://mcp.context7.com/mcp" } } }"#,
     );
 
+    let configs = read_mcp(dir.path());
+    let copilot = configs
+        .iter()
+        .find(|config| config.harness == Harness::CopilotCli)
+        .unwrap();
     let (report, left) = fix(&dir);
 
+    assert!(copilot.servers.is_empty(), "{:?}", copilot.servers);
+    assert_eq!(
+        copilot.warnings,
+        ["Copilot CLI doesn't read this file while .mcp.json exists; it reads .mcp.json instead"]
+    );
     assert!(left.is_empty(), "{left:?}");
-    assert_eq!(report.changed.len(), 1);
-    assert_eq!(report.changed[0].relative_path, Path::new(".mcp.json"));
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
 }
 
 #[test]
