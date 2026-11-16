@@ -23,8 +23,9 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
+use super::agents::agent;
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
-use super::mcp::{Part, Setting, Syntax, parse_value, translate, write_value};
+use super::mcp::{Format, Part, Setting, Syntax, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
 
 /// What `fix_mcp` changed, and what it left.
@@ -254,7 +255,8 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
     };
     let cannot = |what: &str| format!("the value of {what} can't be written for {}", harness.display_name());
 
-    if harness == Harness::Codex {
+    let format = agent(harness).format;
+    if format == Format::Codex {
         return codex_fields(server, cannot)
             .map(|codex| codex.into_iter().filter(|(_, field)| !is_empty(field)).collect());
     }
@@ -272,8 +274,8 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
     };
     let env = settings(&server.env, &|name| format!("`{name}`"))?;
     let headers = settings(&server.headers, &|name| format!("the `{name}` header"))?;
-    match (&server.transport, harness) {
-        (Transport::Command { command, args }, Harness::OpenCode) => {
+    match (&server.transport, format) {
+        (Transport::Command { command, args }, Format::OpenCode) => {
             add("type", Field::Text("local".to_string()));
             let mut list = vec![command.clone()];
             list.extend(args.iter().cloned());
@@ -285,7 +287,7 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             add("args", Field::List(args.clone()));
             add("env", env);
         }
-        (Transport::Remote { url }, Harness::OpenCode) => {
+        (Transport::Remote { url }, Format::OpenCode) => {
             add("type", Field::Text("remote".to_string()));
             add("url", Field::Text(url.clone()));
             add("headers", headers);
@@ -316,7 +318,7 @@ fn command_line_fields(
     harness: Harness,
 ) -> Result<Vec<(&'static str, Field)>, String> {
     match written_transport(transport, source, harness)? {
-        Transport::Command { command, args } if harness == Harness::OpenCode => {
+        Transport::Command { command, args } if agent(harness).format == Format::OpenCode => {
             let mut list = vec![command];
             list.extend(args);
             Ok(vec![("command", Field::List(list))])
@@ -405,10 +407,10 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), true),
         Err(error) => return Err(format!("couldn't read it: {error}")),
     };
-    let new_text = match harness {
-        Harness::Codex => write_toml(&text, writes)?,
-        Harness::ClaudeCode | Harness::Cursor => write_json(&text, "mcpServers", None, writes)?,
-        Harness::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), writes)?,
+    let new_text = match agent(harness).format {
+        Format::Codex => write_toml(&text, writes)?,
+        Format::McpServers => write_json(&text, "mcpServers", None, writes)?,
+        Format::OpenCode => write_json(&text, "mcp", Some("https://opencode.ai/config.json"), writes)?,
     };
     if new_text == text {
         return Ok(None);
