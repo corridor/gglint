@@ -71,6 +71,11 @@ impl Harness {
         agents::agent(self).files[0]
     }
 
+    /// Every file it reads a repository's MCP servers from, relative to the root.
+    pub fn mcp_files(self) -> &'static [&'static str] {
+        agents::agent(self).files
+    }
+
     /// Its own directory in a repository. When it's there, the repository is set up for the
     /// agent on purpose, not just mentioned by a file such as `CLAUDE.md`.
     pub fn directory(self) -> &'static str {
