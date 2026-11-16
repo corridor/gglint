@@ -595,3 +595,39 @@ fn fix_marks_an_sse_server_for_kimi_code() {
          \"url\": \"https://mcp.linear.app/sse\"\n    }\n  }\n}\n"
     );
 }
+
+#[test]
+fn reads_the_bearer_token_kimi_code_takes_from_the_environment() {
+    let dir = TempDir::new();
+    dir.write(
+        ".kimi-code/mcp.json",
+        r#"{ "mcpServers": { "linear": { "url": "https://mcp.linear.app/mcp", "bearerTokenEnvVar": "LINEAR_TOKEN" } } }"#,
+    );
+
+    let config = config_of(&dir, Harness::KimiCode);
+
+    assert_eq!(
+        server(&config, "linear").headers,
+        [setting("Authorization", &[text("Bearer "), env("LINEAR_TOKEN")])]
+    );
+}
+
+#[test]
+fn fix_gives_kimi_code_a_bearer_token_from_the_environment() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "linear": { "type": "http", "url": "https://mcp.linear.app/mcp", "headers": { "Authorization": "Bearer ${LINEAR_TOKEN}" } } } }"#,
+    );
+    dir.write(".kimi-code/mcp.json", "{}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.unfixed.is_empty(), "{:?}", report.unfixed);
+    assert_eq!(
+        read(&dir, ".kimi-code/mcp.json"),
+        "{\n  \"mcpServers\": {\n    \"linear\": {\n      \"url\": \"https://mcp.linear.app/mcp\",\n      \
+         \"bearerTokenEnvVar\": \"LINEAR_TOKEN\"\n    }\n  }\n}\n"
+    );
+}
