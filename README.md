@@ -98,7 +98,8 @@ The options below are for `gglint mcp`; [`secrets`](#finding-secrets) and
 | `0`         | Every agent gets the same servers, set up the same way.                       |
 | `1`         | gglint found a problem, one is left after `--fix`, or there are no MCP config files. |
 
-`gglint secrets` also exits with status 1 when it finds a secret, and `0` when it finds none.
+`gglint secrets` exits with status 1 when it finds a problem, and `0` when it finds none or
+only warnings, such as a secret in a file git ignores.
 
 Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The summary
 line, with counts and timing, goes to standard error.
@@ -107,28 +108,34 @@ line, with counts and timing, goes to standard error.
 
 `gglint secrets` finds credentials written out in the files that configure your coding
 agents: their MCP config files, settings, and instruction files such as `CLAUDE.md`. These
-files are committed, so a token pasted into `.mcp.json` ends up in git history.
+files are committed, so a token pasted into `.mcp.json` ends up in git history. It also stops
+the agents' personal files, such as `.claude/settings.local.json`, from being committed at all.
 
 ```sh
 uvx gglint secrets                 # report every secret
 uvx gglint secrets --fix           # replace each with a reference to an environment variable
-uvx gglint secrets --staged        # only the files staged in git
-uvx gglint secrets FILE...         # only these files, as a pre-commit hook passes them
+uvx gglint secrets --staged        # only what's staged in git: the copy the commit gets
+uvx gglint secrets FILE...         # only these, where they're agent files, as a hook passes them
 ```
 
 | Rule                | Reported when                                                                                     |
 | ------------------- | ------------------------------------------------------------------------------------------------- |
 | `inline-secret`     | Text has the format of a known credential: GitHub, GitLab, Anthropic, Slack, Stripe, Google and npm tokens, AWS access key IDs, API keys starting with `sk-`, and private key blocks. |
-| `inline-credential` | A JSON or TOML value under a name such as `token`, `password`, `api_key` or `Authorization` is written out instead of being a reference to an environment variable. |
+| `inline-credential` | A JSON or TOML value under a name such as `token`, `password`, `api_key` or `Authorization` is written out instead of being a reference to an environment variable; a password is written into a URL (`postgresql://admin:secret@db/app`); or a command carries one, as a command Claude Code saves as allowed does: a header (`curl -H "Authorization: Bearer …"`), a variable set for the command (`PGPASSWORD=… psql`) or an option (`--token …`, `sshpass -p …`, `mysql -p…`). |
+| `local-file`        | An agent file meant for one person's machine is in git: `.claude/settings.local.json`, where Claude Code saves the commands you allow, secrets and all, `CLAUDE.local.md`, `.claude/.credentials.json` or `.codex/auth.json`. Whatever it holds, so a secret no pattern recognises is stopped too. It's a warning while the file is on disk and git doesn't ignore it yet. |
 
 Placeholders (`your-token-here`, `ghp_xxxx…`), references (`${GITHUB_TOKEN}`) and values that
 name a variable (`bearer_token_env_var = "GITHUB_TOKEN"`) aren't reported. A secret's value is
-never printed: gglint shows its kind, the name it's under, and where it is.
+never printed: gglint shows its kind, the name it's under, and where it is. A secret in a file
+git ignores is a warning, since it isn't committed; only errors fail.
 
 `--fix` writes the reference in the agent's own syntax, such as `Bearer ${env:GITHUB_TOKEN}`
 in Cursor, and keeps everything else in the file as it was. An agent with no way to refer to
-an environment variable, such as Codex in a `http_headers` table, is reported and left alone.
-A secret that was ever committed is in git history: rotate it.
+an environment variable, such as Codex in a `http_headers` table, is reported and left alone,
+and so is a secret in a command: take it out of the command, or remove the command with
+`/permissions` in Claude Code. `--fix` also adds a personal agent file to `.gitignore`; one
+that's already in git needs `git rm --cached` too. A secret that was ever committed is in git
+history: rotate it.
 
 ### Before every commit
 
@@ -416,7 +423,8 @@ To run gglint without the action:
   only, and `gglint secrets` shows a secret's kind, the name it's under and where it is, never
   its value.
 - **One external program: git.** gglint runs `git check-ignore` to mark files your
-  `.gitignore` excludes (in `mcp --fix` and in `secrets`), `git diff --cached` for
+  `.gitignore` excludes (in `mcp --fix` and in `secrets`), `git ls-files` to see whether a
+  personal agent file is in git, `git diff --cached` and `git show` to read what's staged for
   `secrets --staged`, and `git rev-parse --git-path hooks` for `gglint hook`.
 - **Nothing is overwritten by `hook`.** An existing hook script is extended, once.
 
@@ -435,10 +443,10 @@ To run gglint without the action:
   as turned off. `--fix` doesn't edit the lists, so a server it adds while `mcp.allowed` is
   set stays off until you add it there.
 - `gglint secrets` reads a file line by line. It finds a value under a name such as `token`
-  only in JSON and TOML files, and only the credential formats it knows in instruction files
-  such as `CLAUDE.md`. It misses a password made of one kind of letters (`"hunter"`), doesn't
-  read `.env` files or other source, and doesn't search git history: a secret that was ever
-  committed has to be rotated.
+  in JSON and TOML files, and in every agent file the credential formats it knows, passwords
+  in URLs and secrets in commands. It misses a password made of one kind of letters
+  (`"hunter"`) or shorter than 8 characters, doesn't read `.env` files or other source, and
+  doesn't search git history: a secret that was ever committed has to be rotated.
 - `gglint secrets --fix` can't change a value for an agent that has no way to refer to an
   environment variable, such as Codex in `http_headers`; it reports it and says what to use
   instead.

@@ -9,9 +9,16 @@ All notable changes to gglint are recorded in this file. The format follows
 ### Added
 
 - `gglint secrets` finds credentials written out in agent config files, settings and
-  instruction files, and with `--fix` replaces them with a reference to an environment
-  variable written in the agent's own syntax. `--staged` checks only what is staged in git,
-  and file arguments check only those files, for pre-commit hooks.
+  instruction files: known token formats, values under names such as `token` or `password`,
+  passwords in URLs, and secrets in commands, such as those Claude Code saves as allowed.
+  With `--fix` it replaces a value with a reference to an environment variable written in
+  the agent's own syntax. `--staged` checks the copy of each file that's staged in git, and
+  file arguments check only those that are agent files, for pre-commit hooks. A secret in a
+  file git ignores is a warning.
+- The `local-file` rule fails when an agent file meant for one person's machine is in git:
+  `.claude/settings.local.json`, `CLAUDE.local.md`, `.claude/.credentials.json` or
+  `.codex/auth.json`. It warns while git doesn't ignore one yet, and `--fix` adds it to
+  `.gitignore`.
 - `gglint hook` runs the secrets check before every commit: it installs into husky or git's
   `pre-commit` hook, and prints the lines to add for pre-commit, lefthook and lint-staged.
   The repository is also a source of pre-commit hooks (`gglint-secrets`, `gglint-mcp`).
