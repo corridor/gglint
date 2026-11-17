@@ -883,6 +883,32 @@ fn is_agent_file(relative: &Path) -> bool {
             && wanted_in_directory(relative)
 }
 
+/// Where an agent file named by its path belongs: the folder it's in and its path under that
+/// folder, read from the end of the path, so `/repo/.cursor/mcp.json` is `.cursor/mcp.json` in
+/// `/repo`. `None` for any other file, as a hook tool such as lint-staged passes every file.
+fn agent_file_in(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let text = slashed(path);
+    let split = |relative: &str| {
+        let base = match text.strip_suffix(relative)? {
+            "" => ".",
+            rest => rest.strip_suffix('/')?,
+        };
+        Some((
+            PathBuf::from(if base.is_empty() { "/" } else { base }),
+            PathBuf::from(relative),
+        ))
+    };
+    fixed_files().find_map(split).or_else(|| {
+        let name = path.file_name()?.to_str()?;
+        if !wanted_in_directory(path) {
+            return None;
+        }
+        EXTRA_DIRECTORIES
+            .iter()
+            .find_map(|directory| split(&format!("{directory}/{name}")))
+    })
+}
+
 /// The agent files that exist under `root`, relative to it.
 fn known_files(root: &Path) -> BTreeSet<PathBuf> {
     let mut files = BTreeSet::new();
@@ -1011,27 +1037,26 @@ fn check_local_file(root: &Path, path: &Path, relative: &Path, description: &str
 
 /// Scans the files in `scope` under `root`.
 pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
-    let files: Vec<(PathBuf, PathBuf)> = match scope {
+    // Each file, as opened from here, under the folder it belongs to, and that folder.
+    let files: Vec<(PathBuf, PathBuf, PathBuf)> = match scope {
         Scope::Known => known_files(root)
             .into_iter()
-            .map(|relative| (root.join(&relative), relative))
+            .map(|relative| (root.join(&relative), relative, root.to_path_buf()))
             .collect(),
         Scope::Staged => staged_files(root)?
             .into_iter()
             .filter(|relative| is_agent_file(relative))
-            .map(|relative| (root.join(&relative), relative))
+            .map(|relative| (root.join(&relative), relative, root.to_path_buf()))
             .collect(),
         Scope::Files(paths) => paths
             .iter()
-            .map(|path| {
-                let relative = path.strip_prefix(root).unwrap_or(path).to_path_buf();
-                (path.clone(), relative)
-            })
+            .filter_map(|path| agent_file_in(path).map(|(base, relative)| (path.clone(), relative, base)))
             .collect(),
     };
 
     let mut check = ScanResult::default();
-    for (path, relative_path) in files {
+    for (path, relative_path, root) in files {
+        let root = root.as_path();
         let local = LOCAL_FILES.iter().find(|&&(file, _)| file == slashed(&relative_path));
         if let Some(&(_, description)) = local {
             check_local_file(root, &path, &relative_path, description, &mut check);
