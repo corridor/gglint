@@ -5,3 +5,4 @@
 //! missing from a config file. The `gglint` command (`main.rs`) is a thin layer over it.
 
 pub mod harness;
+pub mod report;

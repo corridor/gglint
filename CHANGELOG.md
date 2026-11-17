@@ -4,6 +4,13 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A shared report layer (`report::Diagnostic`) that every check prints through.
+
+
 ## [0.3.0] - 2026-11-16
 
 gglint now supports 14 coding agents instead of 4

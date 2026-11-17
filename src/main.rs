@@ -6,7 +6,6 @@
 //! gglint mcp --servers [PATH]   list every server
 //! ```
 
-use std::io::IsTerminal;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -15,6 +14,7 @@ use gglint::harness::{
     Cell, Finding, FixReport, HARNESSES, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport,
     check_mcp_from, fix_mcp, read_mcp,
 };
+use gglint::report::{Diagnostic, Paint};
 
 const USAGE: &str = "\
 Keep the MCP servers of every coding agent in a repository in sync.
@@ -329,42 +329,13 @@ fn print_fixes(report: &FixReport) {
     print!("{out}");
 }
 
-/// ANSI colours, when standard output is a terminal and `NO_COLOR` isn't set.
-struct Paint {
-    on: bool,
-}
-
-impl Paint {
-    fn new() -> Self {
-        let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
-        Self {
-            on: std::io::stdout().is_terminal() && !no_color,
-        }
-    }
-
-    fn paint(&self, code: &str, text: &str) -> String {
-        if self.on {
-            format!("\x1b[{code}m{text}\x1b[0m")
-        } else {
-            text.to_string()
-        }
-    }
-
-    fn bold(&self, text: &str) -> String {
-        self.paint("1", text)
-    }
-
-    fn dim(&self, text: &str) -> String {
-        self.paint("2", text)
-    }
-
-    fn cell(&self, cell: Cell) -> String {
-        match cell {
-            Cell::Same => self.paint("32", "✓"),
-            Cell::Different => self.paint("33", "≠"),
-            Cell::Missing => self.paint("31", "✗"),
-            Cell::Off => self.dim("○"),
-        }
+/// The symbol for a table cell, coloured.
+fn symbol(paint: &Paint, cell: Cell) -> String {
+    match cell {
+        Cell::Same => paint.green("✓"),
+        Cell::Different => paint.yellow("≠"),
+        Cell::Missing => paint.red("✗"),
+        Cell::Off => paint.dim("○"),
     }
 }
 
@@ -419,7 +390,7 @@ fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
             out.push_str(&format!(
                 " {}{}{} │",
                 " ".repeat(left),
-                paint.cell(cell),
+                symbol(&paint, cell),
                 " ".repeat(right)
             ));
         }
@@ -428,10 +399,10 @@ fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
     out.push_str(&border("╰", "┴", "╯"));
     out.push_str(&format!(
         "  {} set up   {} set up differently   {} missing   {} turned off\n\n",
-        paint.cell(Cell::Same),
-        paint.cell(Cell::Different),
-        paint.cell(Cell::Missing),
-        paint.cell(Cell::Off),
+        symbol(&paint, Cell::Same),
+        symbol(&paint, Cell::Different),
+        symbol(&paint, Cell::Missing),
+        symbol(&paint, Cell::Off),
     ));
 
     if problems == 0 {
@@ -464,8 +435,8 @@ fn draw_mcp(root: &Path, check: &McpCheck, problems: usize) {
 /// A finding under its heading: what's wrong, then how to fix it or where to look.
 fn describe(paint: &Paint, finding: &Finding) -> String {
     let symbol = match finding.rule {
-        Rule::MissingServer | Rule::MissingConfig => paint.cell(Cell::Missing),
-        Rule::DifferentServer | Rule::RenamedServer => paint.cell(Cell::Different),
+        Rule::MissingServer | Rule::MissingConfig => symbol(paint, Cell::Missing),
+        Rule::DifferentServer | Rule::RenamedServer => symbol(paint, Cell::Different),
     };
     let next = match &finding.fix {
         Some(fix) => fix.clone(),
@@ -479,16 +450,7 @@ fn describe(paint: &Paint, finding: &Finding) -> String {
 }
 
 fn print_finding(finding: &Finding) {
-    println!(
-        "{}:{}  {:<16} {}",
-        finding.site.path.display(),
-        finding.site.location,
-        finding.rule.as_str(),
-        finding.message
-    );
-    for site in &finding.related {
-        println!("    also at {}:{}", site.path.display(), site.location);
-    }
+    print!("{}", Diagnostic::from(finding).line());
 }
 
 fn print_mcp_server(config: &McpConfig, server: &McpServer) {
