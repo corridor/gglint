@@ -352,13 +352,39 @@ fn looks_like_code(value: &str) -> bool {
             && part.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
             && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     };
-    value.contains(['(', '[', '{'])
+    value.contains(['(', ')', '[', ']', '{', '}', '<', '>'])
         || value.contains('.') && value.split('.').all(identifier)
-        || value.contains('_')
-            && value.starts_with(|c: char| c.is_ascii_uppercase())
-            && value
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        || names_a_variable(value)
+}
+
+/// Whether `value` is written like the name of an environment variable, such as `MY_TOKEN` or
+/// the placeholder `OPENAI_API_KEY_HERE`, rather than being a secret.
+fn names_a_variable(value: &str) -> bool {
+    value.contains('_')
+        && value.starts_with(|c: char| c.is_ascii_uppercase())
+        && value
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Whether `value` names a file rather than being a secret: `./key.json`, `/etc/creds.json`.
+fn looks_like_path(value: &str) -> bool {
+    let extension = value.rsplit_once('.').is_some_and(|(_, extension)| {
+        (2..=5).contains(&extension.len()) && extension.chars().all(|c| c.is_ascii_alphanumeric())
+    });
+    value.starts_with(['/', '~'])
+        || value.starts_with("./")
+        || value.starts_with("../")
+        || value.contains('/') && extension
+}
+
+/// Whether `value` has a digit or a symbol other than the `-`, `_` and `.` that join words.
+/// Commands and the prose around them are full of words and names (`Ownership`,
+/// `publicAccessToken`, `llm-excel`); a secret almost always has one.
+fn beyond_words(value: &str) -> bool {
+    value
+        .chars()
+        .any(|c| c.is_ascii_digit() || !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_' | '.'))
 }
 
 /// The secrets written into command lines in `line`, as the byte range of each and the name
@@ -377,7 +403,9 @@ fn command_secrets(line: &str) -> Vec<(usize, usize, String)> {
             && !is_reference(value)
             && !placeholder(value)
             && credential_like(value)
+            && beyond_words(value)
             && !looks_like_code(value)
+            && !looks_like_path(value)
         {
             found.push((start, end, name.to_string()));
         }
@@ -738,8 +766,11 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
             });
         }
 
+        // A key's first line, `-----BEGIN RSA PRIVATE KEY-----`, not a mention of one such as
+        // `-----BEGIN ... PRIVATE KEY-----`.
         if let Some(start) = line.find("-----BEGIN ")
-            && line[start..].contains("PRIVATE KEY-----")
+            && let Some((label, _)) = line[start + "-----BEGIN ".len()..].split_once("PRIVATE KEY-----")
+            && label.chars().all(|c| c.is_ascii_uppercase() || c == ' ')
         {
             hits.push(Hit {
                 line: number,
@@ -798,6 +829,8 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                     .unwrap_or((0, pair.value));
                 if is_reference(pair.value)
                     || credential.starts_with("http")
+                    || looks_like_path(credential)
+                    || names_a_variable(credential)
                     || placeholder(credential)
                     || !credential_like(credential)
                 {
@@ -1252,6 +1285,9 @@ mod tests {
             "\"GITHUB_TOKEN\": \"$GITHUB_TOKEN\"",
             "the token is ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             "AKIAIOSFODNN7EXAMPLE",
+            // From real repositories: a variable's name as a placeholder, and documentation.
+            "\"OPENAI_API_KEY\": \"OPENAI_API_KEY_HERE\"",
+            "Never commit keys (`sk-...`, PEM `-----BEGIN ... PRIVATE KEY-----`, etc.)",
         ] {
             assert!(scan_text(text, true).is_empty(), "{text}");
         }
@@ -1393,10 +1429,19 @@ mod tests {
             "sshpass -p \"$SSH_PASS\" ssh host",
             "mysql -p -u root",
             "run --max-tokens 4096",
+            // From real repositories: a file's path, code, and words.
+            "export GOOGLE_APPLICATION_CREDENTIALS=./service-account-key.json",
+            "export GOOGLE_APPLICATION_CREDENTIALS=\"/path/to/key.json\"",
+            "### 7. Authorization: Ownership, Admin, and Moderation",
+            "accessToken: publicAccessToken,",
+            "the type is `Partial<{email: string, password: string}>`",
+            "\"Bash(PGPASSWORD=llm-excel psql -h localhost -U llm-excel)\"",
         ] {
             assert!(scan_text(line, false).is_empty(), "{line}");
             assert!(scan_text(line, true).is_empty(), "{line}");
         }
+        // In Markdown, from a real repository. In a config file it's a value under `token`.
+        assert!(scan_text("token: \"use-public-token\",", false).is_empty());
     }
 
     #[test]
