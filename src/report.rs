@@ -96,10 +96,11 @@ fn shown_path(diagnostic: &Diagnostic) -> String {
         .filter(|part| *part != Component::CurDir)
         .collect();
     let current = std::env::current_dir().ok();
-    let from_here = if path.is_relative() {
-        Some(path.as_path())
-    } else {
+    // On Windows, `/repo/x` has a root but no drive, and isn't absolute; it isn't from here either.
+    let from_here = if path.has_root() || path.is_absolute() {
         current.as_deref().and_then(|current| path.strip_prefix(current).ok())
+    } else {
+        Some(path.as_path())
     };
     match from_here {
         Some(relative) if !relative.components().any(|part| part == Component::ParentDir) => uri(relative),
