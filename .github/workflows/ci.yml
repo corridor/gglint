@@ -49,6 +49,51 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
 
+  action:
+    name: GitHub Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # The action runs `uvx gglint@<version>` from PyPI. Here it runs this build instead, so
+      # the action is tested with the code in the pull request. Job variables reach the
+      # steps of a composite action.
+      GGLINT_BIN: ${{ github.workspace }}/target/debug/gglint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      - name: Set up one repository with a secret and one without
+        run: |
+          mkdir -p "$RUNNER_TEMP/dirty/.cursor" "$RUNNER_TEMP/clean"
+          # A token's shape, assembled here so no file in the repository looks like one.
+          token="ghp_$(printf '%s%s' aB3dE6gH9jK2mN5pQ8sT1vW4yZ7 aB3dE6gH9)"
+          printf '{"mcpServers":{"github":{"url":"https://x","headers":{"Authorization":"Bearer %s"}}}}\n' "$token" > "$RUNNER_TEMP/dirty/.cursor/mcp.json"
+          printf '{"mcpServers":{}}\n' > "$RUNNER_TEMP/clean/.mcp.json"
+      - name: Report a secret without failing
+        uses: ./
+        with:
+          command: secrets
+          path: ${{ runner.temp }}/dirty
+          comment: "false"
+          fail-on-problems: "false"
+      - name: Fail on a secret
+        id: fails
+        uses: ./
+        continue-on-error: true
+        with:
+          command: secrets
+          path: ${{ runner.temp }}/dirty
+          comment: "false"
+      - name: Check that it failed
+        run: test "${{ steps.fails.outcome }}" = failure
+      - name: Pass on a repository without problems
+        uses: ./
+        with:
+          command: all
+          path: ${{ runner.temp }}/clean
+          comment: "false"
+
   msrv:
     name: Minimum Rust version
     runs-on: ubuntu-latest
