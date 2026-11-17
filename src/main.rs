@@ -19,8 +19,8 @@ use gglint::harness::{
     check_mcp_from, fix_mcp, read_mcp,
 };
 use gglint::hook::{self, Outcome, TOOLS, Tool};
-use gglint::report::{self, Diagnostic, Paint, exit_code};
-use gglint::secrets::{Scope, apply_fixes, scan_files};
+use gglint::report::{self, Diagnostic, Paint, Severity, exit_code};
+use gglint::secrets::{Scope, apply_fixes, ignore_local_files, scan_files};
 
 const USAGE: &str = "\
 Keep the MCP servers of every coding agent in a repository in sync.
@@ -391,9 +391,9 @@ fn scan_command(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if fix && !check.fixes.is_empty() {
+    if fix && (!check.fixes.is_empty() || !check.ignore.is_empty()) {
         match apply_fixes(&check) {
-            Ok(changed) => {
+            Ok(changed) if !changed.is_empty() => {
                 let count = changed.iter().map(|(_, count)| count).sum::<usize>();
                 println!("Replaced {count} secret(s) with references to environment variables:");
                 for (path, count) in &changed {
@@ -403,6 +403,21 @@ fn scan_command(args: &[String]) -> ExitCode {
                     "\nSet those variables in your environment. Anything already committed stays in git history: rotate it.\n"
                 );
             }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+        match ignore_local_files(root, &check) {
+            Ok(added) if !added.is_empty() => {
+                println!("Added to {}:", root.join(".gitignore").display());
+                for path in &added {
+                    println!("  {}", path.display());
+                }
+                println!();
+            }
+            Ok(_) => {}
             Err(error) => {
                 eprintln!("error: {error}");
                 return ExitCode::FAILURE;
@@ -432,9 +447,12 @@ fn scan_command(args: &[String]) -> ExitCode {
                     paint.bold(&diagnostic.relative_path.display().to_string())
                 ));
             }
+            let symbol = match diagnostic.severity {
+                Severity::Error => paint.red("✗"),
+                Severity::Warning => paint.yellow("!"),
+            };
             out.push_str(&format!(
-                "  {} {:>5}  {}\n{}\n",
-                paint.red("✗"),
+                "  {symbol} {:>5}  {}\n{}\n",
                 diagnostic.location.to_string(),
                 diagnostic.message,
                 paint.dim(&format!("            {}", diagnostic.fix.as_deref().unwrap_or("")))
@@ -443,9 +461,16 @@ fn scan_command(args: &[String]) -> ExitCode {
         print!("{out}");
     }
     let problems = check.diagnostics.len();
-    let problems_text = match problems {
-        0 => "no secrets".to_string(),
-        count => format!("{count} secret(s)"),
+    let warnings = check
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Warning)
+        .count();
+    let problems_text = match (problems - warnings, warnings) {
+        (0, 0) => "no problems".to_string(),
+        (errors, 0) => format!("{errors} problem(s)"),
+        (0, warnings) => format!("{warnings} warning(s)"),
+        (errors, warnings) => format!("{errors} problem(s), {warnings} warning(s)"),
     };
     eprintln!(
         "\nChecked {} file(s): {problems_text}; {:.2} ms",

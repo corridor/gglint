@@ -238,6 +238,99 @@ fn hook_installs_into_husky_once_and_prints_lines_for_lefthook() {
     );
 }
 
+/// `gglint secrets --format lines` in `dir`, with `extra` arguments before the path.
+fn lines(dir: &TempDir, extra: &[&str]) -> (Option<i32>, String) {
+    let mut args: Vec<&std::ffi::OsStr> = vec!["secrets".as_ref(), "--format".as_ref(), "lines".as_ref()];
+    args.extend(extra.iter().map(|arg| std::ffi::OsStr::new(*arg)));
+    args.push(dir.path().as_os_str());
+    let output = gglint(&args);
+    (output.status.code(), String::from_utf8(output.stdout).unwrap())
+}
+
+/// Claude Code's personal settings, with no secret in them.
+const LOCAL_SETTINGS: &str = "{\n  \"permissions\": { \"allow\": [\"Bash(ls)\"] }\n}\n";
+
+#[test]
+fn a_personal_agent_file_that_is_staged_fails_the_hook() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write(".claude/settings.local.json", LOCAL_SETTINGS);
+    git(&dir, &["add", "."]);
+
+    let (code, stdout) = lines(&dir, &["--staged"]);
+
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(
+        stdout.contains(".claude/settings.local.json:1:1  local-file"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_committed_personal_agent_file_fails_and_fix_doesnt_untrack_it() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write(".codex/auth.json", "{}\n");
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-q", "-m", "x"]);
+
+    let (code, stdout) = lines(&dir, &[]);
+    let table = gglint(&["secrets".as_ref(), dir.path().as_os_str()]);
+    let (fixed_code, _) = lines(&dir, &["--fix"]);
+
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(
+        stdout.contains("local-file  ") && stdout.contains("is in git"),
+        "{stdout}"
+    );
+    let table = String::from_utf8(table.stdout).unwrap();
+    assert!(table.contains("git rm --cached .codex/auth.json"), "{table}");
+    // Ignoring a file doesn't take it out of git: that's `git rm --cached`, left to the user.
+    assert_eq!(fixed_code, Some(1));
+}
+
+#[test]
+fn a_personal_agent_file_git_doesnt_ignore_is_a_warning_that_fix_resolves() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write(".gitignore", "target/\n");
+    dir.write(".claude/settings.local.json", LOCAL_SETTINGS);
+
+    let (code, stdout) = lines(&dir, &[]);
+    let (fixed_code, _) = lines(&dir, &["--fix"]);
+    let (after_code, after) = lines(&dir, &[]);
+
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("local-file") && stdout.contains("warning"), "{stdout}");
+    assert_eq!(fixed_code, Some(0));
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert_eq!(gitignore, "target/\n.claude/settings.local.json\n");
+    assert_eq!((after_code, after.as_str()), (Some(0), ""));
+}
+
+#[test]
+fn an_ignored_personal_agent_file_is_fine() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write(".gitignore", ".claude/settings.local.json\n");
+    dir.write(".claude/settings.local.json", LOCAL_SETTINGS);
+
+    assert_eq!(lines(&dir, &[]), (Some(0), String::new()));
+}
+
+#[test]
+fn a_secret_in_an_ignored_file_is_a_warning_that_doesnt_fail() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write(".gitignore", ".cursor/\n");
+    dir.write(".cursor/mcp.json", cursor_config(&token()));
+
+    let (code, stdout) = lines(&dir, &[]);
+
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("warning") && stdout.contains("gitignored"), "{stdout}");
+}
+
 #[test]
 fn a_secret_in_a_gitignored_file_says_so_and_codex_gets_its_own_advice() {
     let dir = TempDir::new();
