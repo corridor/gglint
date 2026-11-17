@@ -446,7 +446,7 @@ To run gglint without the action:
   in JSON and TOML files, and in every agent file the credential formats it knows, passwords
   in URLs and secrets in commands. It misses a password made of one kind of letters
   (`"hunter"`) or shorter than 8 characters, and in a command one with no digit or symbol
-  (`llm-excel`), as commands and the text around them are full of words and names. It doesn't
+  (`app-reader`), as commands and the text around them are full of words and names. It doesn't
   read `.env` files or other source, and doesn't search git history: a secret that was ever
   committed has to be rotated.
 - `gglint secrets --fix` can't change a value for an agent that has no way to refer to an

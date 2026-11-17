@@ -429,6 +429,9 @@ fn no_planted_value_reaches_any_output_in_any_format_or_after_fix() {
         format!("xoxb-{}", filler(24)),
         "Zx9Qw3Er7Ty1Uo5P".to_string(),
         format!("sk-{}", filler(40)),
+        "Qw7Er5Ty3Ui1Op9".to_string(),
+        filler(32),
+        "Pg4Lk8Mn2Bv6Cx0".to_string(),
     ];
     let dir = TempDir::new();
     dir.write(
@@ -441,6 +444,20 @@ fn no_planted_value_reaches_any_output_in_any_format_or_after_fix() {
     dir.write(
         "CLAUDE.md",
         format!("Never commit {} or\n-----BEGIN PRIVATE KEY-----\n", planted[5]),
+    );
+    dir.write(
+        ".mcp.json",
+        format!(
+            "{{\n  \"mcpServers\": {{\n    \"db\": {{\n      \"command\": \"db-mcp\",\n      \"env\": {{ \"DATABASE_URL\": \"postgresql://admin:{}@db.internal/app\" }}\n    }}\n  }}\n}}\n",
+            planted[6]
+        ),
+    );
+    dir.write(
+        ".claude/settings.json",
+        format!(
+            "{{\n  \"permissions\": {{\n    \"allow\": [\n      \"Bash(curl -H \\\"Authorization: Bearer {}\\\" https://api.example.org)\",\n      \"Bash(PGPASSWORD={} psql -h db.internal)\"\n    ]\n  }}\n}}\n",
+            planted[7], planted[8]
+        ),
     );
 
     let mut runs: Vec<Vec<&str>> = ["table", "lines", "github", "sarif", "markdown"]
