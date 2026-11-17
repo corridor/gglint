@@ -435,6 +435,76 @@ fn env_name(key: &str, fallback: &str) -> String {
     }
 }
 
+/// Hosts that are this machine: a password for one is a local setup, not a secret.
+const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "0.0.0.0", "[::1]"];
+
+/// Words that stand in for the password in an example URL.
+const FILLER_PASSWORDS: &[&str] = &["password", "pass", "passwd", "pwd", "pw", "secret"];
+
+/// Whether `value` could be a real password: 6 characters or more, with a digit, a symbol
+/// or both cases of letters.
+fn password_like(value: &str) -> bool {
+    let lower = value.chars().any(|c| c.is_ascii_lowercase());
+    let upper = value.chars().any(|c| c.is_ascii_uppercase());
+    let digit = value.chars().any(|c| c.is_ascii_digit());
+    let symbol = value.chars().any(|c| !c.is_ascii_alphanumeric());
+    value.len() >= 6 && (digit || symbol || (lower && upper))
+}
+
+/// The byte ranges in `line` of passwords written into URLs: `secret` in
+/// `postgresql://user:secret@host/db`.
+fn url_passwords(line: &str) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    for (separator, _) in line.match_indices("://") {
+        if !line[..separator].ends_with(|c: char| c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let start = separator + 3;
+        let rest = &line[start..];
+        let end = rest
+            .find(|c: char| {
+                c.is_whitespace() || matches!(c, '/' | '?' | '#' | '"' | '\'' | '`' | '<' | '>' | '\\' | ')' | ']')
+            })
+            .unwrap_or(rest.len());
+        let authority = &rest[..end];
+        let Some(at) = authority.rfind('@') else {
+            continue;
+        };
+        let Some((user, password)) = authority[..at].split_once(':') else {
+            continue;
+        };
+        let host = &authority[at + 1..];
+        let host = match host.find(']') {
+            Some(close) if host.starts_with('[') => &host[..=close],
+            _ => host.split(':').next().unwrap_or(host),
+        };
+        if password == user
+            || LOCAL_HOSTS.contains(&host.to_ascii_lowercase().as_str())
+            || FILLER_PASSWORDS.contains(&password.to_ascii_lowercase().as_str())
+            || is_reference(password)
+            || placeholder(password)
+            || !password_like(password)
+        {
+            continue;
+        }
+        let begin = start + user.len() + 1;
+        found.push((begin, begin + password.len()));
+    }
+    found
+}
+
+/// The variable for the password in the URL under `key`: `DATABASE_PASSWORD` for
+/// `DATABASE_URL`. `None` when the key isn't written like a variable's name.
+fn password_variable(key: &str) -> Option<String> {
+    if env_name(key, "") != key {
+        return None;
+    }
+    ["_URL", "_URI", "_DSN"]
+        .iter()
+        .find_map(|suffix| key.strip_suffix(suffix))
+        .map(|stem| format!("{stem}_PASSWORD"))
+}
+
 fn column(line: &str, offset: usize) -> usize {
     line[..offset].chars().count() + 1
 }
@@ -447,6 +517,8 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
         let number = index + 1;
         let pairs = pairs(line);
         let mut found = false;
+        // The hits in this line start here.
+        let first = hits.len();
 
         let mut spans: Vec<(usize, usize, &Detector)> = Vec::new();
         for detector in DETECTORS {
@@ -510,6 +582,33 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 key: None,
                 env: "PRIVATE_KEY".to_string(),
                 replaceable: false,
+            });
+            found = true;
+        }
+
+        for (start, end) in url_passwords(line) {
+            if hits[first..].iter().any(|hit| start < hit.end && hit.start < end) {
+                continue;
+            }
+            let key = pairs
+                .iter()
+                .find(|pair| pair.start <= start && end <= pair.end)
+                .map(|pair| pair.key.to_string());
+            hits.push(Hit {
+                line: number,
+                start,
+                end,
+                column: column(line, start),
+                rule: "inline-credential",
+                kind: "password in a URL".to_string(),
+                env: key
+                    .as_deref()
+                    .and_then(password_variable)
+                    .unwrap_or_else(|| "DB_PASSWORD".to_string()),
+                replaceable: key
+                    .as_deref()
+                    .is_some_and(|key| !COMMAND_LINE_KEYS.contains(&key.to_ascii_lowercase().as_str())),
+                key,
             });
             found = true;
         }
@@ -964,6 +1063,61 @@ mod tests {
     fn instruction_files_get_only_the_well_known_formats() {
         let text = "Set the token with \"token\": \"Abc12345Def\"\n";
         assert!(scan_text(text, false).is_empty());
+    }
+
+    #[test]
+    fn finds_a_password_in_a_url_wherever_it_is() {
+        for (line, config) in [
+            (
+                "\"args\": [\"-y\", \"@modelcontextprotocol/server-postgres\", \"postgresql://admin:Pr0dDbPass2024@db.internal/app\"]",
+                true,
+            ),
+            ("\"DATABASE_URL\": \"mysql://root:Pr0dDbPass2024@db/app\"", true),
+            (
+                "Connect with mongodb+srv://app:Pr0dDbPass2024@cluster0.example.net/db",
+                false,
+            ),
+        ] {
+            let hits = scan_text(line, config);
+            assert_eq!(hits.len(), 1, "{line}");
+            assert_eq!(&line[hits[0].start..hits[0].end], "Pr0dDbPass2024", "{line}");
+            assert_eq!(hits[0].rule, "inline-credential");
+        }
+    }
+
+    #[test]
+    fn a_password_in_a_variables_url_is_replaced_by_a_password_variable() {
+        let hits = scan_text("\"DATABASE_URL\": \"mysql://root:Pr0dDbPass2024@db/app\"", true);
+        assert_eq!(hits[0].env, "DATABASE_PASSWORD");
+        assert!(hits[0].replaceable);
+
+        let hits = scan_text("\"args\": [\"postgresql://admin:Pr0dDbPass2024@db/app\"]", true);
+        assert!(!hits[0].replaceable);
+    }
+
+    #[test]
+    fn leaves_urls_without_a_real_password_alone() {
+        for url in [
+            "postgresql://admin:${DB_PASSWORD}@db/app",
+            "postgresql://admin:$DB_PASSWORD@db/app",
+            "postgresql://admin:{env:DB_PASSWORD}@db/app",
+            "postgresql://postgres:Dev12345@localhost:5432/dev",
+            "postgresql://postgres:Dev12345@127.0.0.1/dev",
+            "postgresql://user:password@db.example.com/app",
+            "postgresql://username:<password>@host/db",
+            "postgresql://user:your-password@host/db",
+            "postgresql://app2024:app2024@db/app",
+            "redis://cache.internal:6379",
+            "https://github.com/org/repo",
+            "ssh://git@github.com/org/repo.git",
+            "git@github.com:org/repo.git",
+        ] {
+            assert!(scan_text(url, false).is_empty(), "{url}");
+            assert!(
+                scan_text(&format!("\"DATABASE_URL\": \"{url}\""), true).is_empty(),
+                "{url}"
+            );
+        }
     }
 
     #[test]
