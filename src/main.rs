@@ -20,7 +20,7 @@ use gglint::harness::{
 };
 use gglint::hook::{self, Outcome, TOOLS, Tool};
 use gglint::report::{self, Diagnostic, Paint, exit_code};
-use gglint::secrets::{Scope, check_secrets, fix_secrets};
+use gglint::secrets::{Scope, apply_fixes, scan_files};
 
 const USAGE: &str = "\
 Keep the MCP servers of every coding agent in a repository in sync.
@@ -81,7 +81,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("mcp") => mcp(&args[1..]),
-        Some("secrets") => secrets(&args[1..]),
+        Some("secrets") => scan_command(&args[1..]),
         Some("hook") => hook_command(&args[1..]),
         Some("--version" | "-V") => {
             println!("gglint {}", env!("CARGO_PKG_VERSION"));
@@ -320,7 +320,7 @@ fn mcp(args: &[String]) -> ExitCode {
 }
 
 /// `gglint secrets`: finds secrets written out in the agents' config and instruction files.
-fn secrets(args: &[String]) -> ExitCode {
+fn scan_command(args: &[String]) -> ExitCode {
     let mut fix = false;
     let mut staged = false;
     let mut output = Output::Table;
@@ -378,7 +378,7 @@ fn secrets(args: &[String]) -> ExitCode {
     };
 
     let start = Instant::now();
-    let mut check = match check_secrets(root, &scope) {
+    let mut check = match scan_files(root, &scope) {
         Ok(check) => check,
         Err(error) => {
             eprintln!("error: {error}");
@@ -386,7 +386,7 @@ fn secrets(args: &[String]) -> ExitCode {
         }
     };
     if fix && !check.fixes.is_empty() {
-        match fix_secrets(&check) {
+        match apply_fixes(&check) {
             Ok(changed) => {
                 let count = changed.iter().map(|(_, count)| count).sum::<usize>();
                 println!("Replaced {count} secret(s) with references to environment variables:");
@@ -402,7 +402,7 @@ fn secrets(args: &[String]) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
-        check = match check_secrets(root, &scope) {
+        check = match scan_files(root, &scope) {
             Ok(check) => check,
             Err(error) => {
                 eprintln!("error: {error}");

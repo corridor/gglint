@@ -205,3 +205,58 @@ fn a_secret_in_a_gitignored_file_says_so_and_codex_gets_its_own_advice() {
         "{table}"
     );
 }
+
+/// Text with the mix of a credential's characters, `length` long, that is nothing else.
+fn filler(length: usize) -> String {
+    let alphabet = b"aB3dE6gH9jK2mN5pQ8sT1vW4yZ7";
+    (0..length).map(|i| alphabet[i % alphabet.len()] as char).collect()
+}
+
+#[test]
+fn no_planted_value_reaches_any_output_in_any_format_or_after_fix() {
+    let planted = [
+        format!("ghp_{}", filler(36)),
+        format!("sk-ant-{}", filler(40)),
+        format!("AKIA{}", "ABCDEFGH23456789"),
+        format!("xoxb-{}", filler(24)),
+        "Zx9Qw3Er7Ty1Uo5P".to_string(),
+        format!("sk-{}", filler(40)),
+    ];
+    let dir = TempDir::new();
+    dir.write(
+        ".cursor/mcp.json",
+        format!(
+            "{{\n  \"mcpServers\": {{\n    \"one\": {{\n      \"url\": \"https://x\",\n      \"env\": {{\n        \"GITHUB_TOKEN\": \"{}\",\n        \"ANTHROPIC_API_KEY\": \"{}\",\n        \"AWS_ACCESS_KEY_ID\": \"{}\",\n        \"SLACK_TOKEN\": \"{}\",\n        \"password\": \"{}\"\n      }}\n    }}\n  }}\n}}\n",
+            planted[0], planted[1], planted[2], planted[3], planted[4]
+        ),
+    );
+    dir.write(
+        "CLAUDE.md",
+        format!("Never commit {} or\n-----BEGIN PRIVATE KEY-----\n", planted[5]),
+    );
+
+    let mut runs: Vec<Vec<&str>> = ["table", "lines", "github", "sarif", "markdown"]
+        .iter()
+        .map(|format| vec!["secrets", "--format", format])
+        .collect();
+    runs.push(vec!["secrets", "--fix"]);
+    runs.push(vec!["secrets", "--fix", "--format", "github"]);
+    for args in runs {
+        let mut command: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsStr::new).collect();
+        command.push(dir.path().as_os_str());
+        let output = gglint(&command);
+        let printed = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!printed.is_empty(), "{args:?} printed nothing");
+        for value in &planted {
+            assert!(!printed.contains(value), "{args:?} printed a planted value");
+            assert!(
+                !printed.contains(&value[value.len() - 10..]),
+                "{args:?} printed the end of a planted value"
+            );
+        }
+    }
+}
