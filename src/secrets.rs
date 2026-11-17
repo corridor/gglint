@@ -380,7 +380,7 @@ fn looks_like_path(value: &str) -> bool {
 
 /// Whether `value` has a digit or a symbol other than the `-`, `_` and `.` that join words.
 /// Commands and the prose around them are full of words and names (`Ownership`,
-/// `publicAccessToken`, `llm-excel`); a secret almost always has one.
+/// `publicAccessToken`, `app-reader`); a secret almost always has one.
 fn beyond_words(value: &str) -> bool {
     value
         .chars()
@@ -1435,7 +1435,7 @@ mod tests {
             "### 7. Authorization: Ownership, Admin, and Moderation",
             "accessToken: publicAccessToken,",
             "the type is `Partial<{email: string, password: string}>`",
-            "\"Bash(PGPASSWORD=llm-excel psql -h localhost -U llm-excel)\"",
+            "\"Bash(PGPASSWORD=app-reader psql -h localhost -U app-reader)\"",
         ] {
             assert!(scan_text(line, false).is_empty(), "{line}");
             assert!(scan_text(line, true).is_empty(), "{line}");
