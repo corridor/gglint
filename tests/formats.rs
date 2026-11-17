@@ -40,16 +40,16 @@ fn drifted() -> TempDir {
 fn github_format_annotates_the_file_and_line_without_the_secret() {
     let dir = drifted();
 
-    let secrets = gglint(&["secrets".as_ref(), "--format=github".as_ref(), dir.path().as_os_str()]);
+    let scan = gglint(&["secrets".as_ref(), "--format=github".as_ref(), dir.path().as_os_str()]);
     let mcp = gglint(&["mcp".as_ref(), "--format=github".as_ref(), dir.path().as_os_str()]);
 
-    assert_eq!(secrets.status.code(), Some(1));
-    let secrets = stdout(&secrets);
+    assert_eq!(scan.status.code(), Some(1));
+    let annotations = stdout(&scan);
     assert!(
-        secrets.starts_with("::error file=.cursor/mcp.json,line=5,col=45,title=gglint inline-secret::"),
-        "{secrets}"
+        annotations.starts_with("::error file=.cursor/mcp.json,line=5,col=45,title=gglint inline-secret::"),
+        "{annotations}"
     );
-    assert!(!secrets.contains(&token()));
+    assert!(!annotations.contains(&token()));
     assert!(
         stdout(&mcp).contains("title=gglint missing-server::"),
         "{}",

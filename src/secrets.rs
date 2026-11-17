@@ -11,7 +11,7 @@
 //!
 //! Nothing here prints, stores or sends a secret's value: findings carry the kind, the key
 //! it's under and where it is. Where the agent can read a value from the environment,
-//! `fix_secrets` replaces the secret with a reference to a variable, such as `${env:GITHUB_TOKEN}`.
+//! `apply_fixes` replaces the secret with a reference to a variable, such as `${env:GITHUB_TOKEN}`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -58,7 +58,7 @@ pub enum Scope {
     Files(Vec<PathBuf>),
 }
 
-/// A secret that `fix_secrets` can replace with a reference to an environment variable.
+/// A secret that `apply_fixes` can replace with a reference to an environment variable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingFix {
     pub path: PathBuf,
@@ -72,7 +72,7 @@ pub struct PendingFix {
 }
 
 #[derive(Debug, Default)]
-pub struct SecretsCheck {
+pub struct ScanResult {
     pub files: usize,
     pub diagnostics: Vec<Diagnostic>,
     pub fixes: Vec<PendingFix>,
@@ -601,7 +601,7 @@ fn staged_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
 }
 
 /// Scans the files in `scope` under `root`.
-pub fn check_secrets(root: &Path, scope: &Scope) -> Result<SecretsCheck, String> {
+pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
     let files: Vec<(PathBuf, PathBuf)> = match scope {
         Scope::Known => known_files(root)
             .into_iter()
@@ -624,7 +624,7 @@ pub fn check_secrets(root: &Path, scope: &Scope) -> Result<SecretsCheck, String>
             .collect(),
     };
 
-    let mut check = SecretsCheck::default();
+    let mut check = ScanResult::default();
     for (path, relative_path) in files {
         let Ok(metadata) = std::fs::metadata(&path) else {
             continue;
@@ -694,7 +694,7 @@ pub fn check_secrets(root: &Path, scope: &Scope) -> Result<SecretsCheck, String>
 
 /// Replaces each secret `check` can with a reference to an environment variable, and returns
 /// the files changed with how many secrets each had.
-pub fn fix_secrets(check: &SecretsCheck) -> Result<Vec<(PathBuf, usize)>, String> {
+pub fn apply_fixes(check: &ScanResult) -> Result<Vec<(PathBuf, usize)>, String> {
     let mut changed = Vec::new();
     let paths: BTreeSet<&PathBuf> = check.fixes.iter().map(|fix| &fix.path).collect();
     for path in paths {
@@ -824,9 +824,9 @@ mod tests {
         let file = dir.join(".cursor/mcp.json");
         std::fs::write(&file, format!("{{\"TOKEN_A\": \"{a}\", \"TOKEN_B\": \"{b}\"}}\n")).unwrap();
 
-        let check = check_secrets(&dir, &Scope::Known).unwrap();
+        let check = scan_files(&dir, &Scope::Known).unwrap();
         assert_eq!(check.diagnostics.len(), 2);
-        let changed = fix_secrets(&check).unwrap();
+        let changed = apply_fixes(&check).unwrap();
         assert_eq!(changed.len(), 1);
 
         let fixed = std::fs::read_to_string(&file).unwrap();
@@ -834,7 +834,7 @@ mod tests {
             fixed,
             "{\"TOKEN_A\": \"${env:TOKEN_A}\", \"TOKEN_B\": \"${env:TOKEN_B}\"}\n"
         );
-        assert!(check_secrets(&dir, &Scope::Known).unwrap().diagnostics.is_empty());
+        assert!(scan_files(&dir, &Scope::Known).unwrap().diagnostics.is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

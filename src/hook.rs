@@ -87,7 +87,7 @@ fn has_lint_staged(root: &Path) -> bool {
 
 /// The lines for `tool`'s own configuration.
 fn snippet(tool: Tool, with_mcp: bool) -> (&'static str, String) {
-    let secrets = command("secrets --staged");
+    let staged_scan = command("secrets --staged");
     let mcp = command("mcp --format lines");
     match tool {
         Tool::PreCommit => (
@@ -101,7 +101,7 @@ fn snippet(tool: Tool, with_mcp: bool) -> (&'static str, String) {
         Tool::Lefthook => (
             "lefthook.yml",
             format!(
-                "pre-commit:\n  commands:\n    gglint-secrets:\n      run: {secrets}\n{}",
+                "pre-commit:\n  commands:\n    gglint-secrets:\n      run: {staged_scan}\n{}",
                 if with_mcp {
                     format!("    gglint-mcp:\n      run: {mcp}\n")
                 } else {
