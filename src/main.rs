@@ -352,8 +352,11 @@ fn scan_command(args: &[String]) -> ExitCode {
                     // A directory is the repository's root; anything else is a file to check.
                     if Path::new(other).is_dir() {
                         root = Some(other);
-                    } else {
+                    } else if Path::new(other).exists() {
                         files.push(other.into());
+                    } else {
+                        eprintln!("error: {other} doesn't exist");
+                        return ExitCode::FAILURE;
                     }
                     continue;
                 }

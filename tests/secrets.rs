@@ -99,10 +99,10 @@ fn fix_leaves_a_secret_in_a_file_whose_agent_has_no_reference_syntax() {
 }
 
 #[test]
-fn files_named_on_the_command_line_are_checked_as_given() {
+fn agent_files_named_on_the_command_line_are_checked() {
     let dir = TempDir::new();
-    let clean = dir.write("clean.json", "{}\n");
-    let dirty = dir.write("notes.md", format!("key: {}\n", token()));
+    let clean = dir.write(".cursor/mcp.json", "{}\n");
+    let dirty = dir.write("CLAUDE.md", format!("key: {}\n", token()));
 
     let ok = gglint(&["secrets".as_ref(), clean.as_os_str()]);
     let bad = gglint(&[
@@ -114,7 +114,50 @@ fn files_named_on_the_command_line_are_checked_as_given() {
 
     assert!(ok.status.success());
     assert_eq!(bad.status.code(), Some(1));
-    assert!(String::from_utf8(bad.stdout).unwrap().contains("notes.md:1:"));
+    assert!(String::from_utf8(bad.stdout).unwrap().contains("CLAUDE.md:1:"));
+}
+
+#[test]
+fn other_files_named_on_the_command_line_are_skipped_as_lint_staged_passes_them_all() {
+    let dir = TempDir::new();
+    let fixture = dir.write("tests/fixtures/login.json", "{\"password\": \"Test1234!\"}\n");
+    let notes = dir.write("notes.md", format!("key: {}\n", token()));
+
+    let output = gglint(&[
+        "secrets".as_ref(),
+        "--format".as_ref(),
+        "lines".as_ref(),
+        fixture.as_os_str(),
+        notes.as_os_str(),
+    ]);
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "");
+}
+
+#[test]
+fn an_agent_file_named_by_its_full_path_gets_its_agents_fix() {
+    let dir = TempDir::new();
+    let file = dir.write(".cursor/mcp.json", cursor_config(&token()));
+
+    let output = gglint(&["secrets".as_ref(), "--fix".as_ref(), file.as_os_str()]);
+
+    assert!(output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        cursor_config("${env:GITHUB_TOKEN}")
+    );
+}
+
+#[test]
+fn a_path_that_doesnt_exist_is_an_error_not_a_pass() {
+    let dir = TempDir::new();
+    let missing = dir.path().join("no-such-repo");
+
+    let output = gglint(&["secrets".as_ref(), missing.as_os_str()]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("no-such-repo"));
 }
 
 #[test]
