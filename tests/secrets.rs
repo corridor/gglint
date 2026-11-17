@@ -468,3 +468,43 @@ fn no_planted_value_reaches_any_output_in_any_format_or_after_fix() {
         }
     }
 }
+
+/// `major.minor.patch` as numbers, to compare versions.
+fn version(text: &str) -> (u32, u32, u32) {
+    let mut parts = text.split('.').map(|part| part.parse::<u32>().unwrap());
+    (parts.next().unwrap(), parts.next().unwrap(), parts.next().unwrap())
+}
+
+#[test]
+fn the_hooks_and_the_action_pin_one_release_no_older_than_this_one() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hooks = std::fs::read_to_string(root.join(".pre-commit-hooks.yaml")).unwrap();
+    let action = std::fs::read_to_string(root.join("action.yml")).unwrap();
+
+    // Without a version, uvx can run an older gglint it has cached, without `secrets`.
+    let entries: Vec<&str> = hooks
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("entry: "))
+        .collect();
+    let mut pins: Vec<&str> = entries
+        .iter()
+        .map(|entry| {
+            let pinned = entry.strip_prefix("uvx gglint@");
+            pinned
+                .unwrap_or_else(|| panic!("not pinned: {entry}"))
+                .split(' ')
+                .next()
+                .unwrap()
+        })
+        .collect();
+    let version_input = action.split("  version:").nth(1).unwrap();
+    let action_pin = version_input
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("default: "))
+        .unwrap();
+    pins.push(action_pin.trim_matches('"'));
+
+    assert_eq!(entries.len(), 2);
+    assert!(pins.iter().all(|pin| *pin == pins[0]), "{pins:?}");
+    assert!(version(pins[0]) >= version(env!("CARGO_PKG_VERSION")), "{pins:?}");
+}

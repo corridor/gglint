@@ -6,12 +6,13 @@
 #       hooks:
 #         - id: gglint-secrets
 #
-# They run `uvx gglint`, so uv has to be installed.
+# They run `uvx gglint@VERSION`, so uv has to be installed. Each release pins its own version
+# here and in action.yml; a test checks that they match.
 
 - id: gglint-secrets
   name: gglint secrets
   description: Find secrets written out in the config and instruction files of coding agents
-  entry: uvx gglint secrets
+  entry: uvx gglint@0.4.0 secrets
   language: system
   pass_filenames: true
   files: '^(\.mcp\.json|opencode\.jsonc?|(CLAUDE|AGENTS|GEMINI|QWEN)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|instructions/.*)|\.(claude|codex|cursor|gemini|qwen|qoder|factory|junie|kimi-code|kiro|trae|agents)/.*)$'
@@ -19,7 +20,7 @@
 - id: gglint-mcp
   name: gglint mcp
   description: Check that every coding agent in the repository gets the same MCP servers
-  entry: uvx gglint mcp --format lines
+  entry: uvx gglint@0.4.0 mcp --format lines
   language: system
   pass_filenames: false
   files: '^(\.mcp\.json|opencode\.jsonc?|\.github/mcp\.json|\.(codex|cursor|gemini|qwen|qoder|factory|junie|kimi-code|kiro|trae|agents)/.*)$'
