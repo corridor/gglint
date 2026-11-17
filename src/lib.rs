@@ -6,3 +6,4 @@
 
 pub mod harness;
 pub mod report;
+pub mod secrets;

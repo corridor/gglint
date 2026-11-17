@@ -4,6 +4,8 @@
 //! gglint mcp [--fix] [--source AGENT] [--format F] [PATH]
 //!                               compare each agent's MCP servers, and fix them
 //! gglint mcp --servers [PATH]   list every server
+//! gglint secrets [--fix] [--staged] [--format F] [PATH | FILE...]
+//!                               find secrets written out in agent config files
 //! ```
 
 use std::path::Path;
@@ -14,7 +16,8 @@ use gglint::harness::{
     Cell, Finding, FixReport, HARNESSES, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport,
     check_mcp_from, fix_mcp, read_mcp,
 };
-use gglint::report::{Diagnostic, Paint};
+use gglint::report::{Diagnostic, Paint, exit_code};
+use gglint::secrets::{Scope, check_secrets, fix_secrets};
 
 const USAGE: &str = "\
 Keep the MCP servers of every coding agent in a repository in sync.
@@ -25,6 +28,10 @@ Usage:
   gglint mcp --fix --source codex   take each server's setup from Codex where it has one
   gglint mcp --servers [PATH]       list every server, file by file
   gglint mcp --format lines [PATH]  one line per problem, for scripts and CI
+  gglint secrets [PATH]             find secrets written out in agent config files
+  gglint secrets --fix [PATH]       replace each with a reference to an environment variable
+  gglint secrets --staged           check only the files staged in git, for a pre-commit hook
+  gglint secrets FILE...            check these files, as a pre-commit hook passes them
 
 PATH is the repository's root, the current directory by default. `--fix` adds missing
 servers, creates the config file of an agent that has its own directory, and copies the
@@ -64,6 +71,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("mcp") => mcp(&args[1..]),
+        Some("secrets") => secrets(&args[1..]),
         Some("--version" | "-V") => {
             println!("gglint {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -252,6 +260,148 @@ fn mcp(args: &[String]) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+/// `gglint secrets`: finds secrets written out in the agents' config and instruction files.
+fn secrets(args: &[String]) -> ExitCode {
+    let mut fix = false;
+    let mut staged = false;
+    let mut lines = false;
+    let mut root: Option<&str> = None;
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        let format = match arg.as_str() {
+            "--fix" => {
+                fix = true;
+                continue;
+            }
+            "--staged" => {
+                staged = true;
+                continue;
+            }
+            "--help" | "-h" => {
+                print!("{}", usage());
+                return ExitCode::SUCCESS;
+            }
+            "--format" => args.next().map(String::as_str),
+            other => match other.strip_prefix("--format=") {
+                Some(format) => Some(format),
+                None if other.starts_with('-') => {
+                    eprintln!("error: unknown option {other:?}; see `gglint --help`");
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    // A directory is the repository's root; anything else is a file to check.
+                    if Path::new(other).is_dir() {
+                        root = Some(other);
+                    } else {
+                        files.push(other.into());
+                    }
+                    continue;
+                }
+            },
+        };
+        lines = match format {
+            Some("table") => false,
+            Some("lines") => true,
+            other => {
+                eprintln!(
+                    "error: unknown format {:?}; use `table` or `lines`",
+                    other.unwrap_or("")
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+    }
+    if staged && !files.is_empty() {
+        eprintln!("error: `--staged` and a list of files both say what to check; use one");
+        return ExitCode::FAILURE;
+    }
+    let root = Path::new(root.unwrap_or("."));
+    let scope = if staged {
+        Scope::Staged
+    } else if files.is_empty() {
+        Scope::Known
+    } else {
+        Scope::Files(files)
+    };
+
+    let start = Instant::now();
+    let mut check = match check_secrets(root, &scope) {
+        Ok(check) => check,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if fix && !check.fixes.is_empty() {
+        match fix_secrets(&check) {
+            Ok(changed) => {
+                let count = changed.iter().map(|(_, count)| count).sum::<usize>();
+                println!("Replaced {count} secret(s) with references to environment variables:");
+                for (path, count) in &changed {
+                    println!("  {}  ({count})", path.display());
+                }
+                println!(
+                    "\nSet those variables in your environment. Anything already committed stays in git history: rotate it.\n"
+                );
+            }
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+        check = match check_secrets(root, &scope) {
+            Ok(check) => check,
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    }
+    let elapsed = start.elapsed();
+
+    if lines {
+        for diagnostic in &check.diagnostics {
+            print!("{}", diagnostic.line());
+        }
+    } else if !check.diagnostics.is_empty() {
+        let paint = Paint::new();
+        let mut out = String::new();
+        let mut file: Option<&Path> = None;
+        for diagnostic in &check.diagnostics {
+            if file != Some(diagnostic.relative_path.as_path()) {
+                file = Some(diagnostic.relative_path.as_path());
+                out.push_str(&format!(
+                    "\n{}\n",
+                    paint.bold(&diagnostic.relative_path.display().to_string())
+                ));
+            }
+            out.push_str(&format!(
+                "  {} {:>5}  {}\n{}\n",
+                paint.red("✗"),
+                diagnostic.location.to_string(),
+                diagnostic.message,
+                paint.dim(&format!("            {}", diagnostic.fix.as_deref().unwrap_or("")))
+            ));
+        }
+        print!("{out}");
+    }
+    let problems = check.diagnostics.len();
+    let problems_text = match problems {
+        0 => "no secrets".to_string(),
+        count => format!("{count} secret(s)"),
+    };
+    eprintln!(
+        "\nChecked {} file(s): {problems_text}; {:.2} ms",
+        check.files,
+        elapsed.as_secs_f64() * 1000.0
+    );
+    if problems > 0 && !fix && !check.fixes.is_empty() {
+        eprintln!("`gglint secrets --fix` can replace {} of them.", check.fixes.len());
+    }
+    exit_code(&check.diagnostics)
 }
 
 /// The agent `--source` names, or the exit code after saying why it isn't one.

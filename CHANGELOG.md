@@ -8,6 +8,10 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ### Added
 
+- `gglint secrets` finds credentials written out in agent config files, settings and
+  instruction files, and with `--fix` replaces them with a reference to an environment
+  variable written in the agent's own syntax. `--staged` checks only what is staged in git,
+  and file arguments check only those files, for pre-commit hooks.
 - A shared report layer (`report::Diagnostic`) that every check prints through.
 
 
