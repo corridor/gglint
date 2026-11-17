@@ -1,0 +1,68 @@
+name: gglint
+description: >-
+  Check that every coding agent in the repository gets the same MCP servers, and that no
+  secret is written out in their config files. Reports only: it never changes a file.
+author: corridor
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  command:
+    description: "What to check: `secrets`, `mcp` or `all`."
+    default: all
+  path:
+    description: The repository's root, relative to the workspace.
+    default: "."
+  version:
+    description: The version of gglint to run, from PyPI.
+    default: "0.4.0"
+  fail-on-problems:
+    description: Fail the job when gglint finds a problem.
+    default: "true"
+  comment:
+    description: >-
+      On a pull request, post the findings as one comment, updated on each push. Needs
+      `pull-requests: write`.
+    default: "true"
+  sarif:
+    description: >-
+      Upload the findings to Code scanning, under Security. Needs `security-events: write`,
+      and Code scanning on private repositories.
+    default: "false"
+  token:
+    description: The token used to post the comment.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v7
+
+    - id: gglint
+      shell: bash
+      run: ${{ github.action_path }}/scripts/action.sh
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FAIL_ON_PROBLEMS: ${{ inputs.fail-on-problems }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+
+    - if: ${{ always() && inputs.sarif == 'true' && steps.gglint.outputs.sarif-directory != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.gglint.outputs.sarif-directory }}
+
+    - if: ${{ always() && inputs.comment == 'true' && github.event_name == 'pull_request' && steps.gglint.outputs.comment-file != '' }}
+      shell: bash
+      # A pull request from a fork has a read-only token, so posting can fail; the
+      # annotations and the job's status still report the findings.
+      continue-on-error: true
+      run: ${{ github.action_path }}/scripts/comment.sh
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPOSITORY: ${{ github.repository }}
+        PULL_REQUEST: ${{ github.event.pull_request.number }}
+        COMMENT_FILE: ${{ steps.gglint.outputs.comment-file }}

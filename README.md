@@ -33,6 +33,7 @@ in this table, on hover:
 | ------- | ------------ |
 | [`gglint mcp`](#usage) | Compares the MCP servers of every coding agent, and fixes the differences. |
 | [`gglint secrets`](#finding-secrets) | Finds credentials written out in agent config and instruction files, and replaces them with environment variables. |
+| [GitHub Action](#github-action) | Runs both on every pull request: annotations on the diff, a comment, and Code scanning. It only reports. |
 | [`gglint hook`](#before-every-commit) | Runs the secrets check before every commit, through husky, git, pre-commit, lefthook or lint-staged. |
 
 - **One view of every agent.** A table shows which agent gets which server, and how each
@@ -353,26 +354,58 @@ $ uvx gglint mcp --servers
 
 The summary line still goes to standard error, so standard output holds only the report.
 
-## Continuous integration
+## GitHub Action
 
-Fail a pull request when the agents' MCP servers drift apart:
+The gglint action checks every pull request, and only reports: it never changes a file.
 
 ```yaml
-# .github/workflows/mcp.yml
-name: MCP servers
+# .github/workflows/gglint.yml
+name: gglint
 on: [pull_request]
+
+permissions:
+  contents: read
+  pull-requests: write   # for the comment
 
 jobs:
   gglint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.3.0 mcp --format lines
-      - run: uvx gglint@0.4.0 secrets --format lines
+      - uses: corridor/gglint@v1
 ```
 
-`secrets` is in gglint 0.4.0 and later.
+It does three things with what gglint finds:
+
+- **Annotations.** Each problem appears on its line in the pull request's *Files changed*.
+- **One comment.** The problems, and a table of which agent gets which MCP server, in a single
+  comment that's updated on every push, and left alone when a pull request has no problems.
+  Posting needs `pull-requests: write`; a pull request from a fork can't post, and still gets
+  the annotations and the failing check.
+- **Code scanning (optional).** With `sarif: true`, the findings also go to *Security*, *Code
+  scanning*, where they can be tracked and dismissed. That needs `security-events: write`, and
+  Code scanning enabled on a private repository.
+
+| Input              | Default   | Meaning                                                           |
+| ------------------ | --------- | ----------------------------------------------------------------- |
+| `command`          | `all`     | `secrets`, `mcp` or `all`.                                        |
+| `path`             | `.`       | The repository's root, for a repository checked out elsewhere.    |
+| `version`          | the one `@v1` was released with | The gglint version to run, from PyPI. Pin it for repeatable runs. |
+| `fail-on-problems` | `true`    | Set to `false` to report without failing the check.               |
+| `comment`          | `true`    | Post the pull request comment.                                    |
+| `sarif`            | `false`   | Upload to Code scanning.                                          |
+
+A repository with no MCP config files has nothing to compare, so `mcp` is skipped with a
+notice. The action runs gglint with [uv](https://docs.astral.sh/uv/) and doesn't start a
+server or fetch anything else.
+
+To run gglint without the action:
+
+```yaml
+      - uses: astral-sh/setup-uv@v7
+      - run: uvx gglint@0.4.0 mcp --format github
+      - run: uvx gglint@0.4.0 secrets --format github
+```
 
 ## Security
 
