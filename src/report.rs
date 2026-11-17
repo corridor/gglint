@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use crate::harness::{Finding, Location};
 
-/// How serious a diagnostic is. Both make `gglint` exit with status 1.
+/// How serious a diagnostic is. Only an error makes `gglint` exit with status 1: a warning
+/// is something to look at that can't leak yet, such as a secret in a file git ignores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     Warning,
@@ -54,9 +55,14 @@ impl From<&Finding> for Diagnostic {
 
 impl Diagnostic {
     /// The `--format lines` form: where it is, the rule, a description, then the other places.
+    /// A warning says so before its description.
     pub fn line(&self) -> String {
+        let level = match self.severity {
+            Severity::Error => "",
+            Severity::Warning => "warning: ",
+        };
         let mut out = format!(
-            "{}:{}  {:<16} {}\n",
+            "{}:{}  {:<16} {level}{}\n",
             self.path.display(),
             self.location,
             self.rule,
@@ -158,6 +164,10 @@ const RULES: &[(&str, &str)] = &[
         "inline-credential",
         "A value under a credential-like name is written out in a file",
     ),
+    (
+        "local-file",
+        "An agent file meant for one person's machine is in git, or not ignored by it",
+    ),
 ];
 
 /// A SARIF 2.1.0 log, which GitHub shows under Security, Code scanning. `category` tells
@@ -215,8 +225,16 @@ pub fn markdown(title: &str, diagnostics: &[Diagnostic]) -> String {
         return format!("### ✅ {title}: no problems\n");
     }
     let count = diagnostics.len();
+    let icon = if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
+        "❌"
+    } else {
+        "⚠️"
+    };
     let mut out = format!(
-        "### ❌ {title}: {count} problem{}\n\n| Where | Rule | Problem |\n| --- | --- | --- |\n",
+        "### {icon} {title}: {count} problem{}\n\n| Where | Rule | Problem |\n| --- | --- | --- |\n",
         if count == 1 { "" } else { "s" }
     );
     for diagnostic in diagnostics {
@@ -283,12 +301,15 @@ impl Default for Paint {
     }
 }
 
-/// The exit status for a run: 1 when anything was found.
+/// The exit status for a run: 1 when it found an error, 0 for warnings alone.
 pub fn exit_code(diagnostics: &[Diagnostic]) -> std::process::ExitCode {
-    if diagnostics.is_empty() {
-        std::process::ExitCode::SUCCESS
-    } else {
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
         std::process::ExitCode::FAILURE
+    } else {
+        std::process::ExitCode::SUCCESS
     }
 }
 

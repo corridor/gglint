@@ -33,8 +33,20 @@ const EXTRA_FILES: &[&str] = &[
     ".windsurfrules",
     ".clinerules",
     ".claude/settings.json",
-    ".claude/settings.local.json",
     ".github/copilot-instructions.md",
+];
+
+/// Agent files meant for one person's machine and never for git, and what each one is.
+/// Committing one is a problem whatever is in it, so the `local-file` rule doesn't depend on
+/// recognising a secret.
+const LOCAL_FILES: &[(&str, &str)] = &[
+    (
+        ".claude/settings.local.json",
+        "Claude Code's personal settings, where it saves the commands you allow, secrets and all",
+    ),
+    ("CLAUDE.local.md", "Claude Code's personal notes for this project"),
+    (".claude/.credentials.json", "Claude Code's login"),
+    (".codex/auth.json", "Codex's login"),
 ];
 
 /// Directories of the agents' rules, commands and skills, whose files are read too.
@@ -76,6 +88,9 @@ pub struct ScanResult {
     pub files: usize,
     pub diagnostics: Vec<Diagnostic>,
     pub fixes: Vec<PendingFix>,
+    /// Personal agent files that git doesn't ignore, relative to the root, for
+    /// `ignore_local_files` to add to `.gitignore`.
+    pub ignore: Vec<PathBuf>,
 }
 
 /// One secret found in a text.
@@ -555,6 +570,7 @@ fn fixed_files() -> impl Iterator<Item = &'static str> {
         .iter()
         .flat_map(|harness| harness.mcp_files().iter().copied())
         .chain(EXTRA_FILES.iter().copied())
+        .chain(LOCAL_FILES.iter().map(|&(file, _)| file))
 }
 
 /// Whether a file in one of `EXTRA_DIRECTORIES` is a kind gglint reads.
@@ -651,6 +667,56 @@ fn read_on_disk(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
+/// Whether `relative` is in git's index under `root`: committed, or staged to be. `None`
+/// outside a repository, or without git.
+fn in_git_index(root: &Path, relative: &Path) -> Option<bool> {
+    let output = Command::new("git")
+        .args(["ls-files", "-z", "--"])
+        .arg(relative)
+        .current_dir(root)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output.status.success().then_some(!output.stdout.is_empty())
+}
+
+/// The `local-file` finding for a personal agent file: an error once it's in git, a warning
+/// while git doesn't ignore it, and nothing once it's ignored.
+fn check_local_file(root: &Path, path: &Path, relative: &Path, description: &str, check: &mut ScanResult) {
+    let Some(in_index) = in_git_index(root, relative) else {
+        return;
+    };
+    let name = slashed(relative);
+    let (severity, message, fix) = if in_index {
+        (
+            Severity::Error,
+            format!("this file is in git, but it's {description}, meant for one person's machine"),
+            format!(
+                "run `git rm --cached {name}` and add it to .gitignore (and to .dockerignore if you build images from this folder); if it was ever pushed, rotate what's in it"
+            ),
+        )
+    } else if !ignored_by_git(root, relative) {
+        (
+            Severity::Warning,
+            format!("git doesn't ignore this file, so it can be committed by accident; it's {description}"),
+            "add it to .gitignore (and to .dockerignore if you build images from this folder); `gglint secrets --fix` adds it to .gitignore".to_string(),
+        )
+    } else {
+        return;
+    };
+    check.ignore.push(relative.to_path_buf());
+    check.diagnostics.push(Diagnostic {
+        rule: "local-file",
+        severity,
+        path: path.to_path_buf(),
+        relative_path: relative.to_path_buf(),
+        location: Location { line: 1, column: 1 },
+        message,
+        fix: Some(fix),
+        related: Vec::new(),
+    });
+}
+
 /// Scans the files in `scope` under `root`.
 pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
     let files: Vec<(PathBuf, PathBuf)> = match scope {
@@ -674,6 +740,10 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
 
     let mut check = ScanResult::default();
     for (path, relative_path) in files {
+        let local = LOCAL_FILES.iter().find(|&&(file, _)| file == slashed(&relative_path));
+        if let Some(&(_, description)) = local {
+            check_local_file(root, &path, &relative_path, description, &mut check);
+        }
         let text = match scope {
             Scope::Staged => read_staged(root, &relative_path),
             Scope::Known | Scope::Files(_) => read_on_disk(&path),
@@ -722,7 +792,8 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
             }
             check.diagnostics.push(Diagnostic {
                 rule: hit.rule,
-                severity: Severity::Error,
+                // A file git ignores isn't committed, so the secret stays on this machine.
+                severity: if ignored { Severity::Warning } else { Severity::Error },
                 path: path.clone(),
                 relative_path: relative_path.clone(),
                 location: Location {
@@ -736,6 +807,40 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
         }
     }
     Ok(check)
+}
+
+/// Adds each personal agent file in `check.ignore` to the `.gitignore` at `root`, unless it's
+/// there already, and returns the ones added. It doesn't take a file out of git: that's
+/// `git rm --cached`, which the finding names.
+pub fn ignore_local_files(root: &Path, check: &ScanResult) -> Result<Vec<PathBuf>, String> {
+    if check.ignore.is_empty() {
+        return Ok(Vec::new());
+    }
+    let path = root.join(".gitignore");
+    let mut text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("can't read {}: {error}", path.display())),
+    };
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let present: BTreeSet<String> = text.lines().map(|line| line.trim().to_string()).collect();
+    let mut added = Vec::new();
+    for relative in &check.ignore {
+        let line = slashed(relative);
+        if present.contains(&line) || present.contains(&format!("/{line}")) || added.contains(relative) {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push_str(newline);
+        }
+        text.push_str(&line);
+        text.push_str(newline);
+        added.push(relative.clone());
+    }
+    if !added.is_empty() {
+        std::fs::write(&path, text).map_err(|error| format!("can't write {}: {error}", path.display()))?;
+    }
+    Ok(added)
 }
 
 /// Replaces each secret `check` can with a reference to an environment variable, and returns
