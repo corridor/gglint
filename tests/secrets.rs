@@ -135,6 +135,78 @@ fn staged_checks_only_what_is_staged() {
     assert_eq!(staged.status.code(), Some(1));
 }
 
+/// Runs git in `dir`, and fails the test if git does.
+fn git(dir: &TempDir, args: &[&str]) {
+    let status = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+#[test]
+fn staged_checks_the_copy_in_the_commit_not_the_one_on_disk() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    let clean = cursor_config("${env:GITHUB_TOKEN}");
+
+    // Staged with a secret, then fixed on disk only: the commit would still have it.
+    dir.write(".cursor/mcp.json", cursor_config(&token()));
+    git(&dir, &["add", ".cursor/mcp.json"]);
+    dir.write(".cursor/mcp.json", &clean);
+    let staged_secret = gglint(&["secrets".as_ref(), "--staged".as_ref(), dir.path().as_os_str()]);
+
+    // Staged clean, with a secret only on disk: the commit is fine.
+    dir.write(".cursor/mcp.json", &clean);
+    git(&dir, &["add", ".cursor/mcp.json"]);
+    dir.write(".cursor/mcp.json", cursor_config(&token()));
+    let disk_secret = gglint(&["secrets".as_ref(), "--staged".as_ref(), dir.path().as_os_str()]);
+
+    assert_eq!(staged_secret.status.code(), Some(1));
+    assert!(disk_secret.status.success());
+}
+
+#[test]
+fn staged_finds_files_under_a_root_below_the_top_of_the_repository() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+    dir.write("app/.cursor/mcp.json", cursor_config(&token()));
+    git(&dir, &["add", "."]);
+
+    let output = gglint(&[
+        "secrets".as_ref(),
+        "--staged".as_ref(),
+        "--format".as_ref(),
+        "lines".as_ref(),
+        dir.path().join("app").as_os_str(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains(".cursor/mcp.json:5:")
+    );
+}
+
+#[test]
+fn staged_and_fix_cannot_be_combined() {
+    let dir = TempDir::new();
+    git(&dir, &["init", "-q"]);
+
+    let output = gglint(&[
+        "secrets".as_ref(),
+        "--staged".as_ref(),
+        "--fix".as_ref(),
+        dir.path().as_os_str(),
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("git add"));
+}
+
 #[test]
 fn staged_and_a_file_list_cannot_be_combined() {
     let dir = TempDir::new();
