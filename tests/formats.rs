@@ -37,6 +37,28 @@ fn drifted() -> TempDir {
 }
 
 #[test]
+fn github_and_sarif_paths_start_where_gglint_runs_so_a_subfolder_lands_on_its_files() {
+    // The Action runs in the workspace, with its `path` input as the folder to check.
+    let workspace = TempDir::new();
+    let checked = drifted();
+    let sub = workspace.path().join("services/api");
+    std::fs::create_dir_all(sub.parent().unwrap()).unwrap();
+    std::fs::rename(checked.path(), &sub).unwrap();
+
+    for (format, expected) in [
+        ("github", "file=services/api/.cursor/mcp.json,"),
+        ("sarif", "\"uri\":\"services/api/.cursor/mcp.json\""),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_gglint"))
+            .args(["secrets", "--format", format, "services/api"])
+            .current_dir(workspace.path())
+            .output()
+            .unwrap();
+        assert!(stdout(&output).contains(expected), "{format}: {}", stdout(&output));
+    }
+}
+
+#[test]
 fn github_format_annotates_the_file_and_line_without_the_secret() {
     let dir = drifted();
 

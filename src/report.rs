@@ -84,6 +84,29 @@ fn uri(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Where `diagnostic` is, for GitHub: its path from the current directory, which is the
+/// workspace in a GitHub Action, so a check of `services/api` points at
+/// `services/api/.cursor/mcp.json`. The path under the checked folder when the file is
+/// outside the current directory.
+fn shown_path(diagnostic: &Diagnostic) -> String {
+    use std::path::Component;
+    let path: PathBuf = diagnostic
+        .path
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .collect();
+    let current = std::env::current_dir().ok();
+    let from_here = if path.is_relative() {
+        Some(path.as_path())
+    } else {
+        current.as_deref().and_then(|current| path.strip_prefix(current).ok())
+    };
+    match from_here {
+        Some(relative) if !relative.components().any(|part| part == Component::ParentDir) => uri(relative),
+        _ => uri(&diagnostic.relative_path),
+    }
+}
+
 /// A workflow command's message: `%`, carriage returns and newlines escaped.
 fn escape_data(text: &str) -> String {
     text.replace('%', "%25").replace('\r', "%0D").replace('\n', "%0A")
@@ -109,7 +132,7 @@ pub fn github(diagnostics: &[Diagnostic]) -> String {
         }
         out.push_str(&format!(
             "::{level} file={},line={},col={},title={}::{}\n",
-            escape_property(&uri(&diagnostic.relative_path)),
+            escape_property(&shown_path(diagnostic)),
             diagnostic.location.line,
             diagnostic.location.column,
             escape_property(&format!("gglint {}", diagnostic.rule)),
@@ -198,7 +221,7 @@ pub fn sarif(category: &str, diagnostics: &[Diagnostic]) -> String {
                 "{{\"ruleId\":{},\"level\":\"{level}\",\"message\":{{\"text\":{}}},\"locations\":[{{\"physicalLocation\":{{\"artifactLocation\":{{\"uri\":{},\"uriBaseId\":\"%SRCROOT%\"}},\"region\":{{\"startLine\":{},\"startColumn\":{}}}}}}}]}}",
                 json_string(diagnostic.rule),
                 json_string(&message),
-                json_string(&uri(&diagnostic.relative_path)),
+                json_string(&shown_path(diagnostic)),
                 diagnostic.location.line,
                 diagnostic.location.column,
             )
@@ -244,7 +267,7 @@ pub fn markdown(title: &str, diagnostics: &[Diagnostic]) -> String {
         }
         out.push_str(&format!(
             "| `{}:{}` | `{}` | {} |\n",
-            cell(&uri(&diagnostic.relative_path)),
+            cell(&shown_path(diagnostic)),
             diagnostic.location.line,
             diagnostic.rule,
             cell(&problem),
