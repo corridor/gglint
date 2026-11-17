@@ -74,9 +74,9 @@ install. It works on Linux, macOS and Windows.
 ## Usage
 
 ```text
-uvx gglint mcp [--fix] [--source AGENT] [--format table|lines] [PATH]
+uvx gglint mcp [--fix] [--source AGENT] [--format FORMAT] [PATH]
 uvx gglint mcp --servers [PATH]
-uvx gglint secrets [--fix] [--staged] [--format table|lines] [PATH | FILE...]
+uvx gglint secrets [--fix] [--staged] [--format FORMAT] [PATH | FILE...]
 uvx gglint hook [install|print] [--tool NAME] [--with-mcp] [PATH]
 ```
 
@@ -88,7 +88,7 @@ The options below are for `gglint mcp`; [`secrets`](#finding-secrets) and
 | *(none)*            | Report every problem and draw each server in each agent.                                 |
 | `--fix`             | Add missing servers and config files, start each server the same way, then report what's left. |
 | `--source AGENT`    | Take each server's setup from `AGENT` where it has the server. `AGENT` is a name from the `--source` column of [Supported agents](#supported-agents), such as `claude-code` or `gemini-cli`. |
-| `--format lines`    | Print one line per problem instead of the table, for editors and CI.                     |
+| `--format FORMAT`   | `table` (the default), `lines`, `github`, `sarif` or `markdown`. See [Output formats](#output-formats). |
 | `--servers`         | List every configured server, file by file, without comparing them.                      |
 | `PATH`              | The repository's root. Defaults to the current directory.                               |
 
@@ -338,6 +338,20 @@ $ uvx gglint mcp --servers
 ./.cursor/mcp.json:3:5  cursor       playwright  npx -y @playwright/mcp@latest
 ./.cursor/mcp.json:7:5  cursor       linear  https://mcp.linear.app/sse
 ```
+
+### Formats for CI
+
+`--format` takes the same five values for `mcp` and `secrets`:
+
+| Format     | Prints                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------------- |
+| `table`    | The default: each command's own drawing, for reading in a terminal.                            |
+| `lines`    | One line per problem.                                                                          |
+| `github`   | [Workflow commands](https://docs.github.com/actions/reference/workflow-commands-for-github-actions), so GitHub shows each problem as an annotation on its line in a pull request's *Files changed*. |
+| `sarif`    | A [SARIF](https://sarifweb.azurewebsites.net) 2.1.0 log, for GitHub's *Security*, *Code scanning* tab. Each command is its own category. |
+| `markdown` | A section for a pull request comment: the problems as a table, and for `mcp` a table of servers by agent. |
+
+The summary line still goes to standard error, so standard output holds only the report.
 
 ## Continuous integration
 

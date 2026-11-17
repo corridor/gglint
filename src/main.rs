@@ -19,7 +19,7 @@ use gglint::harness::{
     check_mcp_from, fix_mcp, read_mcp,
 };
 use gglint::hook::{self, Outcome, TOOLS, Tool};
-use gglint::report::{Diagnostic, Paint, exit_code};
+use gglint::report::{self, Diagnostic, Paint, exit_code};
 use gglint::secrets::{Scope, check_secrets, fix_secrets};
 
 const USAGE: &str = "\
@@ -39,6 +39,9 @@ Usage:
                                     husky or git; for pre-commit, lefthook and lint-staged it
                                     prints the lines to add. `--tool NAME` picks the tool,
                                     `--with-mcp` adds the MCP check, `hook print` only prints.
+
+`--format` takes table, lines, github (annotations for a pull request's diff), sarif (for
+GitHub's Code scanning) or markdown (a pull request comment), for `mcp` and `secrets`.
 
 PATH is the repository's root, the current directory by default. `--fix` adds missing
 servers, creates the config file of an agent that has its own directory, and copies the
@@ -100,13 +103,63 @@ fn main() -> ExitCode {
     }
 }
 
+/// How a command prints its findings.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Output {
+    /// The command's own drawing, for reading in a terminal.
+    Table,
+    /// One line per problem.
+    Lines,
+    /// GitHub Actions annotations on the lines of a pull request.
+    Github,
+    /// A SARIF log, for GitHub's Code scanning.
+    Sarif,
+    /// A section for a pull request comment.
+    Markdown,
+}
+
+impl Output {
+    fn parse(name: Option<&str>) -> Result<Output, ExitCode> {
+        match name {
+            Some("table") => Ok(Output::Table),
+            Some("lines") => Ok(Output::Lines),
+            Some("github") => Ok(Output::Github),
+            Some("sarif") => Ok(Output::Sarif),
+            Some("markdown") => Ok(Output::Markdown),
+            other => {
+                eprintln!(
+                    "error: unknown format {:?}; use `table`, `lines`, `github`, `sarif` or `markdown`",
+                    other.unwrap_or("")
+                );
+                Err(ExitCode::FAILURE)
+            }
+        }
+    }
+}
+
+/// Prints `diagnostics` in `output`, for every format but the table, which each command draws
+/// itself. `command` names the SARIF run and the Markdown section.
+fn print_report(output: Output, command: &str, diagnostics: &[Diagnostic]) {
+    match output {
+        Output::Table => {}
+        Output::Lines => {
+            for diagnostic in diagnostics {
+                print!("{}", diagnostic.line());
+            }
+        }
+        Output::Github => print!("{}", report::github(diagnostics)),
+        Output::Sarif => print!("{}", report::sarif(command, diagnostics)),
+        Output::Markdown => print!("{}", report::markdown(&format!("gglint {command}"), diagnostics)),
+    }
+}
+
 /// How `gglint mcp` prints what it finds.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum McpView {
     /// A table of servers and agents, then the problems under each server.
     Table,
-    /// One line per problem.
-    Lines,
+    /// The problems in one of the formats for scripts and CI.
+    Report(Output),
     /// One line per server, without comparing them.
     Servers,
 }
@@ -158,16 +211,10 @@ fn mcp(args: &[String]) -> ExitCode {
                 }
             },
         };
-        view = match format {
-            Some("table") => McpView::Table,
-            Some("lines") => McpView::Lines,
-            other => {
-                eprintln!(
-                    "error: unknown format {:?}; use `table` or `lines`",
-                    other.unwrap_or("")
-                );
-                return ExitCode::FAILURE;
-            }
+        view = match Output::parse(format) {
+            Ok(Output::Table) => McpView::Table,
+            Ok(output) => McpView::Report(output),
+            Err(code) => return code,
         };
     }
     if fix && view == McpView::Servers {
@@ -226,9 +273,11 @@ fn mcp(args: &[String]) -> ExitCode {
     let problems = check.findings().count();
     match view {
         McpView::Table if !configs.is_empty() => draw_mcp(root, &check, problems),
-        McpView::Lines => {
-            for finding in check.findings() {
-                print_finding(finding);
+        McpView::Report(output) => {
+            let diagnostics: Vec<Diagnostic> = check.findings().map(Diagnostic::from).collect();
+            print_report(output, "mcp", &diagnostics);
+            if output == Output::Markdown {
+                print!("{}", mcp_matrix_markdown(&check));
             }
         }
         _ => {}
@@ -274,7 +323,7 @@ fn mcp(args: &[String]) -> ExitCode {
 fn secrets(args: &[String]) -> ExitCode {
     let mut fix = false;
     let mut staged = false;
-    let mut lines = false;
+    let mut output = Output::Table;
     let mut root: Option<&str> = None;
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     let mut args = args.iter();
@@ -310,16 +359,9 @@ fn secrets(args: &[String]) -> ExitCode {
                 }
             },
         };
-        lines = match format {
-            Some("table") => false,
-            Some("lines") => true,
-            other => {
-                eprintln!(
-                    "error: unknown format {:?}; use `table` or `lines`",
-                    other.unwrap_or("")
-                );
-                return ExitCode::FAILURE;
-            }
+        output = match Output::parse(format) {
+            Ok(output) => output,
+            Err(code) => return code,
         };
     }
     if staged && !files.is_empty() {
@@ -370,10 +412,8 @@ fn secrets(args: &[String]) -> ExitCode {
     }
     let elapsed = start.elapsed();
 
-    if lines {
-        for diagnostic in &check.diagnostics {
-            print!("{}", diagnostic.line());
-        }
+    if output != Output::Table {
+        print_report(output, "secrets", &check.diagnostics);
     } else if !check.diagnostics.is_empty() {
         let paint = Paint::new();
         let mut out = String::new();
@@ -691,8 +731,35 @@ fn describe(paint: &Paint, finding: &Finding) -> String {
     format!("    {symbol} {}\n      {}\n", finding.detail, paint.dim(&next))
 }
 
-fn print_finding(finding: &Finding) {
-    print!("{}", Diagnostic::from(finding).line());
+/// The servers and the agents that get them, as a Markdown table.
+fn mcp_matrix_markdown(check: &McpCheck) -> String {
+    if check.servers.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n| Server |");
+    for harness in &check.harnesses {
+        out.push_str(&format!(" {} |", harness.display_name()));
+    }
+    out.push_str("\n| --- |");
+    for _ in &check.harnesses {
+        out.push_str(" :---: |");
+    }
+    out.push('\n');
+    for server in &check.servers {
+        out.push_str(&format!("| `{}` |", server.name));
+        for &(_, cell) in &server.cells {
+            let symbol = match cell {
+                Cell::Same => "✅",
+                Cell::Different => "⚠️",
+                Cell::Missing => "❌",
+                Cell::Off => "➖",
+            };
+            out.push_str(&format!(" {symbol} |"));
+        }
+        out.push('\n');
+    }
+    out.push_str("\n✅ set up · ⚠️ set up differently · ❌ missing · ➖ turned off\n");
+    out
 }
 
 fn print_mcp_server(config: &McpConfig, server: &McpServer) {

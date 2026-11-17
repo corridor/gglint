@@ -15,6 +15,9 @@ All notable changes to gglint are recorded in this file. The format follows
 - `gglint hook` runs the secrets check before every commit: it installs into husky or git's
   `pre-commit` hook, and prints the lines to add for pre-commit, lefthook and lint-staged.
   The repository is also a source of pre-commit hooks (`gglint-secrets`, `gglint-mcp`).
+- `--format github`, `sarif` and `markdown` for `mcp` and `secrets`: annotations on the lines
+  of a pull request, a SARIF log for Code scanning, and a section for a pull request comment
+  that includes a table of servers by agent.
 - A shared report layer (`report::Diagnostic`) that every check prints through.
 
 ## [0.3.0] - 2026-11-16
