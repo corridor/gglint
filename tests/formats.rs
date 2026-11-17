@@ -99,3 +99,142 @@ fn an_unknown_format_lists_every_format() {
         assert!(stderr.contains(format), "{stderr}");
     }
 }
+
+#[cfg(unix)]
+mod action {
+    use super::*;
+
+    struct Run {
+        status: Option<i32>,
+        stdout: String,
+        github_output: String,
+        comment: Option<String>,
+        sarif_files: Vec<String>,
+    }
+
+    /// Runs the Action's script in `dir` as GitHub would, with this build of gglint.
+    fn run(dir: &TempDir, environment: &[(&str, &str)]) -> Run {
+        let temp = TempDir::new();
+        let github_output = temp.path().join("github_output");
+        std::fs::write(&github_output, "").unwrap();
+        let output = Command::new("bash")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/action.sh"))
+            .current_dir(dir.path())
+            .env("GGLINT_BIN", env!("CARGO_BIN_EXE_gglint"))
+            .env("RUNNER_TEMP", temp.path())
+            .env("GITHUB_OUTPUT", &github_output)
+            .env("INPUT_PATH", ".")
+            .envs(environment.iter().copied())
+            .output()
+            .unwrap();
+        let gglint_directory = temp.path().join("gglint");
+        let mut sarif_files: Vec<String> = std::fs::read_dir(gglint_directory.join("sarif"))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        sarif_files.sort();
+        Run {
+            status: output.status.code(),
+            stdout: String::from_utf8(output.stdout).unwrap(),
+            github_output: std::fs::read_to_string(&github_output).unwrap(),
+            comment: std::fs::read_to_string(gglint_directory.join("comment.md")).ok(),
+            sarif_files,
+        }
+    }
+
+    #[test]
+    fn annotates_fails_and_leaves_a_comment_and_sarif_for_the_next_steps() {
+        let dir = drifted();
+
+        let run = run(
+            &dir,
+            &[
+                ("INPUT_COMMAND", "all"),
+                ("INPUT_COMMENT", "true"),
+                ("INPUT_SARIF", "true"),
+            ],
+        );
+
+        assert_eq!(run.status, Some(1));
+        assert!(
+            run.stdout.contains("::error file=.cursor/mcp.json,line=5"),
+            "{}",
+            run.stdout
+        );
+        assert!(run.stdout.contains("title=gglint missing-server::"), "{}", run.stdout);
+        assert_eq!(run.sarif_files, ["gglint-mcp.sarif", "gglint-secrets.sarif"]);
+        assert!(run.github_output.contains("sarif-directory="), "{}", run.github_output);
+        assert!(run.github_output.contains("comment-file="), "{}", run.github_output);
+        let comment = run.comment.unwrap();
+        assert!(comment.starts_with("<!-- gglint -->\n"), "{comment}");
+        assert!(comment.contains("### ❌ gglint secrets: 1 problem"), "{comment}");
+        assert!(comment.contains("### ❌ gglint mcp: "), "{comment}");
+        assert!(!comment.contains(&token()));
+    }
+
+    #[test]
+    fn writes_no_comment_or_sarif_unless_asked_to() {
+        let dir = drifted();
+
+        let run = run(&dir, &[("INPUT_COMMAND", "secrets")]);
+
+        assert_eq!(run.status, Some(1));
+        assert!(run.comment.is_none());
+        assert!(run.sarif_files.is_empty());
+        assert!(run.github_output.is_empty(), "{}", run.github_output);
+    }
+
+    #[test]
+    fn reports_without_failing_when_told_not_to_fail() {
+        let dir = drifted();
+
+        let run = run(
+            &dir,
+            &[("INPUT_COMMAND", "secrets"), ("INPUT_FAIL_ON_PROBLEMS", "false")],
+        );
+
+        assert_eq!(run.status, Some(0));
+        assert!(run.stdout.contains("::error "), "{}", run.stdout);
+    }
+
+    #[test]
+    fn a_clean_repository_passes_and_says_so() {
+        let dir = TempDir::new();
+        dir.write(".mcp.json", r#"{ "mcpServers": {} }"#);
+
+        let run = run(&dir, &[("INPUT_COMMAND", "all"), ("INPUT_COMMENT", "true")]);
+
+        assert_eq!(run.status, Some(0));
+        assert!(!run.stdout.contains("::error"), "{}", run.stdout);
+        assert!(run.comment.unwrap().contains("### ✅ gglint secrets: no problems"));
+    }
+
+    #[test]
+    fn a_repository_without_mcp_config_files_isnt_a_failure() {
+        let dir = TempDir::new();
+        dir.write("README.md", "# Nothing here\n");
+
+        let run = run(&dir, &[("INPUT_COMMAND", "all")]);
+
+        assert_eq!(run.status, Some(0));
+        assert!(
+            run.stdout.contains("::notice::gglint: no MCP config files found"),
+            "{}",
+            run.stdout
+        );
+    }
+
+    #[test]
+    fn an_unknown_command_is_an_error() {
+        let dir = TempDir::new();
+
+        let run = run(&dir, &[("INPUT_COMMAND", "fix")]);
+
+        assert_eq!(run.status, Some(2));
+        assert!(run.stdout.contains("::error::command must be"), "{}", run.stdout);
+    }
+}

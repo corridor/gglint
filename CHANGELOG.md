@@ -18,6 +18,9 @@ All notable changes to gglint are recorded in this file. The format follows
 - `--format github`, `sarif` and `markdown` for `mcp` and `secrets`: annotations on the lines
   of a pull request, a SARIF log for Code scanning, and a section for a pull request comment
   that includes a table of servers by agent.
+- A GitHub Action (`uses: corridor/gglint@v1`) that annotates a pull request, posts one
+  comment that it updates on each push, and optionally uploads to Code scanning. It only
+  reports.
 - A shared report layer (`report::Diagnostic`) that every check prints through.
 
 ## [0.3.0] - 2026-11-16
