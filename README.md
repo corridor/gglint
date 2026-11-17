@@ -4,7 +4,8 @@
 [![PyPI](https://img.shields.io/pypi/v/gglint.svg)](https://pypi.org/project/gglint/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/corridor/gglint/blob/main/LICENSE)
 
-Keep the MCP servers of every coding agent in your repository in sync.
+Keep every coding agent in your repository in sync, and keep secrets out of their config
+files.
 
 Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and nine other coding agents each read
 MCP servers from their own config file, in their own format (see
@@ -27,6 +28,12 @@ in this table, on hover:
 <tr><td><a href="#what-gglint-checks" title="npx -y @playwright/mcp@0.0.78 --headless in Claude Code; npx -y @playwright/mcp@latest in Cursor"><code>playwright</code></a></td><td align="center"><a href="#what-gglint-checks" title="Set up in .mcp.json:8: npx -y @playwright/mcp@0.0.78 --headless">✓</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Codex. --fix adds it to .codex/config.toml, as set up in .mcp.json:8">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Set up differently in .cursor/mcp.json:3: the newest version, without --headless. --fix starts it as in .mcp.json:8">≠</a></td><td align="center"><a href="#what-gglint-checks" title="OpenCode has no opencode.json. --fix creates it with the 3 MCP servers set up for Claude Code and Cursor.">✗</a></td></tr>
 <tr><td><a href="#what-gglint-checks" title="https://mcp.linear.app/sse"><code>linear</code></a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Claude Code. --fix adds it to .mcp.json, as set up in .cursor/mcp.json:7">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Missing from Codex. --fix adds it to .codex/config.toml, as set up in .cursor/mcp.json:7">✗</a></td><td align="center"><a href="#what-gglint-checks" title="Set up in .cursor/mcp.json:7">✓</a></td><td align="center"><a href="#what-gglint-checks" title="OpenCode has no opencode.json. --fix creates it with the 3 MCP servers set up for Claude Code and Cursor.">✗</a></td></tr>
 </table>
+
+| Command | What it does |
+| ------- | ------------ |
+| [`gglint mcp`](#usage) | Compares the MCP servers of every coding agent, and fixes the differences. |
+| [`gglint secrets`](#finding-secrets) | Finds credentials written out in agent config and instruction files, and replaces them with environment variables. |
+| [`gglint hook`](#before-every-commit) | Runs the secrets check before every commit, through husky, git, pre-commit, lefthook or lint-staged. |
 
 - **One view of every agent.** A table shows which agent gets which server, and how each
   one differs.
@@ -60,6 +67,7 @@ git diff
 ```
 
 The first reports every problem, the second fixes them, and the third shows what changed.
+To check for secrets in the same files, run `uvx gglint secrets`.
 `uvx` downloads gglint the first time and reuses it afterwards; there's nothing else to
 install. It works on Linux, macOS and Windows.
 
@@ -68,7 +76,12 @@ install. It works on Linux, macOS and Windows.
 ```text
 uvx gglint mcp [--fix] [--source AGENT] [--format table|lines] [PATH]
 uvx gglint mcp --servers [PATH]
+uvx gglint secrets [--fix] [--staged] [--format table|lines] [PATH | FILE...]
+uvx gglint hook [install|print] [--tool NAME] [--with-mcp] [PATH]
 ```
+
+The options below are for `gglint mcp`; [`secrets`](#finding-secrets) and
+[`hook`](#before-every-commit) describe their own.
 
 | Option              | Effect                                                                                   |
 | ------------------- | ---------------------------------------------------------------------------------------- |
@@ -83,6 +96,8 @@ uvx gglint mcp --servers [PATH]
 | ----------- | ----------------------------------------------------------------------------- |
 | `0`         | Every agent gets the same servers, set up the same way.                       |
 | `1`         | gglint found a problem, one is left after `--fix`, or there are no MCP config files. |
+
+`gglint secrets` also exits with status 1 when it finds a secret, and `0` when it finds none.
 
 Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The summary
 line, with counts and timing, goes to standard error.
@@ -340,7 +355,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
       - run: uvx gglint@0.3.0 mcp --format lines
+      - run: uvx gglint@0.4.0 secrets --format lines
 ```
+
+`secrets` is in gglint 0.4.0 and later.
 
 ## Security
 
@@ -348,9 +366,12 @@ jobs:
 - **Nothing is executed or fetched.** MCP servers aren't started, packages aren't resolved,
   and environment variables aren't expanded. It's safe to run on an untrusted repository.
 - **Secrets stay out of the output.** Environment variables and headers are printed by name
-  only.
-- **One external program.** During `--fix`, gglint runs `git check-ignore` to mark files your
-  `.gitignore` excludes.
+  only, and `gglint secrets` shows a secret's kind, the name it's under and where it is, never
+  its value.
+- **One external program: git.** gglint runs `git check-ignore` to mark files your
+  `.gitignore` excludes (in `mcp --fix` and in `secrets`), `git diff --cached` for
+  `secrets --staged`, and `git rev-parse --git-path hooks` for `gglint hook`.
+- **Nothing is overwritten by `hook`.** An existing hook script is extended, once.
 
 ## Limitations
 
@@ -366,6 +387,14 @@ jobs:
   list, and never those in `mcp.excluded`; gglint reports the servers these lists leave out
   as turned off. `--fix` doesn't edit the lists, so a server it adds while `mcp.allowed` is
   set stays off until you add it there.
+- `gglint secrets` reads a file line by line. It finds a value under a name such as `token`
+  only in JSON and TOML files, and only the credential formats it knows in instruction files
+  such as `CLAUDE.md`. It misses a password made of one kind of letters (`"hunter"`), doesn't
+  read `.env` files or other source, and doesn't search git history: a secret that was ever
+  committed has to be rotated.
+- `gglint secrets --fix` can't change a value for an agent that has no way to refer to an
+  environment variable, such as Codex in `http_headers`; it reports it and says what to use
+  instead.
 - Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
   nothing in a repository to compare.
 - Codex, Copilot CLI, Gemini CLI, Qoder and Qwen Code load a repository's MCP servers only
@@ -393,10 +422,12 @@ nothing:
 GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --nocapture
 ```
 
-The code lives in [`src/harness/`](https://github.com/corridor/gglint/tree/main/src/harness):
+The code lives in [`src/`](https://github.com/corridor/gglint/tree/main/src).
+[`harness/`](https://github.com/corridor/gglint/tree/main/src/harness) does the MCP check:
 `agents.rs` describes each agent in one table, `mcp.rs` reads each agent's config,
 `compare.rs` finds the problems, and `fix.rs` writes the fixes. Supporting another agent
-starts with a row in `agents.rs`.
+starts with a row in `agents.rs`. `report.rs` is what every check prints through,
+`secrets.rs` finds secrets and replaces them, and `hook.rs` sets up the pre-commit hooks.
 
 ### Releasing
 
