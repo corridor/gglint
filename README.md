@@ -114,6 +114,35 @@ in Cursor, and keeps everything else in the file as it was. An agent with no way
 an environment variable, such as Codex in a `http_headers` table, is reported and left alone.
 A secret that was ever committed is in git history: rotate it.
 
+### Before every commit
+
+`gglint hook` runs `gglint secrets --staged` before each commit, so a secret never gets
+committed in the first place. It uses the tool your repository already has:
+
+| Tool         | What `uvx gglint hook` does                                              |
+| ------------ | ------------------------------------------------------------------------ |
+| husky        | Adds the command to `.husky/pre-commit`, keeping what's there.            |
+| git          | Adds it to git's `pre-commit` hook, wherever `core.hooksPath` puts it.    |
+| pre-commit   | Prints the lines for `.pre-commit-config.yaml`.                           |
+| lefthook     | Prints the lines for `lefthook.yml`.                                      |
+| lint-staged  | Prints the lines for `package.json`.                                      |
+
+`--tool NAME` picks one instead of detecting it, `--with-mcp` adds the MCP check, and
+`gglint hook print` only prints. Running it twice changes nothing. The hooks run
+`uvx gglint@<version>`, pinned to the version that wrote them, so uv has to be installed.
+
+With the [pre-commit](https://pre-commit.com) framework, gglint is also a source of hooks:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/corridor/gglint
+    rev: v0.4.0
+    hooks:
+      - id: gglint-secrets
+      - id: gglint-mcp      # optional: the MCP servers of every agent match
+```
+
 ## What gglint checks
 
 | Rule               | Reported when                                                                                       | Fixed by          |

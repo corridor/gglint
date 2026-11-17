@@ -1,0 +1,25 @@
+# Hooks for the pre-commit framework (https://pre-commit.com). Add to .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/corridor/gglint
+#       rev: v0.4.0
+#       hooks:
+#         - id: gglint-secrets
+#
+# They run `uvx gglint`, so uv has to be installed.
+
+- id: gglint-secrets
+  name: gglint secrets
+  description: Find secrets written out in the config and instruction files of coding agents
+  entry: uvx gglint secrets
+  language: system
+  pass_filenames: true
+  files: '^(\.mcp\.json|opencode\.jsonc?|(CLAUDE|AGENTS|GEMINI|QWEN)\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|instructions/.*)|\.(claude|codex|cursor|gemini|qwen|qoder|factory|junie|kimi-code|kiro|trae|agents)/.*)$'
+
+- id: gglint-mcp
+  name: gglint mcp
+  description: Check that every coding agent in the repository gets the same MCP servers
+  entry: uvx gglint mcp --format lines
+  language: system
+  pass_filenames: false
+  files: '^(\.mcp\.json|opencode\.jsonc?|\.github/mcp\.json|\.(codex|cursor|gemini|qwen|qoder|factory|junie|kimi-code|kiro|trae|agents)/.*)$'

@@ -6,6 +6,8 @@
 //! gglint mcp --servers [PATH]   list every server
 //! gglint secrets [--fix] [--staged] [--format F] [PATH | FILE...]
 //!                               find secrets written out in agent config files
+//! gglint hook [install|print] [--tool T] [--with-mcp] [PATH]
+//!                               run gglint before every commit
 //! ```
 
 use std::path::Path;
@@ -16,6 +18,7 @@ use gglint::harness::{
     Cell, Finding, FixReport, HARNESSES, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport,
     check_mcp_from, fix_mcp, read_mcp,
 };
+use gglint::hook::{self, Outcome, TOOLS, Tool};
 use gglint::report::{Diagnostic, Paint, exit_code};
 use gglint::secrets::{Scope, check_secrets, fix_secrets};
 
@@ -32,6 +35,10 @@ Usage:
   gglint secrets --fix [PATH]       replace each with a reference to an environment variable
   gglint secrets --staged           check only the files staged in git, for a pre-commit hook
   gglint secrets FILE...            check these files, as a pre-commit hook passes them
+  gglint hook [PATH]                run `gglint secrets --staged` before every commit, through
+                                    husky or git; for pre-commit, lefthook and lint-staged it
+                                    prints the lines to add. `--tool NAME` picks the tool,
+                                    `--with-mcp` adds the MCP check, `hook print` only prints.
 
 PATH is the repository's root, the current directory by default. `--fix` adds missing
 servers, creates the config file of an agent that has its own directory, and copies the
@@ -72,6 +79,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("mcp") => mcp(&args[1..]),
         Some("secrets") => secrets(&args[1..]),
+        Some("hook") => hook_command(&args[1..]),
         Some("--version" | "-V") => {
             println!("gglint {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -402,6 +410,90 @@ fn secrets(args: &[String]) -> ExitCode {
         eprintln!("`gglint secrets --fix` can replace {} of them.", check.fixes.len());
     }
     exit_code(&check.diagnostics)
+}
+
+/// `gglint hook`: runs gglint before every commit.
+fn hook_command(args: &[String]) -> ExitCode {
+    let mut print_only = false;
+    let mut with_mcp = false;
+    let mut tool: Option<Tool> = None;
+    let mut path = ".";
+    let mut args = args.iter().peekable();
+    if let Some(action) = args.next_if(|arg| matches!(arg.as_str(), "install" | "print")) {
+        print_only = action == "print";
+    }
+    while let Some(arg) = args.next() {
+        let name = match arg.as_str() {
+            "--with-mcp" => {
+                with_mcp = true;
+                continue;
+            }
+            "--help" | "-h" => {
+                print!("{}", usage());
+                return ExitCode::SUCCESS;
+            }
+            "--tool" => args.next().map(String::as_str),
+            other => match other.strip_prefix("--tool=") {
+                Some(name) => Some(name),
+                None if other.starts_with('-') => {
+                    eprintln!("error: unknown option {other:?}; see `gglint --help`");
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    path = other;
+                    continue;
+                }
+            },
+        };
+        tool = match name.and_then(Tool::parse) {
+            Some(tool) => Some(tool),
+            None => {
+                let names: Vec<&str> = TOOLS.iter().map(|tool| tool.as_str()).collect();
+                eprintln!(
+                    "error: unknown tool {:?} for --tool; use {}",
+                    name.unwrap_or(""),
+                    names.join(", ")
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+    }
+    let root = Path::new(path);
+    if !root.is_dir() {
+        eprintln!("error: {path} isn't a directory");
+        return ExitCode::FAILURE;
+    }
+    let tool = tool.unwrap_or_else(|| hook::detect(root));
+    if print_only {
+        let (file, snippet) = hook::print(tool, with_mcp);
+        println!("# {} ({file})\n{snippet}", tool.as_str());
+        return ExitCode::SUCCESS;
+    }
+    match hook::install(root, tool, with_mcp) {
+        Ok(Outcome::Wrote(file)) => {
+            println!(
+                "Added gglint to {}. It runs before each commit ({}).",
+                file.display(),
+                tool.as_str()
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::AlreadyThere(file)) => {
+            println!("{} already runs gglint; nothing to change.", file.display());
+            ExitCode::SUCCESS
+        }
+        Ok(Outcome::Print { file, snippet }) => {
+            println!(
+                "This repository uses {}. Add this to {file}:\n\n{snippet}",
+                tool.as_str()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// The agent `--source` names, or the exit code after saying why it isn't one.

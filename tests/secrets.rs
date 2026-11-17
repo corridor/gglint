@@ -147,6 +147,26 @@ fn staged_and_a_file_list_cannot_be_combined() {
 }
 
 #[test]
+fn hook_installs_into_husky_once_and_prints_lines_for_lefthook() {
+    let dir = TempDir::new();
+    dir.write(".husky/pre-commit", "npx lint-staged\n");
+
+    let first = gglint(&["hook".as_ref(), dir.path().as_os_str()]);
+    let second = gglint(&["hook".as_ref(), dir.path().as_os_str()]);
+    let print = gglint(&["hook".as_ref(), "print".as_ref(), "--tool=lefthook".as_ref()]);
+
+    assert!(first.status.success() && second.status.success());
+    let script = std::fs::read_to_string(dir.path().join(".husky/pre-commit")).unwrap();
+    assert!(script.starts_with("npx lint-staged\n"));
+    assert_eq!(script.matches("secrets --staged").count(), 1, "{script}");
+    let stdout = String::from_utf8(print.stdout).unwrap();
+    assert!(
+        stdout.contains("gglint-secrets:") && stdout.contains("secrets --staged"),
+        "{stdout}"
+    );
+}
+
+#[test]
 fn a_secret_in_a_gitignored_file_says_so_and_codex_gets_its_own_advice() {
     let dir = TempDir::new();
     let status = Command::new("git")
