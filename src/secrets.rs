@@ -291,6 +291,10 @@ fn words(key: &str) -> Vec<String> {
 const GLUED_ENDINGS: &[&str] = &["token", "secret", "password", "passwd", "apikey", "passphrase"];
 
 fn names_a_credential(key: &str) -> bool {
+    // The working directory, not a password.
+    if key.eq_ignore_ascii_case("pwd") {
+        return false;
+    }
     let words = words(key);
     if words.iter().any(|w| REFERENCE_WORDS.contains(&w.as_str())) {
         return false;
@@ -676,7 +680,6 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
     for (index, line) in text.lines().enumerate() {
         let number = index + 1;
         let pairs = pairs(line);
-        let mut found = false;
         // The hits in this line start here.
         let first = hits.len();
 
@@ -695,6 +698,12 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                         .sum();
                     let tail = &line[tail_start..tail_start + run];
                     if run < detector.min || detector.max.is_some_and(|max| run != max) || placeholder(tail) {
+                        continue;
+                    }
+                    // Many names start with `sk-` (`sk-image-generation-v2`); a key has a long
+                    // random part with a digit in it.
+                    let random_part = |part: &str| part.len() >= 16 && part.contains(|c: char| c.is_ascii_digit());
+                    if *prefix == "sk-" && !tail.split(['-', '_']).any(random_part) {
                         continue;
                     }
                     let end = tail_start + run;
@@ -727,7 +736,6 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 replaceable,
                 command: false,
             });
-            found = true;
         }
 
         if let Some(start) = line.find("-----BEGIN ")
@@ -745,7 +753,6 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 replaceable: false,
                 command: false,
             });
-            found = true;
         }
 
         for (start, end) in url_passwords(line) {
@@ -773,10 +780,9 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 key,
                 command: false,
             });
-            found = true;
         }
 
-        if config && !found {
+        if config {
             for pair in pairs {
                 if !names_a_credential(pair.key) {
                     continue;
@@ -795,6 +801,11 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                     || placeholder(credential)
                     || !credential_like(credential)
                 {
+                    continue;
+                }
+                // Another secret in the line doesn't hide this one, unless it's the same text.
+                let start = pair.start + offset;
+                if hits[first..].iter().any(|hit| start < hit.end && hit.start < pair.end) {
                     continue;
                 }
                 hits.push(Hit {
@@ -1373,6 +1384,40 @@ mod tests {
         let hits = scan_text("\"env\": { \"PGPASSWORD\": \"Pr0dDbPass2024\" }", true);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].key.as_deref(), Some("PGPASSWORD"));
+    }
+
+    #[test]
+    fn a_known_token_doesnt_hide_another_secret_in_its_line() {
+        let line = format!(
+            "\"env\": {{\"GITHUB_TOKEN\": \"ghp_{}\", \"DB_PASSWORD\": \"Pr0dDbPass2024\"}}",
+            fake(36)
+        );
+        let keys: Vec<_> = scan_text(&line, true).into_iter().map(|hit| hit.key).collect();
+        assert_eq!(
+            keys,
+            [Some("GITHUB_TOKEN".to_string()), Some("DB_PASSWORD".to_string())]
+        );
+    }
+
+    #[test]
+    fn the_working_directory_isnt_a_password() {
+        for key in ["PWD", "OLDPWD"] {
+            let text = format!("\"{key}\": \"/home/user/project\"");
+            assert!(scan_text(&text, true).is_empty(), "{key}");
+        }
+        assert_eq!(scan_text("\"DB_PWD\": \"Pr0dDbPass2024\"", true).len(), 1);
+    }
+
+    #[test]
+    fn a_name_that_starts_with_sk_isnt_an_api_key() {
+        assert!(scan_text("Use the sk-image-generation-pipeline-v2 skill.", false).is_empty());
+        for key in [
+            format!("sk-proj-{}", fake(40)),
+            // DeepSeek's: lowercase hex.
+            "sk-1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d".to_string(),
+        ] {
+            assert_eq!(scan_text(&format!("key: {key}"), false).len(), 1, "{key}");
+        }
     }
 
     #[test]
