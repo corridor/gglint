@@ -112,6 +112,8 @@ struct Hit {
     /// Whether the key is one whose value an agent reads as an environment or header value, so
     /// a reference works there.
     replaceable: bool,
+    /// Whether it's written in a command line, such as a command Claude Code saved as allowed.
+    command: bool,
 }
 
 struct Detector {
@@ -284,6 +286,10 @@ fn words(key: &str) -> Vec<String> {
     words
 }
 
+/// Words that say a name is a credential when they end a name written as one word:
+/// `PGPASSWORD`, `ACCESSTOKEN`.
+const GLUED_ENDINGS: &[&str] = &["token", "secret", "password", "passwd", "apikey", "passphrase"];
+
 fn names_a_credential(key: &str) -> bool {
     let words = words(key);
     if words.iter().any(|w| REFERENCE_WORDS.contains(&w.as_str())) {
@@ -293,6 +299,160 @@ fn names_a_credential(key: &str) -> bool {
         || words
             .windows(2)
             .any(|pair| SENSITIVE_PAIRS.contains(&(pair[0].as_str(), pair[1].as_str())))
+        || words.iter().any(|w| {
+            GLUED_ENDINGS
+                .iter()
+                .any(|ending| w.len() > ending.len() && w.ends_with(ending))
+        })
+}
+
+/// Where a run of characters that `keep` accepts, ending at byte `end` of `line`, starts.
+fn run_start(line: &str, end: usize, keep: impl Fn(char) -> bool) -> usize {
+    line[..end]
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| keep(c))
+        .last()
+        .map_or(end, |(index, _)| index)
+}
+
+/// The number of spaces at the start of `text`.
+fn spaces(text: &str) -> usize {
+    text.len() - text.trim_start_matches(' ').len()
+}
+
+/// Whether `c` ends a value written without quotes in a command line.
+fn ends_value(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '"' | '\'' | '\\' | '`' | ',' | ';' | ')' | '|' | '&')
+}
+
+/// The byte range of the value that starts at byte `at` of `line`: what's inside the quotes
+/// of a quoted one (a JSON-escaped `\"` too), else the characters up to the end of the word.
+fn command_value(line: &str, at: usize) -> Option<(usize, usize)> {
+    let rest = &line[at..];
+    for quote in ["\\\"", "\"", "'"] {
+        if let Some(inner) = rest.strip_prefix(quote) {
+            let start = at + quote.len();
+            return inner.find(quote).map(|close| (start, start + close));
+        }
+    }
+    let end = rest.find(ends_value).unwrap_or(rest.len());
+    (end > 0).then_some((at, at + end))
+}
+
+/// Whether `value` is code or the name of a variable rather than a secret: a call or an
+/// index, a dotted name such as `process.env.KEY`, or a name such as `MY_TOKEN`.
+fn looks_like_code(value: &str) -> bool {
+    let identifier = |part: &str| {
+        (1..=24).contains(&part.len())
+            && part.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+            && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    };
+    value.contains(['(', '[', '{'])
+        || value.contains('.') && value.split('.').all(identifier)
+        || value.contains('_')
+            && value.starts_with(|c: char| c.is_ascii_uppercase())
+            && value
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// The secrets written into command lines in `line`, as the byte range of each and the name
+/// it's given: a header (`Authorization: Bearer …`), a variable set for a command
+/// (`PGPASSWORD=… psql`), an option (`--token …`, `sshpass -p …`, `mysql -p…`), or an option
+/// and the value after it in a JSON list of arguments. This is how a command Claude Code saved
+/// as allowed carries a secret.
+fn command_secrets(line: &str) -> Vec<(usize, usize, String)> {
+    let mut found = Vec::new();
+    let mut accept = |name: &str, span: Option<(usize, usize)>| {
+        let Some((start, end)) = span else {
+            return;
+        };
+        let value = &line[start..end];
+        if names_a_credential(name)
+            && !is_reference(value)
+            && !placeholder(value)
+            && credential_like(value)
+            && !looks_like_code(value)
+        {
+            found.push((start, end, name.to_string()));
+        }
+    };
+
+    // A header: `Authorization: Bearer …`, `X-Api-Key: …`.
+    for (colon, _) in line.match_indices(':') {
+        let start = run_start(line, colon, |c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        let gap = spaces(&line[colon + 1..]);
+        if start == colon || gap == 0 {
+            continue;
+        }
+        let mut at = colon + 1 + gap;
+        if let Some(scheme) = ["Bearer ", "Basic ", "Token "].iter().find(|scheme| {
+            line[at..]
+                .get(..scheme.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+        }) {
+            at += scheme.len();
+        }
+        accept(&line[start..colon], command_value(line, at));
+    }
+
+    // A variable set for a command: `PGPASSWORD=… psql`, `export API_TOKEN=…`.
+    for (equals, _) in line.match_indices('=') {
+        let start = run_start(line, equals, |c| c.is_ascii_alphanumeric() || c == '_');
+        // `--password=…` is an option, read below; `a == b` and `key = "…"` aren't commands.
+        if start == equals || line[..start].ends_with('-') || line[equals + 1..].starts_with(['=', ' ']) {
+            continue;
+        }
+        accept(&line[start..equals], command_value(line, equals + 1));
+    }
+
+    // An option: `--token …`, `--password=…`, or `"--api-key", "…"` in a list of arguments.
+    for (dashes, _) in line.match_indices("--") {
+        if line[..dashes].ends_with(|c: char| c.is_ascii_alphanumeric() || c == '-') {
+            continue;
+        }
+        let name_start = dashes + 2;
+        let name_end = name_start
+            + line[name_start..]
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+                .unwrap_or(line.len() - name_start);
+        let name = &line[name_start..name_end];
+        let mut at = name_end;
+        if line[at..].starts_with('=') {
+            at += 1;
+        } else {
+            let quoted = ["\\\"", "\""].iter().find(|quote| line[at..].starts_with(*quote));
+            if let Some(quote) = quoted {
+                at += quote.len();
+                at += spaces(&line[at..]);
+                if !line[at..].starts_with(',') {
+                    continue;
+                }
+                at += 1;
+            } else if spaces(&line[at..]) == 0 {
+                continue;
+            }
+            at += spaces(&line[at..]);
+        }
+        let value = command_value(line, at).filter(|&(start, _)| !line[start..].starts_with('-'));
+        accept(name, value);
+    }
+
+    // A password given with `-p`: `sshpass -p …`, `mysql -p…`.
+    if let Some(at) = line.find("sshpass -p") {
+        let at = at + "sshpass -p".len();
+        accept("password", command_value(line, at + spaces(&line[at..])));
+    }
+    if let Some(program) = line.find("mysql").or_else(|| line.find("mariadb")) {
+        for (option, _) in line[program..].match_indices(" -p") {
+            let at = program + option + " -p".len();
+            if line[at..].starts_with(|c: char| !ends_value(c)) {
+                accept("password", command_value(line, at));
+            }
+        }
+    }
+    found
 }
 
 /// Text that stands in for a secret in documentation and templates.
@@ -565,6 +725,7 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 },
                 key,
                 replaceable,
+                command: false,
             });
             found = true;
         }
@@ -582,6 +743,7 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                 key: None,
                 env: "PRIVATE_KEY".to_string(),
                 replaceable: false,
+                command: false,
             });
             found = true;
         }
@@ -609,6 +771,7 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                     .as_deref()
                     .is_some_and(|key| !COMMAND_LINE_KEYS.contains(&key.to_ascii_lowercase().as_str())),
                 key,
+                command: false,
             });
             found = true;
         }
@@ -644,8 +807,27 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                     key: Some(pair.key.to_string()),
                     env: env_name(pair.key, "API_TOKEN"),
                     replaceable: !COMMAND_LINE_KEYS.contains(&pair.key.to_ascii_lowercase().as_str()),
+                    command: false,
                 });
             }
+        }
+
+        for (start, end, name) in command_secrets(line) {
+            if hits[first..].iter().any(|hit| start < hit.end && hit.start < end) {
+                continue;
+            }
+            hits.push(Hit {
+                line: number,
+                start,
+                end,
+                column: column(line, start),
+                rule: "inline-credential",
+                kind: "credential".to_string(),
+                env: env_name(&name, "API_TOKEN"),
+                key: Some(name),
+                replaceable: false,
+                command: true,
+            });
         }
     }
     hits
@@ -867,6 +1049,10 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
                 message.push_str(" (the file is gitignored, so it isn't committed)");
             }
             let fix = match (&reference, harness) {
+                _ if hit.command => format!(
+                    "take it out of the command and pass it from your environment, as ${}; if Claude Code saved the command as allowed, remove it with /permissions; rotate it, as it stays in git history once committed",
+                    hit.env
+                ),
                 (Some(reference), _) => format!(
                     "use {reference} and set {} in your environment; rotate it, as it stays in git history once committed",
                     hit.env
@@ -1118,6 +1304,75 @@ mod tests {
                 "{url}"
             );
         }
+    }
+
+    #[test]
+    fn finds_secrets_inside_commands() {
+        for (line, secret) in [
+            (
+                r#""Bash(curl -H \"Authorization: Bearer 9f8e7d6c5b4a39281706f5e4d3c2b1a0\" https://api.example.org/v1)","#,
+                "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+            ),
+            (
+                r#""Bash(curl -H 'X-Api-Key: Zx81Kq0Lm2Np' https://api.example.org)","#,
+                "Zx81Kq0Lm2Np",
+            ),
+            (
+                r#""Bash(PGPASSWORD=Pr0dDbPass2024 psql -h db.internal -U admin)","#,
+                "Pr0dDbPass2024",
+            ),
+            (r#""Bash(export OPENAI_TOKEN='Zx81Kq0Lm2Np' && run)","#, "Zx81Kq0Lm2Np"),
+            (
+                r#""Bash(sshpass -p 'Sup3rS3cret!' ssh deploy@10.0.0.5)","#,
+                "Sup3rS3cret!",
+            ),
+            (r#""Bash(mysql -u root -pPr0dDbPass2024 app)","#, "Pr0dDbPass2024"),
+            ("deploy --api-token Zx81Kq0Lm2Np --env prod", "Zx81Kq0Lm2Np"),
+            ("deploy --password=Pr0dDbPass2024", "Pr0dDbPass2024"),
+            (r#""args": ["--api-key", "Zx81Kq0Lm2Np"]"#, "Zx81Kq0Lm2Np"),
+        ] {
+            for config in [true, false] {
+                let hits = scan_text(line, config);
+                assert_eq!(hits.len(), 1, "{line} (config: {config})");
+                assert_eq!(&line[hits[0].start..hits[0].end], secret, "{line}");
+                assert!(hits[0].command && !hits[0].replaceable, "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn leaves_commands_without_a_real_secret_alone() {
+        for line in [
+            r#""Bash(curl -H \"Authorization: Bearer $API_TOKEN\" https://api.example.org)""#,
+            r#""Bash(curl -H \"Authorization: Bearer ${API_TOKEN}\" https://x)""#,
+            "Authorization: Bearer <token>",
+            r#""Bash(PGPASSWORD=$PGPASSWORD psql)""#,
+            "export GITHUB_TOKEN=\"$(gh auth token)\"",
+            "password=os.environ[\"DB_PASSWORD\"]",
+            "API_KEY=process.env.OPENAI_KEY node app.js",
+            "deploy --token MY_DEPLOY_TOKEN",
+            "deploy --password-file secrets/db.txt",
+            "deploy --token-env DEPLOY_TOKEN",
+            "Password: required",
+            "sshpass -p \"$SSH_PASS\" ssh host",
+            "mysql -p -u root",
+            "run --max-tokens 4096",
+        ] {
+            assert!(scan_text(line, false).is_empty(), "{line}");
+            assert!(scan_text(line, true).is_empty(), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_secret_word_at_the_end_of_a_glued_name_counts() {
+        assert!(names_a_credential("PGPASSWORD"));
+        assert!(names_a_credential("ACCESSTOKEN"));
+        assert!(!names_a_credential("TOKENIZER"));
+        assert!(!names_a_credential("max_tokens"));
+
+        let hits = scan_text("\"env\": { \"PGPASSWORD\": \"Pr0dDbPass2024\" }", true);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].key.as_deref(), Some("PGPASSWORD"));
     }
 
     #[test]
