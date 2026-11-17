@@ -251,7 +251,7 @@ fn names(writes: &[&Write], update: bool) -> Vec<String> {
 
 /// Whether git ignores `relative_path` under `root`. The one program gglint runs is git
 /// itself; outside a repository, or without git, nothing counts as ignored.
-fn ignored_by_git(root: &Path, relative_path: &Path) -> bool {
+pub fn ignored_by_git(root: &Path, relative_path: &Path) -> bool {
     Command::new("git")
         .arg("-C")
         .arg(root)

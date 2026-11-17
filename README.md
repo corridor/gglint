@@ -87,6 +87,33 @@ uvx gglint mcp --servers [PATH]
 Colours are used when standard output is a terminal and `NO_COLOR` isn't set. The summary
 line, with counts and timing, goes to standard error.
 
+## Finding secrets
+
+`gglint secrets` finds credentials written out in the files that configure your coding
+agents: their MCP config files, settings, and instruction files such as `CLAUDE.md`. These
+files are committed, so a token pasted into `.mcp.json` ends up in git history.
+
+```sh
+uvx gglint secrets                 # report every secret
+uvx gglint secrets --fix           # replace each with a reference to an environment variable
+uvx gglint secrets --staged        # only the files staged in git
+uvx gglint secrets FILE...         # only these files, as a pre-commit hook passes them
+```
+
+| Rule                | Reported when                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| `inline-secret`     | Text has the format of a known credential: GitHub, GitLab, Anthropic, Slack, Stripe, Google and npm tokens, AWS access key IDs, API keys starting with `sk-`, and private key blocks. |
+| `inline-credential` | A JSON or TOML value under a name such as `token`, `password`, `api_key` or `Authorization` is written out instead of being a reference to an environment variable. |
+
+Placeholders (`your-token-here`, `ghp_xxxx…`), references (`${GITHUB_TOKEN}`) and values that
+name a variable (`bearer_token_env_var = "GITHUB_TOKEN"`) aren't reported. A secret's value is
+never printed: gglint shows its kind, the name it's under, and where it is.
+
+`--fix` writes the reference in the agent's own syntax, such as `Bearer ${env:GITHUB_TOKEN}`
+in Cursor, and keeps everything else in the file as it was. An agent with no way to refer to
+an environment variable, such as Codex in a `http_headers` table, is reported and left alone.
+A secret that was ever committed is in git history: rotate it.
+
 ## What gglint checks
 
 | Rule               | Reported when                                                                                       | Fixed by          |

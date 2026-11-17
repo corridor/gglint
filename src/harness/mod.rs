@@ -15,7 +15,7 @@ mod mcp;
 pub use compare::{
     Cell, Finding, McpCheck, Rule, ServerCheck, Setup, Site, check_mcp, check_mcp_from, compare_mcp, compared_harnesses,
 };
-pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp};
+pub use fix::{ChangedFile, FixReport, Unfixed, fix_mcp, ignored_by_git};
 pub use mcp::{McpConfig, McpServer, Part, Setting, Transport, read_mcp};
 
 /// A program that runs a model as a coding agent.
@@ -83,6 +83,22 @@ impl Harness {
     /// Every file it reads a repository's MCP servers from, relative to the root.
     pub fn mcp_files(self) -> &'static [&'static str] {
         agents::agent(self).files
+    }
+
+    /// The agent that reads `relative_path`, a repository-relative MCP config file such as
+    /// `.cursor/mcp.json`.
+    pub fn of_mcp_file(relative_path: &str) -> Option<Harness> {
+        HARNESSES
+            .iter()
+            .copied()
+            .find(|harness| harness.mcp_files().contains(&relative_path))
+    }
+
+    /// How it refers to the environment variable `name` in the value of one of an MCP
+    /// server's environment variables or headers, such as `${env:NAME}` for Cursor. `None`
+    /// when it has no way to.
+    pub fn env_reference(self, name: &str) -> Option<String> {
+        mcp::write_value(&[Part::Env(name.to_string())], mcp::Syntax::of(self))
     }
 
     /// A file it reads instead of its own while that one exists: Copilot CLI reads
