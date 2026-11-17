@@ -368,6 +368,12 @@ fn scan_command(args: &[String]) -> ExitCode {
         eprintln!("error: `--staged` and a list of files both say what to check; use one");
         return ExitCode::FAILURE;
     }
+    if staged && fix {
+        eprintln!(
+            "error: `--fix` changes the files on disk, not what's staged; run `gglint secrets --fix`, then `git add` the files again"
+        );
+        return ExitCode::FAILURE;
+    }
     let root = Path::new(root.unwrap_or("."));
     let scope = if staged {
         Scope::Staged

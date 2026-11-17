@@ -15,7 +15,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::harness::{HARNESSES, Harness, Location, ignored_by_git};
 use crate::report::{Diagnostic, Severity};
@@ -549,14 +549,36 @@ fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// The agent files gglint reads at fixed paths, relative to the root.
+fn fixed_files() -> impl Iterator<Item = &'static str> {
+    HARNESSES
+        .iter()
+        .flat_map(|harness| harness.mcp_files().iter().copied())
+        .chain(EXTRA_FILES.iter().copied())
+}
+
+/// Whether a file in one of `EXTRA_DIRECTORIES` is a kind gglint reads.
+fn wanted_in_directory(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("md" | "mdc" | "json" | "toml")
+    )
+}
+
+/// Whether `relative`, a path under the root, is one of the agent files gglint reads.
+fn is_agent_file(relative: &Path) -> bool {
+    let name = slashed(relative);
+    fixed_files().any(|file| file == name)
+        || relative
+            .parent()
+            .is_some_and(|parent| EXTRA_DIRECTORIES.contains(&slashed(parent).as_str()))
+            && wanted_in_directory(relative)
+}
+
 /// The agent files that exist under `root`, relative to it.
 fn known_files(root: &Path) -> BTreeSet<PathBuf> {
     let mut files = BTreeSet::new();
-    let candidates = HARNESSES
-        .iter()
-        .flat_map(|harness| harness.mcp_files().iter().copied())
-        .chain(EXTRA_FILES.iter().copied());
-    for candidate in candidates {
+    for candidate in fixed_files() {
         if root.join(candidate).is_file() {
             files.insert(PathBuf::from(candidate));
         }
@@ -567,12 +589,8 @@ fn known_files(root: &Path) -> BTreeSet<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let wanted = matches!(
-                path.extension().and_then(|extension| extension.to_str()),
-                Some("md" | "mdc" | "json" | "toml")
-            );
             if path.is_file()
-                && wanted
+                && wanted_in_directory(&path)
                 && let Some(name) = path.file_name()
             {
                 files.insert(Path::new(directory).join(name));
@@ -582,10 +600,18 @@ fn known_files(root: &Path) -> BTreeSet<PathBuf> {
     files
 }
 
-/// The files with changes staged in git, relative to `root`.
+/// The files with changes staged in git, relative to `root`, which can be below the top of
+/// the repository.
 fn staged_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
     let output = Command::new("git")
-        .args(["diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"])
+        .args([
+            "diff",
+            "--cached",
+            "--name-only",
+            "--relative",
+            "--diff-filter=ACMR",
+            "-z",
+        ])
         .current_dir(root)
         .output()
         .map_err(|error| format!("can't run git to list the staged files: {error}"))?;
@@ -600,6 +626,31 @@ fn staged_files(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
         .collect())
 }
 
+/// The text of `relative` as it's staged in git: what the next commit gets, which can differ
+/// from the file on disk.
+fn read_staged(root: &Path, relative: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("show")
+        .arg(format!(":./{}", slashed(relative)))
+        .current_dir(root)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.len() as u64 > MAX_FILE_SIZE {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+/// The text of the file at `path`, unless it's too big to be agent configuration.
+fn read_on_disk(path: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_FILE_SIZE {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
+}
+
 /// Scans the files in `scope` under `root`.
 pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
     let files: Vec<(PathBuf, PathBuf)> = match scope {
@@ -607,14 +658,11 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
             .into_iter()
             .map(|relative| (root.join(&relative), relative))
             .collect(),
-        Scope::Staged => {
-            let staged = staged_files(root)?;
-            known_files(root)
-                .into_iter()
-                .filter(|relative| staged.contains(relative))
-                .map(|relative| (root.join(&relative), relative))
-                .collect()
-        }
+        Scope::Staged => staged_files(root)?
+            .into_iter()
+            .filter(|relative| is_agent_file(relative))
+            .map(|relative| (root.join(&relative), relative))
+            .collect(),
         Scope::Files(paths) => paths
             .iter()
             .map(|path| {
@@ -626,13 +674,11 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
 
     let mut check = ScanResult::default();
     for (path, relative_path) in files {
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            continue;
+        let text = match scope {
+            Scope::Staged => read_staged(root, &relative_path),
+            Scope::Known | Scope::Files(_) => read_on_disk(&path),
         };
-        if !metadata.is_file() || metadata.len() > MAX_FILE_SIZE {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Some(text) = text else {
             continue;
         };
         check.files += 1;
