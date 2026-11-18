@@ -4,7 +4,13 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-18
+
+gglint now keeps secrets out of the files that configure coding agents, as well as keeping
+their MCP servers in sync ([#14](https://github.com/corridor/gglint/issues/14)), and runs
+before every commit and on every pull request. Run over 441 public repositories, `gglint
+secrets` found 7 secrets and 21 committed `.claude/settings.local.json` files, and no false
+alarms.
 
 ### Added
 
@@ -144,6 +150,7 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.4.0]: https://github.com/corridor/gglint/releases/tag/v0.4.0
 [0.3.0]: https://github.com/corridor/gglint/releases/tag/v0.3.0
 [0.2.0]: https://github.com/corridor/gglint/releases/tag/v0.2.0
 [0.1.1]: https://github.com/corridor/gglint/releases/tag/v0.1.1
