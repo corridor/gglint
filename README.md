@@ -7,20 +7,28 @@
 Keep every coding agent in your repository in sync, and keep secrets out of their config
 files.
 
-Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and nine other coding agents each read
-MCP servers from their own config file, in their own format (see
-[Supported agents](#supported-agents)). In a repository set up for more than one of them,
-those files drift apart: a server is added to `.mcp.json` but not to `.cursor/mcp.json`, a
-version is pinned in one file and not the other, or an agent has no MCP config at all.
-gglint finds every difference and fixes it for you, written in each agent's own format.
+Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and nine other coding agents are each set
+up by their own files in a repository (see [Supported agents](#supported-agents)). gglint
+checks those files for two problems:
+
+- **MCP servers that drift apart.** Each agent reads MCP servers from its own config file, in
+  its own format. In a repository set up for more than one of them, a server is added to
+  `.mcp.json` but not to `.cursor/mcp.json`, a version is pinned in one file and not the
+  other, or an agent has no MCP config at all. `gglint mcp` finds every difference and fixes
+  it, written in each agent's own format.
+- **Secrets written into agent files.** Approving a command in Claude Code saves it, keys and
+  all, in `.claude/settings.local.json`, and tokens get pasted into `.mcp.json`,
+  `.codex/config.toml` and `CLAUDE.md`. `gglint secrets` finds them, replaces the ones it can
+  with environment variables, and stops the agents' personal files from being committed.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg"><img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="A terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%"></a>
 </p>
 
-Click the terminal to open it on its own, then hover over a server, an agent, a cell or a
-problem to see what gglint found there and what `--fix` does about it. The same details are
-in this table, on hover:
+The terminal shows `gglint mcp` on a repository whose agents have drifted apart. Click it to
+open it on its own, then hover over a server, an agent, a cell or a problem to see what
+gglint found there and what `--fix` does about it. The same details are in this table, on
+hover:
 
 <table>
 <tr><th>Server</th><th><a href="#what-gglint-checks" title="Claude Code reads .mcp.json">Claude Code</a></th><th><a href="#what-gglint-checks" title="Codex reads .codex/config.toml">Codex</a></th><th><a href="#what-gglint-checks" title="Cursor reads .cursor/mcp.json">Cursor</a></th><th><a href="#what-gglint-checks" title="OpenCode has a .opencode directory but no opencode.json">OpenCode</a></th></tr>
@@ -42,10 +50,15 @@ in this table, on hover:
   same way in every agent. It never removes a server, and keeps your comments and formatting.
 - **Each agent's own format.** A server is translated between JSON and TOML, between each
   agent's syntax for environment variables, and between local and remote server types.
+- **Secrets in the forms they leak in.** Tokens in known formats, passwords in database URLs,
+  keys in the commands Claude Code saves as allowed, and values under names such as
+  `password` or `Authorization`. A secret's value is never printed.
+- **Personal files stay personal.** Committing `.claude/settings.local.json`,
+  `CLAUDE.local.md` or an agent's login file fails the check, whatever is in it.
 - **Fast and read-only by default.** gglint reads a few files at fixed paths and typically
   finishes in under a millisecond. It never starts a server or downloads anything.
-- **Built for CI.** It exits with status 1 when it finds a problem, and `--format lines`
-  prints one problem per line.
+- **Built for CI.** It exits with status 1 when it finds a problem, prints annotations for a
+  pull request or a SARIF log, and runs as a [GitHub Action](#github-action).
 
 In November 2026 we checked the 258 most-starred GitHub repositories set up for two or more
 of Claude Code, Codex, Cursor and OpenCode. Of the 179 that configure MCP servers, 128 (72%)
@@ -53,24 +66,49 @@ had at least one of the problems gglint reports. Among the 166 active repositori
 more stars that set up a newer agent, such as Gemini CLI, Kiro or Junie, 83 of the 162 with
 MCP servers (51%) had at least one problem.
 
+The same month we ran `gglint secrets` over 441 public repositories set up for coding agents:
+21 had committed `.claude/settings.local.json`, and 5 had 7 secrets that look real in their
+agent files, 2 of them inside commands saved in `.claude/settings.json`. Across all of public
+GitHub, GitGuardian counted about 31,000 secrets in `.claude/settings.local.json` files
+([report](https://blog.gitguardian.com/claude-code-settings-local-json-secrets-docker-hub/)).
+
 ## Quick start
 
 gglint runs with `uvx`, which comes with [uv](https://docs.astral.sh/uv/). If `uvx` isn't on
 your machine, install uv with its
 [installation guide](https://docs.astral.sh/uv/getting-started/installation/) first.
 
-From the root of a repository, run these three commands in order:
+From the root of a repository, run both checks:
 
 ```sh
 uvx gglint mcp
-uvx gglint mcp --fix
-git diff
+uvx gglint secrets
 ```
 
-The first reports every problem, the second fixes them, and the third shows what changed.
-To check for secrets in the same files, run `uvx gglint secrets`.
-`uvx` downloads gglint the first time and reuses it afterwards; there's nothing else to
-install. It works on Linux, macOS and Windows.
+Each reports what it finds. To fix what it can, run each one again with `--fix`, then
+`git diff` to see what changed. `uvx` downloads gglint the first time and reuses it
+afterwards; there's nothing else to install. It works on Linux, macOS and Windows.
+
+To check every pull request for secrets, add this workflow as
+`.github/workflows/agent-secrets.yml` (see [GitHub Action](#github-action) for the options):
+
+```yaml
+name: Agent secrets
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gglint:
+    name: gglint secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: corridor/gglint@v1
+        with:
+          command: secrets
+          comment: "false"
+```
 
 ## Usage
 
