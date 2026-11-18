@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "gglint"
-description = "Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync"
+description = "Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync, and secrets out of their config files"
 readme = "README.md"
 # The wheels hold a compiled program, not Python code, so any Python 3 can install them.
 requires-python = ">=3.8"
@@ -22,6 +22,9 @@ keywords = [
     "kiro",
     "junie",
     "linter",
+    "secrets",
+    "secret-scanning",
+    "pre-commit",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
