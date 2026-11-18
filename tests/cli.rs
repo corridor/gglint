@@ -274,6 +274,12 @@ fn prints_the_version_and_usage() {
     assert!(help.status.success());
     let help = String::from_utf8(help.stdout).unwrap();
     assert!(help.contains("gglint mcp --fix [PATH]"), "{help}");
+    // The first line says what gglint is for: both checks, not only MCP servers.
+    let summary = help.lines().next().unwrap();
+    assert!(
+        summary.contains("MCP servers") && summary.contains("secrets"),
+        "{summary}"
+    );
     // Every agent, with the name `--source` takes and the file it's read from.
     for words in [
         ["claude-code", "Claude", "Code", ".mcp.json"].as_slice(),
