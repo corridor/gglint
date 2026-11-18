@@ -490,7 +490,9 @@ starts with a row in `agents.rs`. `report.rs` is what every check prints through
 
 1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
 2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.3.0`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.4.0`.
+4. Move the `v1` tag to the release's commit, so `uses: corridor/gglint@v1` runs it:
+   `git tag -f v1 v<version> && git push -f origin v1`.
 
 The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
 builds and tests every wheel, publishes them to PyPI, and attaches them to the release.
