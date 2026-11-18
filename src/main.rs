@@ -23,7 +23,7 @@ use gglint::report::{self, Diagnostic, Paint, Severity, exit_code};
 use gglint::secrets::{Scope, apply_fixes, ignore_local_files, scan_files};
 
 const USAGE: &str = "\
-Keep the MCP servers of every coding agent in a repository in sync.
+Keep the MCP servers of every coding agent in a repository in sync, and secrets out of their files.
 
 Usage:
   gglint mcp [PATH]                 compare each coding agent's MCP servers

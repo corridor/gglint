@@ -4,6 +4,16 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `gglint --help` says gglint keeps secrets out of the agents' files as well as their MCP
+  servers in sync.
+- The README introduces both checks, with the secrets results of the November 2026 survey,
+  and its Quick start runs `gglint secrets` and shows a workflow that checks every pull
+  request for secrets.
+
 ## [0.4.0] - 2026-11-18
 
 gglint now keeps secrets out of the files that configure coding agents, as well as keeping
