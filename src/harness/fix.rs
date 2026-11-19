@@ -23,7 +23,7 @@ use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
 use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
 
-use super::agents::{Remote, agent, shares_file_with};
+use super::agents::{Agent, Remote, agent, shares_file_with};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
 use super::mcp::{BYTE_ORDER_MARK, Format, Part, Setting, Syntax, confusing, parse_value, translate, write_value};
 use super::{HARNESSES, Harness, McpConfig, McpServer, Transport};
@@ -521,8 +521,7 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
     };
     let new_text = match agent(harness).format {
         Format::Codex => write_toml(text, writes)?,
-        Format::McpServers => write_json(text, "mcpServers", None, agent(harness).servers_at_top, writes)?,
-        Format::OpenCode => write_json(text, "mcp", Some("https://opencode.ai/config.json"), false, writes)?,
+        Format::McpServers | Format::OpenCode => write_json(text, agent(harness), writes)?,
     };
     if new_text == text {
         return Ok(None);
@@ -547,15 +546,15 @@ fn json_value(field: &Field) -> CstInputValue {
     }
 }
 
-/// Adds the servers to the object at `key`, keeping the rest of the file as it is. A new
-/// file starts with `schema`, when the agent has one.
-/// With `at_top`, a file that already lists servers right at its top gets the new ones
-/// there too.
-fn write_json(text: &str, key: &str, schema: Option<&str>, at_top: bool, writes: &[&Write]) -> Result<String, String> {
+/// Adds the servers to the object at the agent's key, keeping the rest of the file as it is.
+/// A new file starts with the agent's schema, when it has one. An agent that can list servers
+/// right at the top of its file gets the new ones there too, in a file that does.
+fn write_json(text: &str, agent: &Agent, writes: &[&Write]) -> Result<String, String> {
+    let (key, at_top) = (agent.servers_key, agent.servers_at_top);
     let root =
         CstRootNode::parse(text, &ParseOptions::default()).map_err(|error| format!("couldn't parse it: {error}"))?;
     let object = root.object_value_or_set();
-    if let Some(schema) = schema
+    if let Some(schema) = agent.schema
         && text.trim().is_empty()
     {
         object.append("$schema", schema.into());
@@ -574,11 +573,11 @@ fn write_json(text: &str, key: &str, schema: Option<&str>, at_top: bool, writes:
     };
     // OpenCode: write where the file keeps its servers, under `mcp.servers` in its current
     // layout or right under `mcp` in the older one. A file with none gets the current one.
-    if key == "mcp" {
-        match servers.object_value("servers") {
+    if let Some(nested_key) = agent.nested_key {
+        match servers.object_value(nested_key) {
             Some(nested) if !is_server(&nested) => servers = nested,
             Some(_) => {}
-            None if servers.properties().is_empty() => servers = servers.object_value_or_set("servers"),
+            None if servers.properties().is_empty() => servers = servers.object_value_or_set(nested_key),
             None => {}
         }
     }

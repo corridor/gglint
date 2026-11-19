@@ -23,6 +23,13 @@ pub(super) struct Agent {
     pub files: &'static [&'static str],
     /// How those files list the servers.
     pub format: Format,
+    /// The key of the object a JSON file lists the servers in, such as `mcpServers`.
+    pub servers_key: &'static str,
+    /// The key one level down that its current layout keeps the servers in, and that a new
+    /// file gets: OpenCode's `mcp.servers`.
+    pub nested_key: Option<&'static str>,
+    /// The JSON schema a new file starts with.
+    pub schema: Option<&'static str>,
     /// How it refers to an environment variable inside the value of an environment
     /// variable or header.
     pub syntax: Syntax,
@@ -117,6 +124,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".claude"),
         files: &[".mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         syntax: Syntax::Dollar,
         command_line_syntax: Syntax::Dollar,
         remote: Remote::TypedUrl,
@@ -145,6 +155,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".codex"),
         files: &[".codex/config.toml"],
         format: Format::Codex,
+        servers_key: "mcp_servers",
+        nested_key: None,
+        schema: None,
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
         remote: Remote::Url,
@@ -166,6 +179,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".cursor"),
         files: &[".cursor/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         syntax: Syntax::DollarEnv,
         command_line_syntax: Syntax::DollarEnv,
         remote: Remote::Url,
@@ -188,6 +204,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".opencode"),
         files: &["opencode.json", "opencode.jsonc"],
         format: Format::OpenCode,
+        servers_key: "mcp",
+        nested_key: Some("servers"),
+        schema: Some("https://opencode.ai/config.json"),
         syntax: Syntax::BraceEnv,
         command_line_syntax: Syntax::BraceEnv,
         remote: Remote::Url,
@@ -216,6 +235,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: None,
         files: &[".agents/mcp_config.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
@@ -241,6 +263,9 @@ pub(super) const AGENTS: &[Agent] = &[
         // Copilot CLI 1.x reads `.mcp.json` instead while it exists: see `read_instead`.
         files: &[".github/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
@@ -270,6 +295,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".factory"),
         files: &[".factory/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // `${NAME}` in `env` and `headers`, and nowhere else.
         syntax: Syntax::Dollar,
         command_line_syntax: Syntax::Literal,
@@ -297,6 +325,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: None,
         files: &[".gemini/settings.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // `$VAR` or `${VAR}` in any string of settings.json.
         syntax: Syntax::Shell,
         command_line_syntax: Syntax::Shell,
@@ -322,6 +353,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".junie"),
         files: &[".junie/mcp/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,
@@ -344,6 +378,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".kimi-code"),
         files: &[".kimi-code/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Values are literal: a bearer token is read from the environment with
         // `bearerTokenEnvVar`.
         syntax: Syntax::Literal,
@@ -367,6 +404,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".kiro"),
         files: &[".kiro/settings/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // `${VAR}` in `env` and `headers`; its docs show none in a command line or URL.
         syntax: Syntax::Dollar,
         command_line_syntax: Syntax::Literal,
@@ -391,6 +431,9 @@ pub(super) const AGENTS: &[Agent] = &[
         // It reads `.mcp.json` too, in `also_reads`.
         files: &[".qoder/settings.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Its docs don't say, but Qoder CLI 1.1.89 fills in `$VAR` and `${VAR}` in `env`, `args`
         // and `headers`, as Gemini CLI does.
         syntax: Syntax::Shell,
@@ -417,6 +460,9 @@ pub(super) const AGENTS: &[Agent] = &[
         directory: Some(".qwen"),
         files: &[".qwen/settings.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // As in Gemini CLI, which it's built on: `$VAR` or `${VAR}` in any string.
         syntax: Syntax::Shell,
         command_line_syntax: Syntax::Shell,
@@ -443,6 +489,9 @@ pub(super) const AGENTS: &[Agent] = &[
         // Read once "Enable Project MCP" is turned on in Trae's settings.
         files: &[".trae/mcp.json"],
         format: Format::McpServers,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
         // Its docs don't say how a value refers to an environment variable.
         syntax: Syntax::Literal,
         command_line_syntax: Syntax::Literal,

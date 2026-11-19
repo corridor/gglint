@@ -19,7 +19,8 @@ use super::agents::{AGENTS, Off, agent};
 /// How a file lists its MCP servers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Format {
-    /// JSON: `"mcpServers": {name: {command, args, env} or {url, headers}}`.
+    /// JSON: `"mcpServers": {name: {command, args, env} or {url, headers}}`, under the agent's
+    /// own key.
     McpServers,
     /// TOML: `[mcp_servers.<name>]` tables.
     Codex,
@@ -254,9 +255,9 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                     // A byte order mark, which editors on Windows often save, isn't JSON or TOML.
                     let text = text.strip_prefix(BYTE_ORDER_MARK).unwrap_or(&text);
                     match agent.format {
-                        Format::McpServers => read_json(text, "mcpServers", mcp_servers_entry, &mut config),
+                        Format::McpServers => read_json(text, agent.servers_key, mcp_servers_entry, &mut config),
                         Format::Codex => read_codex(text, &mut config),
-                        Format::OpenCode => read_json(text, "mcp", opencode_entry, &mut config),
+                        Format::OpenCode => read_json(text, agent.servers_key, opencode_entry, &mut config),
                     }
                 }
                 // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
@@ -341,8 +342,8 @@ fn read_json(
     };
     // OpenCode's current layout keeps servers one level down, under `mcp.servers`. In the
     // older one they're right under `mcp`, so a server there can be called `servers`.
-    if key == "mcp"
-        && let Some(nested) = servers.get_object("servers")
+    if let Some(nested_key) = agent(config.harness).nested_key
+        && let Some(nested) = servers.get_object(nested_key)
         && !is_server(nested)
     {
         servers = nested;
