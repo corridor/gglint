@@ -4,7 +4,14 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.5] - 2026-11-19
+
+gglint now supports the last 7 coding agents from
+[#10](https://github.com/corridor/gglint/issues/10), 21 in all, and `gglint secrets` reads
+each agent's own settings, rules and personal files. Run over 346 public repositories that
+configure the new agents, `gglint mcp --fix` never removed a server and a second run changed
+nothing, and `gglint secrets` found 14 secrets written out in 12 of them, with two false
+alarms: placeholders left in comments.
 
 ### Added
 
@@ -216,6 +223,7 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.4.5]: https://github.com/corridor/gglint/releases/tag/v0.4.5
 [0.4.0]: https://github.com/corridor/gglint/releases/tag/v0.4.0
 [0.3.0]: https://github.com/corridor/gglint/releases/tag/v0.3.0
 [0.2.0]: https://github.com/corridor/gglint/releases/tag/v0.2.0

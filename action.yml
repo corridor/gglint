@@ -16,7 +16,7 @@ inputs:
     default: "."
   version:
     description: The version of gglint to run, from PyPI.
-    default: "0.4.0"
+    default: "0.4.5"
   fail-on-problems:
     description: Fail the job when gglint finds a problem.
     default: "true"

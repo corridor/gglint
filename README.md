@@ -236,7 +236,7 @@ With the [pre-commit](https://pre-commit.com) framework, gglint is also a source
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/corridor/gglint
-    rev: v0.4.0
+    rev: v0.4.5
     hooks:
       - id: gglint-secrets
       - id: gglint-mcp      # optional: the MCP servers of every agent match
@@ -518,8 +518,8 @@ To run gglint without the action:
 
 ```yaml
       - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.4.0 mcp --format github
-      - run: uvx gglint@0.4.0 secrets --format github
+      - run: uvx gglint@0.4.5 mcp --format github
+      - run: uvx gglint@0.4.5 secrets --format github
 ```
 
 ## Security
@@ -596,7 +596,7 @@ starts with a row in `agents.rs`. `report.rs` is what every check prints through
 
 1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
 2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.4.0`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.4.5`.
 4. Move the `v1` tag to the release's commit, so `uses: corridor/gglint@v1` runs it:
    `git tag -f v1 v<version> && git push -f origin v1`.
 
