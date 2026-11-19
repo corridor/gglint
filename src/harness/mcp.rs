@@ -99,7 +99,7 @@ pub(super) enum Syntax {
     DollarEnv,
     /// `{env:KEY}`: OpenCode.
     BraceEnv,
-    /// `$KEY` or `${KEY}`, written `${KEY}`: Gemini CLI.
+    /// `$KEY` or `${KEY}`, written `${KEY}`: Gemini CLI. Crush runs `$(command)` too.
     Shell,
     /// It doesn't: Codex reads a whole value from the environment with other keys.
     Literal,
@@ -202,10 +202,11 @@ pub(super) fn confusing(text: &str, syntax: Syntax) -> Option<&str> {
         .iter()
         .filter_map(|marker| text.find(marker))
         .min();
+    // `$(` too: Crush runs the command inside.
     let dollar = || {
         text.match_indices('$')
             .map(|(index, _)| index)
-            .find(|&index| text[index + 1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'))
+            .find(|&index| text[index + 1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || c == '('))
     };
     let (start, closed) = match (marked, syntax) {
         (Some(start), _) => (start, true),
@@ -215,6 +216,8 @@ pub(super) fn confusing(text: &str, syntax: Syntax) -> Option<&str> {
     let rest = &text[start..];
     let length = if closed {
         rest.find('}').map_or(rest.len(), |end| end + 1)
+    } else if rest[1..].starts_with('(') {
+        2
     } else {
         1 + rest[1..]
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
@@ -270,6 +273,14 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                     return None;
                 }
                 (Err(error), _) => config.warnings.push(format!("couldn't read: {error}")),
+            }
+            for unreadable in agent.unreadable_files {
+                if root.join(unreadable).is_file() {
+                    config.warnings.push(format!(
+                        "{} also reads servers from {unreadable}, a shell script gglint doesn't read",
+                        agent.name
+                    ));
+                }
             }
             Some(config)
         })
@@ -434,6 +445,12 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
         .find_map(|key| json_string(object, key))
     {
         Transport::Remote { url }
+    } else if object.get("settings").is_some() {
+        // Zed: a server an extension starts, configured by its `settings`.
+        return Err(format!(
+            "`{name}` is started by a {} extension, so gglint can't compare it",
+            agent(harness).name
+        ));
     } else {
         return Err(no_transport(&name, agent(harness).remote.keys()));
     };

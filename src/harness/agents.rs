@@ -31,7 +31,9 @@ pub(super) struct Agent {
     /// The JSON schema a new file starts with.
     pub schema: Option<&'static str>,
     /// How it refers to an environment variable inside the value of an environment
-    /// variable or header.
+    /// variable or header, in a repository's own config file. An agent can trust that file
+    /// less than the user's own: Kilo Code refuses one that refers to the environment, though
+    /// its docs show how. So this follows what the agent does with a repository's file.
     pub syntax: Syntax,
     /// How it refers to one inside a command, its arguments or a URL.
     pub command_line_syntax: Syntax,
@@ -44,6 +46,8 @@ pub(super) struct Agent {
     /// bearer token, sent as `Authorization: Bearer <token>`. Codex's is set by its format.
     pub bearer_token_key: Option<&'static str>,
     /// The `type` an `mcpServers` entry started as a command has, when the agent gives it one.
+    /// An agent that types its remote servers can need one here too: Claude Code takes an
+    /// entry without a `type` for a command, but Crush doesn't start it.
     pub command_type: Option<&'static str>,
     /// The agents whose config files it reads too: every server in them is one it gets.
     pub also_reads: &'static [Harness],
@@ -61,6 +65,9 @@ pub(super) struct Agent {
     /// Its files meant for one person's machine and never for git, which its docs say to keep
     /// out of it, and what each one is.
     pub personal_files: &'static [(&'static str, &'static str)],
+    /// Files it reads servers from too that gglint can't read, such as Crush's `crushrc`, a
+    /// shell script. When one is there, its config file says so.
+    pub unreadable_files: &'static [&'static str],
 }
 
 /// The agent whose config file `harness` reads too and gets a server from, among those
@@ -146,6 +153,7 @@ pub(super) const AGENTS: &[Agent] = &[
             ("CLAUDE.local.md", "Claude Code's personal notes for this project"),
             (".claude/.credentials.json", "Claude Code's login"),
         ],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Codex,
@@ -170,6 +178,7 @@ pub(super) const AGENTS: &[Agent] = &[
         other_files: &["AGENTS.md"],
         rule_directories: &[],
         personal_files: &[(".codex/auth.json", "Codex's login")],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Cursor,
@@ -195,6 +204,7 @@ pub(super) const AGENTS: &[Agent] = &[
         other_files: &[".cursorrules", ".cursor/cli.json"],
         rule_directories: &[".cursor/rules", ".cursor/commands"],
         personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::OpenCode,
@@ -225,6 +235,34 @@ pub(super) const AGENTS: &[Agent] = &[
             ".opencode/command",
         ],
         personal_files: &[],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::Amp,
+        id: "amp",
+        aliases: &[],
+        name: "Amp",
+        directory: Some(".amp"),
+        // Servers here run once you approve them with `amp mcp approve`.
+        files: &[".amp/settings.json"],
+        format: Format::McpServers,
+        servers_key: "amp.mcpServers",
+        nested_key: None,
+        schema: None,
+        // `${VAR}` in any string, a URL and headers included.
+        syntax: Syntax::Dollar,
+        command_line_syntax: Syntax::Dollar,
+        remote: Remote::Url,
+        off: Off::Never,
+        bearer_token_key: None,
+        command_type: None,
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        other_files: &["AGENTS.md", "AGENT.md"],
+        rule_directories: &[],
+        personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Antigravity,
@@ -252,6 +290,7 @@ pub(super) const AGENTS: &[Agent] = &[
         // `.agent` is the older name, and still read.
         rule_directories: &[".agents/rules", ".agents/workflows", ".agent/rules", ".agent/workflows"],
         personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::CopilotCli,
@@ -286,6 +325,37 @@ pub(super) const AGENTS: &[Agent] = &[
             ".github/copilot/settings.local.json",
             "Copilot CLI's personal settings for this repository",
         )],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::Crush,
+        id: "crush",
+        aliases: &[],
+        name: "Crush",
+        // `.crush` holds its logs and sessions, not its settings. Its JSON files are its older
+        // format, read and fixed but never created: a repository starting now uses `crushrc`.
+        directory: None,
+        files: &[".crush.json", "crush.json"],
+        format: Format::McpServers,
+        servers_key: "mcp",
+        nested_key: None,
+        schema: None,
+        // Every value goes through the shell: `$VAR`, `${VAR}` and `$(command)`.
+        syntax: Syntax::Shell,
+        command_line_syntax: Syntax::Shell,
+        remote: Remote::TypedUrl,
+        off: Off::Disabled,
+        bearer_token_key: None,
+        // Every server needs its `type`: one without, a command too, fails to start.
+        command_type: Some("stdio"),
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        // `crushrc` is a shell script, which can set API keys.
+        other_files: &["AGENTS.md", "CRUSH.md", ".crushrc", "crushrc"],
+        rule_directories: &[],
+        personal_files: &[],
+        unreadable_files: &[".crushrc", "crushrc"],
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -315,6 +385,7 @@ pub(super) const AGENTS: &[Agent] = &[
             ".factory/settings.local.json",
             "Factory Droid's personal settings for this project",
         )],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -344,6 +415,7 @@ pub(super) const AGENTS: &[Agent] = &[
             ".gemini/.env",
             "Gemini CLI's environment file, where its docs put your API key",
         )],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Junie,
@@ -369,6 +441,37 @@ pub(super) const AGENTS: &[Agent] = &[
         other_files: &[],
         rule_directories: &[".junie"],
         personal_files: &[],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::KiloCode,
+        id: "kilo",
+        aliases: &["kilo-code", "kilocode"],
+        name: "Kilo Code",
+        directory: Some(".kilo"),
+        // Its docs say to add servers to `kilo.json` when the project has one, and to
+        // `.kilo/kilo.json` otherwise.
+        files: &[".kilo/kilo.json", ".kilo/kilo.jsonc", "kilo.json", "kilo.jsonc"],
+        format: Format::OpenCode,
+        servers_key: "mcp",
+        // Servers sit right under `mcp`.
+        nested_key: None,
+        schema: None,
+        // Its docs show `{env:VAR}`, but it doesn't trust a repository's config: it skips a
+        // whole file that has one, and every server in it.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::Url,
+        off: Off::NotEnabled,
+        bearer_token_key: None,
+        command_type: None,
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        other_files: &["AGENTS.md"],
+        rule_directories: &[],
+        personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::KimiCode,
@@ -395,6 +498,7 @@ pub(super) const AGENTS: &[Agent] = &[
         other_files: &["AGENTS.md"],
         rule_directories: &[],
         personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Kiro,
@@ -421,6 +525,7 @@ pub(super) const AGENTS: &[Agent] = &[
         // Hooks run commands.
         rule_directories: &[".kiro/steering", ".kiro/hooks"],
         personal_files: &[],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Qoder,
@@ -451,6 +556,7 @@ pub(super) const AGENTS: &[Agent] = &[
             ".qoder/settings.local.json",
             "Qoder's personal settings, where it saves the commands you allow",
         )],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::QwenCode,
@@ -479,6 +585,7 @@ pub(super) const AGENTS: &[Agent] = &[
             ".qwen/.env",
             "Qwen Code's environment file, where its docs put your API key",
         )],
+        unreadable_files: &[],
     },
     Agent {
         harness: Harness::Trae,
@@ -505,6 +612,62 @@ pub(super) const AGENTS: &[Agent] = &[
         other_files: &[],
         rule_directories: &[".trae/rules"],
         personal_files: &[],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::VsCode,
+        id: "vscode",
+        aliases: &["vs-code", "copilot-vscode"],
+        name: "VS Code",
+        // Most `.vscode` directories hold editor settings, so it doesn't count alone.
+        directory: None,
+        files: &[".vscode/mcp.json"],
+        format: Format::McpServers,
+        servers_key: "servers",
+        nested_key: None,
+        schema: None,
+        // `${env:VAR}`, and `${input:id}` for a value asked for once, which isn't copied.
+        syntax: Syntax::DollarEnv,
+        command_line_syntax: Syntax::DollarEnv,
+        remote: Remote::TypedUrl,
+        off: Off::Never,
+        bearer_token_key: None,
+        command_type: Some("stdio"),
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        other_files: &[".github/copilot-instructions.md", "AGENTS.md"],
+        rule_directories: &[".github/instructions", ".github/prompts"],
+        personal_files: &[],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::Zed,
+        id: "zed",
+        aliases: &[],
+        name: "Zed",
+        // `.zed` often holds only tasks or debug settings, so it doesn't count alone.
+        directory: None,
+        // Read once you trust the project.
+        files: &[".zed/settings.json"],
+        format: Format::McpServers,
+        servers_key: "context_servers",
+        nested_key: None,
+        schema: None,
+        // Zed doesn't fill in environment variables in its settings.
+        syntax: Syntax::Literal,
+        command_line_syntax: Syntax::Literal,
+        remote: Remote::Url,
+        off: Off::NotEnabled,
+        bearer_token_key: None,
+        command_type: None,
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        other_files: &[".rules", "AGENTS.md"],
+        rule_directories: &[],
+        personal_files: &[],
+        unreadable_files: &[],
     },
 ];
 
