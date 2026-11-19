@@ -26,3 +26,7 @@ toml_edit = { version = "=0.25.17", default-features = false, features = ["parse
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+# Matches the pre-commit hook's `files` pattern in a test. MIT or Apache-2.0.
+regex-lite = "=0.1.9"

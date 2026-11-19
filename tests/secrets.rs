@@ -414,6 +414,29 @@ fn a_secret_in_a_gitignored_file_says_so_and_codex_gets_its_own_advice() {
     );
 }
 
+#[test]
+fn an_agent_that_reads_no_variable_in_its_file_isnt_told_to_read_one() {
+    for (file, advice) in [
+        (
+            ".junie/mcp/mcp.json",
+            "Junie reads no environment variable in this file that gglint knows of, so keep the server in your own Junie config, out of the repository; rotate it",
+        ),
+        (
+            ".kimi-code/mcp.json",
+            "keep the server in your own Kimi Code config, out of the repository, or name the variable holding the Bearer token in `bearerTokenEnvVar`; rotate it",
+        ),
+    ] {
+        let dir = TempDir::new();
+        dir.write(file, cursor_config(&token()));
+
+        let table = gglint(&["secrets".as_ref(), dir.path().as_os_str()]);
+        let table = String::from_utf8(table.stdout).unwrap();
+
+        assert!(table.contains(advice), "{file}: {table}");
+        assert!(!table.contains("environment variable instead"), "{file}: {table}");
+    }
+}
+
 /// Text with the mix of a credential's characters, `length` long, that is nothing else.
 fn filler(length: usize) -> String {
     let alphabet = b"aB3dE6gH9jK2mN5pQ8sT1vW4yZ7";
@@ -524,4 +547,112 @@ fn the_hooks_and_the_action_pin_one_release_no_older_than_this_one() {
     assert_eq!(entries.len(), 2);
     assert!(pins.iter().all(|pin| *pin == pins[0]), "{pins:?}");
     assert!(version(pins[0]) >= version(env!("CARGO_PKG_VERSION")), "{pins:?}");
+}
+
+/// Each agent's personal files, which its docs say to keep out of git, as `local-file` reports
+/// them: one per agent that has one.
+const PERSONAL_FILES: &[&str] = &[
+    ".claude/settings.local.json",
+    "CLAUDE.local.md",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    ".github/copilot/settings.local.json",
+    ".factory/settings.local.json",
+    ".gemini/.env",
+    ".qoder/settings.local.json",
+    ".qwen/.env",
+];
+
+#[test]
+fn every_agents_personal_files_fail_when_staged() {
+    for file in PERSONAL_FILES {
+        let dir = TempDir::new();
+        git(&dir, &["init", "-q"]);
+        dir.write(file, "{}\n");
+        git(&dir, &["add", "."]);
+
+        let (code, stdout) = lines(&dir, &["--staged"]);
+
+        assert_eq!(code, Some(1), "{file}: {stdout}");
+        assert!(stdout.contains(&format!("{file}:1:1  local-file")), "{file}: {stdout}");
+    }
+}
+
+/// The settings, hooks, rules and commands of each agent, other than MCP config files.
+const OTHER_AGENT_FILES: &[&str] = &[
+    ".claude/commands/deploy.md",
+    ".cursor/cli.json",
+    ".cursor/commands/deploy.md",
+    ".opencode/agents/deploy.md",
+    ".opencode/agent/deploy.md",
+    ".opencode/commands/deploy.md",
+    ".opencode/command/deploy.md",
+    ".agents/rules/deploy.md",
+    ".agents/workflows/deploy.md",
+    ".agent/rules/deploy.md",
+    ".agent/workflows/deploy.md",
+    ".github/copilot/settings.json",
+    ".github/hooks/deploy.json",
+    ".factory/settings.json",
+    ".factory/droids/deploy.md",
+    ".factory/commands/deploy.md",
+    ".gemini/commands/deploy.toml",
+    ".kiro/hooks/deploy.json",
+    ".kiro/hooks/deploy.kiro.hook",
+    ".qwen/commands/deploy.md",
+    ".trae/rules/project_rules.md",
+];
+
+#[test]
+fn reads_every_agents_settings_hooks_rules_and_commands() {
+    for file in OTHER_AGENT_FILES {
+        let dir = TempDir::new();
+        dir.write(file, format!("{{ \"note\": \"{}\" }}\n", token()));
+
+        let (code, stdout) = lines(&dir, &[]);
+
+        assert_eq!(code, Some(1), "{file}: {stdout}");
+        assert!(stdout.contains(&format!("{file}:1:")), "{file}: {stdout}");
+    }
+}
+
+#[test]
+fn a_command_saved_by_another_agent_names_that_agent() {
+    let dir = TempDir::new();
+    dir.write(
+        ".qoder/settings.local.json",
+        format!(
+            "{{\n  \"permissions\": {{ \"allow\": [\"Bash(curl -H 'Authorization: Bearer {}' https://x)\"] }}\n}}\n",
+            filler(32)
+        ),
+    );
+
+    let output = gglint(&["secrets".as_ref(), dir.path().as_os_str()]);
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("if Qoder saved the command"), "{stdout}");
+    assert!(!stdout.contains("/permissions"), "{stdout}");
+}
+
+#[test]
+fn the_pre_commit_hook_passes_every_file_gglint_secrets_reads() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hooks = std::fs::read_to_string(root.join(".pre-commit-hooks.yaml")).unwrap();
+    let pattern = hooks
+        .split("\n- id: gglint-secrets")
+        .nth(1)
+        .and_then(|hook| hook.lines().find_map(|line| line.trim().strip_prefix("files: ")))
+        .unwrap()
+        .trim_matches('\'');
+    let pattern = regex_lite::Regex::new(pattern).unwrap();
+
+    let files = gglint::secrets::agent_files()
+        .map(str::to_string)
+        .chain(gglint::secrets::agent_directories().map(|directory| format!("{directory}/deploy.md")));
+    for file in files {
+        assert!(pattern.is_match(&file), "the hook doesn't pass {file}");
+    }
+    for file in PERSONAL_FILES.iter().chain(OTHER_AGENT_FILES) {
+        assert!(pattern.is_match(file), "the hook doesn't pass {file}");
+    }
 }

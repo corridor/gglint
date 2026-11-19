@@ -101,6 +101,13 @@ impl Harness {
         mcp::write_value(&[Part::Env(name.to_string())], mcp::Syntax::of(self))
     }
 
+    /// The key of an MCP server's entry that names the environment variable holding its
+    /// Bearer token, for an agent that reads no other variable there: Kimi Code's
+    /// `bearerTokenEnvVar`.
+    pub fn bearer_token_key(self) -> Option<&'static str> {
+        agents::agent(self).bearer_token_key
+    }
+
     /// A file it reads instead of its own while that one exists: Copilot CLI reads
     /// `.mcp.json` instead of `.github/mcp.json`.
     pub fn reads_instead(self) -> Option<&'static str> {
@@ -112,6 +119,23 @@ impl Harness {
     /// that counts only once it has an MCP config file.
     pub fn directory(self) -> Option<&'static str> {
         agents::agent(self).directory
+    }
+
+    /// Its files other than MCP config files that can hold a secret, relative to the root:
+    /// instructions such as `CLAUDE.md`, and settings and hooks that hold commands.
+    pub fn other_files(self) -> &'static [&'static str] {
+        agents::agent(self).other_files
+    }
+
+    /// The directories of its rules, commands, agents and hooks, relative to the root.
+    pub fn rule_directories(self) -> &'static [&'static str] {
+        agents::agent(self).rule_directories
+    }
+
+    /// Its files meant for one person's machine and never for git, relative to the root, and
+    /// what each one is.
+    pub fn personal_files(self) -> &'static [(&'static str, &'static str)] {
+        agents::agent(self).personal_files
     }
 }
 

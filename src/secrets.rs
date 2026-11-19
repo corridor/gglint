@@ -23,41 +23,54 @@ use crate::report::{Diagnostic, Severity};
 /// Files bigger than this aren't agent configuration, and aren't read.
 const MAX_FILE_SIZE: u64 = 1 << 20;
 
-/// Instruction and settings files of the agents, relative to the root.
-const EXTRA_FILES: &[&str] = &[
-    "CLAUDE.md",
-    "AGENTS.md",
-    "GEMINI.md",
-    "QWEN.md",
-    ".cursorrules",
-    ".windsurfrules",
-    ".clinerules",
-    ".claude/settings.json",
-    ".github/copilot-instructions.md",
-];
+/// Instruction files of agents whose MCP servers gglint doesn't compare, as Windsurf and
+/// Cline keep them in the home directory. Every other agent's files are in its row of the agent
+/// table.
+const OTHER_AGENTS_FILES: &[&str] = &[".windsurfrules", ".clinerules"];
 
-/// Agent files meant for one person's machine and never for git, and what each one is.
-/// Committing one is a problem whatever is in it, so the `local-file` rule doesn't depend on
-/// recognising a secret.
-const LOCAL_FILES: &[(&str, &str)] = &[
-    (
-        ".claude/settings.local.json",
-        "Claude Code's personal settings, where it saves the commands you allow, secrets and all",
-    ),
-    ("CLAUDE.local.md", "Claude Code's personal notes for this project"),
-    (".claude/.credentials.json", "Claude Code's login"),
-    (".codex/auth.json", "Codex's login"),
-];
+/// Every file gglint secrets reads at a fixed path, relative to the root: each agent's MCP
+/// config, other and personal files, and other agents' instruction files. A file several agents
+/// read, such as `AGENTS.md`, comes more than once.
+pub fn agent_files() -> impl Iterator<Item = &'static str> {
+    HARNESSES
+        .iter()
+        .flat_map(|harness| {
+            harness
+                .mcp_files()
+                .iter()
+                .chain(harness.other_files())
+                .copied()
+                .chain(harness.personal_files().iter().map(|&(file, _)| file))
+        })
+        .chain(OTHER_AGENTS_FILES.iter().copied())
+}
 
-/// Directories of the agents' rules, commands and skills, whose files are read too.
-const EXTRA_DIRECTORIES: &[&str] = &[
-    ".claude/commands",
-    ".claude/agents",
-    ".cursor/rules",
-    ".github/instructions",
-    ".kiro/steering",
-    ".junie",
-];
+/// The directories of the agents' rules, commands, agents and hooks, whose files gglint
+/// secrets reads, relative to the root.
+pub fn agent_directories() -> impl Iterator<Item = &'static str> {
+    HARNESSES
+        .iter()
+        .flat_map(|harness| harness.rule_directories().iter().copied())
+}
+
+/// Every agent's personal files, relative to the root, and what each one is.
+pub fn personal_files() -> impl Iterator<Item = (&'static str, &'static str)> {
+    HARNESSES
+        .iter()
+        .flat_map(|harness| harness.personal_files().iter().copied())
+}
+
+/// The agent that keeps `relative` among its settings or personal files, when one does: an
+/// agent that saves the commands you allow saves them to one of those.
+fn settings_owner(relative: &str) -> Option<Harness> {
+    HARNESSES.iter().copied().find(|harness| {
+        harness
+            .other_files()
+            .iter()
+            .chain(harness.personal_files().iter().map(|(file, _)| file))
+            .any(|&file| file == relative && is_config(Path::new(file)))
+    })
+}
 
 /// What to scan.
 #[derive(Clone, Debug)]
@@ -511,6 +524,10 @@ fn placeholder(text: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+/// Whether `value`, the text that would be the secret, is read from elsewhere in one of the
+/// agents' syntaxes instead: `${NAME}`, `${env:NAME}`, `${{ secrets.NAME }}`, `{env:NAME}`,
+/// `{file:path}`, or `$NAME`, `$(command)` and `%NAME%` at its start. A `$` further in is part
+/// of the text, as passwords have them.
 fn is_reference(value: &str) -> bool {
     value.contains("${") || value.contains("{env:") || value.contains("{file:") || value.starts_with(['$', '%'])
 }
@@ -827,7 +844,9 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
                             .map(|_| (scheme.len(), &pair.value[scheme.len()..]))
                     })
                     .unwrap_or((0, pair.value));
-                if is_reference(pair.value)
+                // The credential is what's judged, as in a command line: `Bearer $TOKEN` reads
+                // the environment as surely as `$TOKEN` does.
+                if is_reference(credential)
                     || credential.starts_with("http")
                     || looks_like_path(credential)
                     || names_a_variable(credential)
@@ -878,9 +897,10 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
 }
 
 fn is_config(path: &Path) -> bool {
+    // Kiro's older hooks are JSON files named `*.kiro.hook`.
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("json" | "jsonc" | "toml")
+        Some("json" | "jsonc" | "toml" | "hook")
     )
 }
 
@@ -889,30 +909,21 @@ fn slashed(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-/// The agent files gglint reads at fixed paths, relative to the root.
-fn fixed_files() -> impl Iterator<Item = &'static str> {
-    HARNESSES
-        .iter()
-        .flat_map(|harness| harness.mcp_files().iter().copied())
-        .chain(EXTRA_FILES.iter().copied())
-        .chain(LOCAL_FILES.iter().map(|&(file, _)| file))
-}
-
-/// Whether a file in one of `EXTRA_DIRECTORIES` is a kind gglint reads.
+/// Whether a file in one of the agents' directories is a kind gglint reads.
 fn wanted_in_directory(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("md" | "mdc" | "json" | "toml")
+        Some("md" | "mdc" | "json" | "toml" | "hook")
     )
 }
 
 /// Whether `relative`, a path under the root, is one of the agent files gglint reads.
 fn is_agent_file(relative: &Path) -> bool {
     let name = slashed(relative);
-    fixed_files().any(|file| file == name)
+    agent_files().any(|file| file == name)
         || relative
             .parent()
-            .is_some_and(|parent| EXTRA_DIRECTORIES.contains(&slashed(parent).as_str()))
+            .is_some_and(|parent| agent_directories().any(|directory| directory == slashed(parent)))
             && wanted_in_directory(relative)
 }
 
@@ -931,36 +942,36 @@ fn agent_file_in(path: &Path) -> Option<(PathBuf, PathBuf)> {
             PathBuf::from(relative),
         ))
     };
-    fixed_files().find_map(split).or_else(|| {
+    agent_files().find_map(split).or_else(|| {
         let name = path.file_name()?.to_str()?;
         if !wanted_in_directory(path) {
             return None;
         }
-        EXTRA_DIRECTORIES
-            .iter()
-            .find_map(|directory| split(&format!("{directory}/{name}")))
+        agent_directories().find_map(|directory| split(&format!("{directory}/{name}")))
     })
 }
 
 /// The agent files that exist under `root`, relative to it.
 fn known_files(root: &Path) -> BTreeSet<PathBuf> {
     let mut files = BTreeSet::new();
-    for candidate in fixed_files() {
+    for candidate in agent_files() {
         if root.join(candidate).is_file() {
             files.insert(PathBuf::from(candidate));
         }
     }
-    for directory in EXTRA_DIRECTORIES {
+    for directory in agent_directories() {
         let Ok(entries) = std::fs::read_dir(root.join(directory)) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // Named with `/` on every system, as the agent table names files: a path joined
+            // with `\` on Windows wouldn't match them, or print the same.
             if path.is_file()
                 && wanted_in_directory(&path)
-                && let Some(name) = path.file_name()
+                && let Some(name) = path.file_name().and_then(|name| name.to_str())
             {
-                files.insert(Path::new(directory).join(name));
+                files.insert(PathBuf::from(format!("{directory}/{name}")));
             }
         }
     }
@@ -1090,8 +1101,8 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
     let mut check = ScanResult::default();
     for (path, relative_path, root) in files {
         let root = root.as_path();
-        let local = LOCAL_FILES.iter().find(|&&(file, _)| file == slashed(&relative_path));
-        if let Some(&(_, description)) = local {
+        let local = personal_files().find(|&(file, _)| file == slashed(&relative_path));
+        if let Some((_, description)) = local {
             check_local_file(root, &path, &relative_path, description, &mut check);
         }
         let text = match scope {
@@ -1118,10 +1129,22 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
                 message.push_str(" (the file is gitignored, so it isn't committed)");
             }
             let fix = match (&reference, harness) {
-                _ if hit.command => format!(
-                    "take it out of the command and pass it from your environment, as ${}; if Claude Code saved the command as allowed, remove it with /permissions; rotate it, as it stays in git history once committed",
-                    hit.env
-                ),
+                _ if hit.command => {
+                    let saved = match settings_owner(&slashed(&relative_path)) {
+                        Some(Harness::ClaudeCode) => {
+                            "if Claude Code saved the command as allowed, remove it with /permissions; ".to_string()
+                        }
+                        Some(owner) => format!(
+                            "if {} saved the command as allowed, delete it from this file; ",
+                            owner.display_name()
+                        ),
+                        None => String::new(),
+                    };
+                    format!(
+                        "take it out of the command and pass it from your environment, as ${}; {saved}rotate it, as it stays in git history once committed",
+                        hit.env
+                    )
+                }
                 (Some(reference), _) => format!(
                     "use {reference} and set {} in your environment; rotate it, as it stays in git history once committed",
                     hit.env
@@ -1131,6 +1154,20 @@ pub fn scan_files(root: &Path, scope: &Scope) -> Result<ScanResult, String> {
                     "in Codex, use `bearer_token_env_var = \"{0}\"` for a Bearer token, or `env_http_headers = {{ Header = \"{0}\" }}` for another header, and set {0} in your environment; rotate it",
                     hit.env
                 ),
+                // An agent with no way gglint knows of to read a variable in this file: telling
+                // it to read one would have it write what the agent ignores, or refuses, as Kilo
+                // Code skips its whole file over `{env:VAR}`. The person's own config can hold it.
+                (None, Some(harness)) if harness.env_reference(&hit.env).is_none() => {
+                    let name = harness.display_name();
+                    let bearer = harness
+                        .bearer_token_key()
+                        .filter(|_| hit.key.as_deref().is_some_and(|key| key.eq_ignore_ascii_case("Authorization")))
+                        .map(|key| format!(", or name the variable holding the Bearer token in `{key}`"))
+                        .unwrap_or_default();
+                    format!(
+                        "{name} reads no environment variable in this file that gglint knows of, so keep the server in your own {name} config, out of the repository{bearer}; rotate it, as it stays in git history once committed"
+                    )
+                }
                 (None, _) => "read it from an environment variable instead, and rotate it, as it stays in git history once committed"
                     .to_string(),
             };
@@ -1262,14 +1299,24 @@ mod tests {
         // The replacement starts after "Bearer ", so the scheme is kept.
         assert_eq!(&literal[hits[0].start..hits[0].start + 3], fake(30)[..3].to_string());
 
+        // Every agent's way of reading it from elsewhere, after a scheme too.
         for reference in [
             "Bearer ${GITHUB_TOKEN}",
             "Bearer ${env:GITHUB_TOKEN}",
             "Bearer {env:GITHUB_TOKEN}",
+            "Bearer ${{ secrets.GITHUB_TOKEN }}",
+            "Bearer $GITHUB_PERSONAL_ACCESS_TOKEN",
+            "Basic $BASIC_AUTH_CREDENTIALS",
+            "Token $(op-read-github-token)",
+            "$(op-read-github-token)",
         ] {
             let text = format!("\"Authorization\": \"{reference}\"");
             assert!(scan_text(&text, true).is_empty(), "{reference}");
         }
+
+        // A `$` inside the credential is part of it.
+        let literal = format!("\"Authorization\": \"Bearer {}$X{}\"", fake(12), fake(12));
+        assert_eq!(scan_text(&literal, true).len(), 1);
     }
 
     #[test]
