@@ -15,7 +15,7 @@
   entry: uvx gglint@0.4.0 secrets
   language: system
   pass_filenames: true
-  files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.rules|(CLAUDE|AGENTS?|GEMINI|QWEN|CRUSH)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|copilot/settings(\.local)?\.json|instructions/.*|prompts/.*|hooks/.*)|\.vscode/mcp\.json|\.zed/settings\.json|\.(claude|codex|cursor|opencode|amp|agents|agent|factory|gemini|junie|kilo|kimi-code|kiro|qoder|qwen|trae)/.*)$'
+  files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.rules|(CLAUDE|AGENTS?|GEMINI|QWEN|CRUSH)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|copilot/settings(\.local)?\.json|instructions/.*|prompts/.*|hooks/.*)|\.vscode/mcp\.json|\.zed/settings\.json|\.(claude|codex|cursor|opencode|amp|agents|agent|factory|gemini|junie|kilo|kimi-code|kiro|vibe|qoder|qwen|trae)/.*)$'
 
 - id: gglint-mcp
   name: gglint mcp
@@ -23,4 +23,4 @@
   entry: uvx gglint@0.4.0 mcp --format lines
   language: system
   pass_filenames: false
-  files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.github/mcp\.json|\.vscode/mcp\.json|\.zed/settings\.json|\.(codex|cursor|amp|agents|factory|gemini|junie|kilo|kimi-code|kiro|qoder|qwen|trae)/.*)$'
+  files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.github/mcp\.json|\.vscode/mcp\.json|\.zed/settings\.json|\.(codex|cursor|amp|agents|factory|gemini|junie|kilo|kimi-code|kiro|vibe|qoder|qwen|trae)/.*)$'

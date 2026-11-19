@@ -35,6 +35,7 @@ pub enum Harness {
     KiloCode,
     KimiCode,
     Kiro,
+    MistralVibe,
     Qoder,
     QwenCode,
     Trae,
@@ -43,7 +44,7 @@ pub enum Harness {
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 19] = [
+pub const HARNESSES: [Harness; 20] = [
     Harness::ClaudeCode,
     Harness::Codex,
     Harness::Cursor,
@@ -58,6 +59,7 @@ pub const HARNESSES: [Harness; 19] = [
     Harness::KiloCode,
     Harness::KimiCode,
     Harness::Kiro,
+    Harness::MistralVibe,
     Harness::Qoder,
     Harness::QwenCode,
     Harness::Trae,

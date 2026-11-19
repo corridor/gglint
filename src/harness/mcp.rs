@@ -26,6 +26,8 @@ pub(super) enum Format {
     Codex,
     /// JSON with comments: `"mcp": {name: {command: [...], environment} or {url, headers}}`.
     OpenCode,
+    /// TOML: `[[mcp_servers]]` tables, each with its `name` and `transport`: Mistral Vibe.
+    Vibe,
 }
 
 /// One harness's MCP config file.
@@ -261,6 +263,7 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                         Format::McpServers => read_json(text, agent.servers_key, mcp_servers_entry, &mut config),
                         Format::Codex => read_codex(text, &mut config),
                         Format::OpenCode => read_json(text, agent.servers_key, opencode_entry, &mut config),
+                        Format::Vibe => read_vibe(text, &mut config),
                     }
                 }
                 // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
@@ -653,4 +656,157 @@ fn read_codex(text: &str, config: &mut McpConfig) {
     config
         .servers
         .sort_by_key(|server| (server.location.line, server.location.column));
+}
+
+// ---------------------------------------------------------------------------
+// TOML: Mistral Vibe
+// ---------------------------------------------------------------------------
+
+/// A command written as one string, split into words as a POSIX shell does: by spaces,
+/// keeping what's quoted together. Mistral Vibe splits it with Python's `shlex`.
+pub(super) fn split_command(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut chars = command.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                in_word = true;
+                word.extend(chars.by_ref().take_while(|&c| c != '\''));
+            }
+            '"' => {
+                in_word = true;
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => word.extend(chars.next()),
+                        c => word.push(c),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                word.extend(chars.next());
+            }
+            c if c.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            c => {
+                in_word = true;
+                word.push(c);
+            }
+        }
+    }
+    if in_word {
+        words.push(word);
+    }
+    words
+}
+
+/// A header read from the environment with `api_key_env`: its name and value, from
+/// `api_key_header` and `api_key_format`, `Authorization: Bearer {token}` by default.
+fn vibe_api_key(table: &DeTable<'_>) -> Option<Setting> {
+    let variable = toml_string(table, "api_key_env").filter(|variable| !variable.is_empty())?;
+    let header = toml_string(table, "api_key_header").unwrap_or_else(|| "Authorization".to_string());
+    let format = toml_string(table, "api_key_format").unwrap_or_else(|| "Bearer {token}".to_string());
+    let (before, after) = format.split_once("{token}")?;
+    let mut value = Vec::new();
+    if !before.is_empty() {
+        value.push(Part::Text(before.to_string()));
+    }
+    value.push(Part::Env(variable));
+    if !after.is_empty() {
+        value.push(Part::Text(after.to_string()));
+    }
+    Some(Setting { name: header, value })
+}
+
+/// Mistral Vibe's `.vibe/config.toml`: a list of `[[mcp_servers]]` tables.
+fn read_vibe(text: &str, config: &mut McpConfig) {
+    let root = match DeTable::parse(text) {
+        Ok(root) => root.into_inner(),
+        Err(error) => {
+            config.warnings.push(format!("couldn't parse: {error}"));
+            return;
+        }
+    };
+    let Some(DeValue::Array(servers)) = toml_get(&root, "mcp_servers") else {
+        return;
+    };
+    for value in servers.iter() {
+        let DeValue::Table(table) = value.get_ref() else {
+            config
+                .warnings
+                .push("an entry of `mcp_servers` isn't a table".to_string());
+            continue;
+        };
+        let Some((key, name)) = table.iter().find_map(|(key, value)| match value.get_ref() {
+            DeValue::String(name) if key.get_ref() == "name" => Some((key, name.to_string())),
+            _ => None,
+        }) else {
+            config
+                .warnings
+                .push("an entry of `mcp_servers` has no `name`".to_string());
+            continue;
+        };
+        let transport = match toml_string(table, "transport").as_deref() {
+            Some("stdio") => {
+                let mut words = match toml_get(table, "command") {
+                    Some(DeValue::String(command)) => split_command(command),
+                    Some(DeValue::Array(_)) => toml_strings(table, "command").unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                if words.is_empty() {
+                    config.warnings.push(format!("`{name}` has no `command`"));
+                    continue;
+                }
+                let command = words.remove(0);
+                words.extend(toml_strings(table, "args").unwrap_or_default());
+                Transport::Command { command, args: words }
+            }
+            Some("http" | "streamable-http") => match toml_string(table, "url") {
+                Some(url) => Transport::Remote { url },
+                None => {
+                    config.warnings.push(format!("`{name}` has no `url`"));
+                    continue;
+                }
+            },
+            other => {
+                let other = other.map_or("none".to_string(), |other| format!("`{other}`"));
+                config.warnings.push(format!(
+                    "`{name}` has the transport {other}, not `stdio`, `http` or `streamable-http`"
+                ));
+                continue;
+            }
+        };
+        // The headers and API key are right in the entry in the older layout, and in its
+        // `auth` table, of type `static`, in the current one.
+        let auth = match toml_get(table, "auth") {
+            Some(DeValue::Table(auth)) => Some(auth),
+            _ => None,
+        };
+        let source = auth.unwrap_or(table);
+        let mut headers: Vec<Setting> = toml_pairs(source, "headers").into_iter().map(text_setting).collect();
+        if let Some(api_key) = vibe_api_key(source)
+            && !headers
+                .iter()
+                .any(|header| header.name.eq_ignore_ascii_case(&api_key.name))
+        {
+            headers.push(api_key);
+        }
+        config.servers.push(McpServer {
+            location: location(text, key.span().start),
+            name,
+            transport,
+            env: sorted(toml_pairs(table, "env").into_iter().map(text_setting).collect()),
+            headers: sorted(headers),
+            enabled: !matches!(toml_get(table, "disabled"), Some(DeValue::Boolean(true))),
+            enabled_tools: None,
+            disabled_tools: toml_strings(table, "disabled_tools").unwrap_or_default(),
+        });
+    }
 }

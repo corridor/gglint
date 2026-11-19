@@ -19,6 +19,10 @@ All notable changes to gglint are recorded in this file. The format follows
   one, though its docs show `{env:VAR}`, so a server that reads one isn't copied to either. A
   Zed server started by an extension is named but not compared. `gglint secrets` reads their
   instruction files too, and Crush's `crushrc`.
+- Mistral Vibe, from step 4 of #10: `.vibe/config.toml`, a list of `[[mcp_servers]]` tables
+  with a `name` each. A header read from the environment is written with `api_key_env`, and a
+  server reached over SSE isn't copied to it, as it reaches remote servers over streamable
+  HTTP only.
 
 - `gglint secrets` reads every supported agent's own files, not only Claude Code's and
   Codex's: settings and hooks that hold commands (`.cursor/cli.json`,
