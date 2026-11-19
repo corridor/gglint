@@ -82,20 +82,38 @@ fn fix_replaces_the_secret_with_the_agents_own_reference_and_is_idempotent() {
 
 #[test]
 fn fix_leaves_a_secret_in_a_file_whose_agent_has_no_reference_syntax() {
-    let dir = TempDir::new();
-    let path = dir.write(
-        ".codex/config.toml",
-        format!(
-            "[mcp_servers.github]\nurl = \"https://x\"\nhttp_headers = {{ Authorization = \"Bearer {}\" }}\n",
-            token()
+    // Codex reads a whole value with keys of its own; Kilo Code and Zed read no variable in a
+    // repository's file, and Kilo Code skips a file that has one.
+    let header = format!("\"Authorization\": \"Bearer {}\"", token());
+    for (file, text) in [
+        (
+            ".codex/config.toml",
+            format!(
+                "[mcp_servers.github]\nurl = \"https://x\"\nhttp_headers = {{ Authorization = \"Bearer {}\" }}\n",
+                token()
+            ),
         ),
-    );
-    let before = std::fs::read_to_string(&path).unwrap();
+        (
+            "kilo.json",
+            format!(
+                "{{ \"mcp\": {{ \"github\": {{ \"type\": \"remote\", \"url\": \"https://x\", \"headers\": {{ {header} }} }} }} }}\n"
+            ),
+        ),
+        (
+            ".zed/settings.json",
+            format!(
+                "{{ \"context_servers\": {{ \"github\": {{ \"url\": \"https://x\", \"headers\": {{ {header} }} }} }} }}\n"
+            ),
+        ),
+    ] {
+        let dir = TempDir::new();
+        let path = dir.write(file, &text);
 
-    let output = gglint(&["secrets".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
+        let output = gglint(&["secrets".as_ref(), "--fix".as_ref(), dir.path().as_os_str()]);
 
-    assert_eq!(output.status.code(), Some(1));
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        assert_eq!(output.status.code(), Some(1), "{file}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{file}");
+    }
 }
 
 #[test]
@@ -654,5 +672,24 @@ fn the_pre_commit_hook_passes_every_file_gglint_secrets_reads() {
     }
     for file in PERSONAL_FILES.iter().chain(OTHER_AGENT_FILES) {
         assert!(pattern.is_match(file), "the hook doesn't pass {file}");
+    }
+}
+
+#[test]
+fn the_mcp_pre_commit_hook_runs_when_any_mcp_config_file_changes() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let hooks = std::fs::read_to_string(root.join(".pre-commit-hooks.yaml")).unwrap();
+    let pattern = hooks
+        .split("\n- id: gglint-mcp")
+        .nth(1)
+        .and_then(|hook| hook.lines().find_map(|line| line.trim().strip_prefix("files: ")))
+        .unwrap()
+        .trim_matches('\'');
+    let pattern = regex_lite::Regex::new(pattern).unwrap();
+
+    for harness in gglint::harness::HARNESSES {
+        for file in harness.mcp_files() {
+            assert!(pattern.is_match(file), "the hook doesn't run for {file}");
+        }
     }
 }

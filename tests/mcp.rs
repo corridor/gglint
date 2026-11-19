@@ -1179,7 +1179,9 @@ fn reads_agent_names() {
     assert_eq!(Harness::parse("Claude-Code"), Some(Harness::ClaudeCode));
     assert_eq!(Harness::parse("claude"), Some(Harness::ClaudeCode));
     assert_eq!(Harness::parse("opencode"), Some(Harness::OpenCode));
-    assert_eq!(Harness::parse("vscode"), None);
+    assert_eq!(Harness::parse("vscode"), Some(Harness::VsCode));
+    // Windsurf keeps its MCP servers in the home directory only.
+    assert_eq!(Harness::parse("windsurf"), None);
 }
 
 #[test]

@@ -1324,3 +1324,496 @@ fn a_server_gemini_cli_excludes_or_does_not_allow_is_turned_off() {
         assert_eq!(enabled, on, "{lists}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Amp
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_amp_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".amp/settings.json",
+        r#"{
+  "amp.dangerouslyAllowAll": false,
+  "amp.mcpServers": {
+    "playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest", "--headless"] },
+    "sourcegraph": {
+      "url": "${SRC_ENDPOINT}/.api/mcp/v1",
+      "headers": { "Authorization": "token ${SRC_ACCESS_TOKEN}" }
+    }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Amp);
+
+    assert_eq!(config.relative_path, Path::new(".amp/settings.json"));
+    assert_eq!(
+        server(&config, "playwright").transport,
+        command("npx", &["-y", "@playwright/mcp@latest", "--headless"])
+    );
+    let sourcegraph = server(&config, "sourcegraph");
+    assert_eq!(sourcegraph.transport, remote("${SRC_ENDPOINT}/.api/mcp/v1"));
+    assert_eq!(
+        sourcegraph.headers,
+        [setting("Authorization", &[text("token "), env("SRC_ACCESS_TOKEN")])]
+    );
+}
+
+#[test]
+fn fix_creates_an_amp_config() {
+    assert_eq!(
+        created_from_claude_code(".amp/notes.md", ".amp/settings.json"),
+        CLAUDE_CODE_AS_URL.replace("\"mcpServers\"", "\"amp.mcpServers\"")
+    );
+}
+
+#[test]
+fn amp_gets_values_and_command_lines_that_read_the_environment() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "search": { "command": "uvx", "args": ["search-mcp", "${ROOT}"], "env": { "TOKEN": "${TOKEN}" } } } }"#,
+    );
+    dir.write(".amp/settings.json", "{}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    let written = read(&dir, ".amp/settings.json");
+    assert!(written.contains(r#""args": ["search-mcp", "${ROOT}"]"#), "{written}");
+    assert!(written.contains(r#""TOKEN": "${TOKEN}""#), "{written}");
+}
+
+// ---------------------------------------------------------------------------
+// Crush
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_crush_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".crush.json",
+        r#"{
+  "$schema": "https://charm.land/crush.json",
+  "mcp": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/srv/mcp-server.js"],
+      "env": { "NODE_ENV": "production", "TOKEN": "$FS_TOKEN" }
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GH_PAT}" }
+    },
+    "old": { "command": "old-mcp", "disabled": true }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Crush);
+
+    let filesystem = server(&config, "filesystem");
+    assert_eq!(filesystem.transport, command("node", &["/srv/mcp-server.js"]));
+    assert_eq!(
+        filesystem.env,
+        [
+            setting("NODE_ENV", &[text("production")]),
+            setting("TOKEN", &[env("FS_TOKEN")]),
+        ]
+    );
+    let github = server(&config, "github");
+    assert_eq!(github.transport, remote("https://api.githubcopilot.com/mcp/"));
+    assert_eq!(
+        github.headers,
+        [setting("Authorization", &[text("Bearer "), env("GH_PAT")])]
+    );
+    assert!(!server(&config, "old").enabled);
+}
+
+#[test]
+fn fix_writes_crush_servers_next_to_its_settings_but_never_creates_its_file() {
+    // Crush's JSON is its older format: a repository starting now uses `crushrc` instead.
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".crush/logs/crush.log", "\n");
+    assert!(fix(&dir).0.changed.is_empty());
+
+    dir.write("crush.json", "{\n  \"options\": { \"debug\": false }\n}\n");
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    assert_eq!(
+        read(&dir, "crush.json"),
+        r#"{
+  "options": { "debug": false },
+  "mcp": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.78"],
+      "env": {
+        "CI": "1"
+      }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "X-Team": "web"
+      }
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn crush_gets_no_text_its_shell_would_expand_or_run() {
+    // Claude Code leaves these as they are; Crush runs every value through the shell.
+    for (arg, shown) in [("$HOME", "$HOME"), ("$(whoami)", "$(")] {
+        let dir = TempDir::new();
+        dir.write(
+            ".mcp.json",
+            format!(r#"{{ "mcpServers": {{ "files": {{ "command": "npx", "args": ["files-mcp", "{arg}"] }} }} }}"#),
+        );
+        dir.write(".crush.json", "{}\n");
+
+        let (report, _) = fix(&dir);
+
+        assert_eq!(
+            report.unfixed,
+            [Unfixed {
+                harness: Harness::Crush,
+                server: "files".to_string(),
+                reason: format!("the command line has `{shown}`, which can't be written for Crush"),
+            }],
+            "{arg}"
+        );
+    }
+}
+
+#[test]
+fn crush_says_it_reads_crushrc_too() {
+    let dir = TempDir::new();
+    dir.write(".crush.json", "{ \"mcp\": {} }\n");
+    dir.write(
+        ".crushrc",
+        "mcp add github --type http --url https://api.githubcopilot.com/mcp/\n",
+    );
+
+    let configs = read_mcp(dir.path());
+
+    let crush = configs.iter().find(|config| config.harness == Harness::Crush).unwrap();
+    assert_eq!(
+        crush.warnings,
+        ["Crush also reads servers from .crushrc, a shell script gglint doesn't read"]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Kilo Code
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_kilo_code_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        "kilo.jsonc",
+        r#"{
+  // Servers for this project.
+  "mcp": {
+    "my-local-server": {
+      "type": "local",
+      "command": ["node", "/path/to/server.js"],
+      "environment": { "LOG_LEVEL": "debug" },
+      "enabled": true,
+      "timeout": 10000
+    },
+    "my-remote-server": {
+      "type": "remote",
+      "url": "https://your-server-url.com/mcp",
+      "headers": { "X-Team": "web" },
+      "enabled": false
+    }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::KiloCode);
+
+    let local = server(&config, "my-local-server");
+    assert_eq!(local.transport, command("node", &["/path/to/server.js"]));
+    assert_eq!(local.env, [setting("LOG_LEVEL", &[text("debug")])]);
+    let remote_server = server(&config, "my-remote-server");
+    assert_eq!(remote_server.transport, remote("https://your-server-url.com/mcp"));
+    assert_eq!(remote_server.headers, [setting("X-Team", &[text("web")])]);
+    assert!(!remote_server.enabled);
+}
+
+#[test]
+fn kilo_code_gets_no_server_that_reads_the_environment() {
+    // Kilo Code skips a repository's whole config file when it has `{env:VAR}`.
+    assert_eq!(
+        unfixed_env_reference(".kilo/agents/review.md"),
+        [Unfixed {
+            harness: Harness::KiloCode,
+            server: "search".to_string(),
+            reason: "the value of `TOKEN` can't be written for Kilo Code".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn fix_creates_a_kilo_code_config_with_servers_right_under_mcp() {
+    assert_eq!(
+        created_from_claude_code(".kilo/agents/review.md", ".kilo/kilo.json"),
+        r#"{
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "-y", "@playwright/mcp@0.0.78"],
+      "environment": {
+        "CI": "1"
+      }
+    },
+    "docs": {
+      "type": "remote",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "X-Team": "web"
+      }
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn kilo_names_kilo_code() {
+    assert_eq!(Harness::parse("kilo"), Some(Harness::KiloCode));
+    assert_eq!(Harness::parse("kilo-code"), Some(Harness::KiloCode));
+}
+
+// ---------------------------------------------------------------------------
+// VS Code
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_vs_code_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".vscode/mcp.json",
+        r#"{
+  "inputs": [{ "type": "promptString", "id": "github-token", "description": "GitHub token", "password": true }],
+  "servers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${input:github-token}" }
+    },
+    "files": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "files-mcp", "${workspaceFolder}"],
+      "env": { "TOKEN": "${env:FILES_TOKEN}" }
+    }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::VsCode);
+
+    let files = server(&config, "files");
+    assert_eq!(
+        files.transport,
+        command("npx", &["-y", "files-mcp", "${workspaceFolder}"])
+    );
+    assert_eq!(files.env, [setting("TOKEN", &[env("FILES_TOKEN")])]);
+    assert_eq!(
+        server(&config, "github").headers,
+        [setting("Authorization", &[text("Bearer ${input:github-token}")])]
+    );
+}
+
+#[test]
+fn a_vscode_directory_alone_is_not_vs_code() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".vscode/settings.json", "{ \"editor.tabSize\": 2 }\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn fix_gives_every_vs_code_server_a_type() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".vscode/mcp.json", "{\n  \"servers\": {}\n}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    assert_eq!(
+        read(&dir, ".vscode/mcp.json"),
+        r#"{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.78"],
+      "env": {
+        "CI": "1"
+      }
+    },
+    "docs": {
+      "type": "http",
+      "url": "https://docs.example.com/mcp",
+      "headers": {
+        "X-Team": "web"
+      }
+    }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn a_vs_code_server_that_asks_for_an_input_isnt_copied() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", "{ \"mcpServers\": {} }\n");
+    dir.write(
+        ".vscode/mcp.json",
+        r#"{ "servers": { "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/", "headers": { "Authorization": "Bearer ${input:github-token}" } } } }"#,
+    );
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::ClaudeCode,
+            server: "github".to_string(),
+            reason: "the value of the `Authorization` header can't be written for Claude Code".to_string(),
+        }]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Zed
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_zed_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".zed/settings.json",
+        r#"// Zed settings for this project
+{
+  "tab_size": 2,
+  "context_servers": {
+    "local-mcp-server": { "command": "some-command", "args": ["arg-1", "arg-2"], "env": { "MODE": "dev" } },
+    "remote-mcp-server": { "url": "https://example.com/mcp", "headers": { "X-Team": "web" } },
+    "off": { "command": "off-mcp", "enabled": false }
+  }
+}
+"#,
+    );
+
+    let config = config_of(&dir, Harness::Zed);
+
+    let local = server(&config, "local-mcp-server");
+    assert_eq!(local.transport, command("some-command", &["arg-1", "arg-2"]));
+    assert_eq!(local.env, [setting("MODE", &[text("dev")])]);
+    assert_eq!(
+        server(&config, "remote-mcp-server").transport,
+        remote("https://example.com/mcp")
+    );
+    assert!(!server(&config, "off").enabled);
+}
+
+#[test]
+fn fix_writes_zed_servers_next_to_its_settings() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".zed/settings.json", "{\n  \"tab_size\": 2\n}\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    assert_eq!(
+        read(&dir, ".zed/settings.json"),
+        CLAUDE_CODE_AS_URL.replace("{\n  \"mcpServers\"", "{\n  \"tab_size\": 2,\n  \"context_servers\"")
+    );
+}
+
+#[test]
+fn a_zed_directory_alone_is_not_zed() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".zed/tasks.json", "[]\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert!(report.changed.is_empty(), "{:?}", report.changed);
+}
+
+#[test]
+fn zed_gets_no_server_that_reads_the_environment() {
+    assert_eq!(
+        unfixed_env_reference(".zed/settings.json"),
+        [Unfixed {
+            harness: Harness::Zed,
+            server: "search".to_string(),
+            reason: "the value of `TOKEN` can't be written for Zed".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn a_zed_server_from_an_extension_is_named_not_compared() {
+    let dir = TempDir::new();
+    dir.write(
+        ".zed/settings.json",
+        r#"{ "context_servers": { "postgres": { "settings": { "database_url": "postgresql://localhost/app" } } } }"#,
+    );
+
+    let configs = read_mcp(dir.path());
+
+    let zed = configs.iter().find(|config| config.harness == Harness::Zed).unwrap();
+    assert!(zed.servers.is_empty());
+    assert_eq!(
+        zed.warnings,
+        ["`postgres` is started by a Zed extension, so gglint can't compare it"]
+    );
+}
