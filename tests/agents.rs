@@ -1817,3 +1817,58 @@ fn a_zed_server_from_an_extension_is_named_not_compared() {
         ["`postgres` is started by a Zed extension, so gglint can't compare it"]
     );
 }
+
+#[test]
+fn reads_and_updates_zed_servers_in_its_older_layout() {
+    // Zed used to nest the command: `"command": { "path", "args", "env" }`.
+    let dir = TempDir::new();
+    dir.write(
+        ".zed/settings.json",
+        r#"{
+  "context_servers": {
+    "docs": { "command": { "path": "npx", "args": ["-y", "docs-mcp@1"], "env": { "MODE": "dev" } } }
+  }
+}
+"#,
+    );
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "docs": { "command": "npx", "args": ["-y", "docs-mcp@2"], "env": { "MODE": "dev" } } } }"#,
+    );
+
+    let config = config_of(&dir, Harness::Zed);
+    let docs = server(&config, "docs");
+    assert_eq!(docs.transport, command("npx", &["-y", "docs-mcp@1"]));
+    assert_eq!(docs.env, [setting("MODE", &[text("dev")])]);
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    assert_eq!(
+        read(&dir, ".zed/settings.json"),
+        r#"{
+  "context_servers": {
+    "docs": { "command": { "path": "npx", "args": ["-y", "docs-mcp@2"], "env": { "MODE": "dev" } } }
+  }
+}
+"#
+    );
+}
+
+#[test]
+fn a_command_that_isnt_a_string_is_named() {
+    let dir = TempDir::new();
+    dir.write(
+        "crush.json",
+        r#"{ "mcp": { "files": { "type": "stdio", "command": ["npx", "-y", "files-mcp"] } } }"#,
+    );
+
+    let configs = read_mcp(dir.path());
+
+    let crush = configs.iter().find(|config| config.harness == Harness::Crush).unwrap();
+    assert_eq!(crush.warnings, ["`files` has a `command` that isn't a string"]);
+}
