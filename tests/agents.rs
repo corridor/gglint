@@ -1872,3 +1872,165 @@ fn a_command_that_isnt_a_string_is_named() {
     let crush = configs.iter().find(|config| config.harness == Harness::Crush).unwrap();
     assert_eq!(crush.warnings, ["`files` has a `command` that isn't a string"]);
 }
+
+// ---------------------------------------------------------------------------
+// Mistral Vibe
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_mistral_vibe_servers() {
+    let dir = TempDir::new();
+    dir.write(
+        ".vibe/config.toml",
+        r#"active_model = "devstral"
+
+[[mcp_servers]]
+name = "fetch_server"
+transport = "stdio"
+command = "uvx"
+args = ["mcp-server-fetch"]
+env = { DEBUG = "1" }
+
+[[mcp_servers]]
+name = "docs"
+transport = "streamable-http"
+url = "https://docs.example.com/mcp"
+headers = { "X-Team" = "web" }
+api_key_env = "DOCS_TOKEN"
+
+[[mcp_servers]]
+name = "linear"
+transport = "http"
+url = "https://mcp.linear.app/mcp"
+
+[mcp_servers.auth]
+type = "static"
+headers = { X-Org = "corridor" }
+api_key_env = "LINEAR_KEY"
+api_key_header = "X-API-Key"
+api_key_format = "{token}"
+
+[[mcp_servers]]
+name = "files"
+transport = "stdio"
+command = "npx -y 'files mcp'"
+disabled = true
+"#,
+    );
+
+    let config = config_of(&dir, Harness::MistralVibe);
+
+    let fetch = server(&config, "fetch_server");
+    assert_eq!(fetch.transport, command("uvx", &["mcp-server-fetch"]));
+    assert_eq!(fetch.env, [setting("DEBUG", &[text("1")])]);
+    assert_eq!(fetch.location.line, 4);
+    let docs = server(&config, "docs");
+    assert_eq!(docs.transport, remote("https://docs.example.com/mcp"));
+    assert_eq!(
+        docs.headers,
+        [
+            setting("Authorization", &[text("Bearer "), env("DOCS_TOKEN")]),
+            setting("X-Team", &[text("web")]),
+        ]
+    );
+    assert_eq!(
+        server(&config, "linear").headers,
+        [
+            setting("X-API-Key", &[env("LINEAR_KEY")]),
+            setting("X-Org", &[text("corridor")])
+        ]
+    );
+    let files = server(&config, "files");
+    assert_eq!(files.transport, command("npx", &["-y", "files mcp"]));
+    assert!(!files.enabled);
+}
+
+#[test]
+fn fix_creates_a_mistral_vibe_config() {
+    assert_eq!(
+        created_from_claude_code(".vibe/agents/review.toml", ".vibe/config.toml"),
+        r#"[[mcp_servers]]
+name = "playwright"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@playwright/mcp@0.0.78"]
+env = { CI = "1" }
+
+[[mcp_servers]]
+name = "docs"
+transport = "streamable-http"
+url = "https://docs.example.com/mcp"
+headers = { X-Team = "web" }
+"#
+    );
+}
+
+#[test]
+fn fix_adds_mistral_vibe_servers_after_its_settings() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "docs": { "type": "http", "url": "https://docs.example.com/mcp", "headers": { "Authorization": "Bearer ${DOCS_TOKEN}" } } } }"#,
+    );
+    dir.write(".vibe/config.toml", "# Vibe\nactive_model = \"devstral\"\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    assert_eq!(
+        read(&dir, ".vibe/config.toml"),
+        r#"# Vibe
+active_model = "devstral"
+
+[[mcp_servers]]
+name = "docs"
+transport = "streamable-http"
+url = "https://docs.example.com/mcp"
+api_key_env = "DOCS_TOKEN"
+"#
+    );
+}
+
+#[test]
+fn mistral_vibe_gets_no_server_that_reads_the_environment_in_another_way() {
+    assert_eq!(
+        unfixed_env_reference(".vibe/agents/review.toml"),
+        [Unfixed {
+            harness: Harness::MistralVibe,
+            server: "search".to_string(),
+            reason: "the value of `TOKEN` can't be written for Mistral Vibe".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn mistral_vibe_gets_no_server_reached_over_sse() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "linear": { "type": "sse", "url": "https://mcp.linear.app/sse" } } }"#,
+    );
+    dir.write(".vibe/config.toml", "");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::MistralVibe,
+            server: "linear".to_string(),
+            reason: "it's reached over SSE, and Mistral Vibe only reaches remote servers over streamable HTTP"
+                .to_string(),
+        }]
+    );
+}
+
+#[test]
+fn vibe_names_mistral_vibe() {
+    assert_eq!(Harness::parse("vibe"), Some(Harness::MistralVibe));
+    assert_eq!(Harness::parse("mistral-vibe"), Some(Harness::MistralVibe));
+}

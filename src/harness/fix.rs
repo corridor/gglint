@@ -21,7 +21,7 @@ use std::process::{Command, Stdio};
 
 use jsonc_parser::ParseOptions;
 use jsonc_parser::cst::{CstInputValue, CstObject, CstRootNode};
-use toml_edit::{Array, DocumentMut, InlineTable, Item, Table};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table};
 
 use super::agents::{Agent, Remote, agent, shares_file_with};
 use super::compare::{Cell, McpCheck, Setup, same_command_line, same_program};
@@ -337,6 +337,10 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
         return codex_fields(server, cannot)
             .map(|codex| codex.into_iter().filter(|(_, field)| !is_empty(field)).collect());
     }
+    if format == Format::Vibe {
+        return vibe_fields(server, harness, cannot)
+            .map(|vibe| vibe.into_iter().filter(|(_, field)| !is_empty(field)).collect());
+    }
     let syntax = Syntax::of(harness);
     let settings = |settings: &[Setting], what: &dyn Fn(&str) -> String| -> Result<Field, String> {
         settings
@@ -501,6 +505,82 @@ fn codex_fields(server: &McpServer, cannot: impl Fn(&str) -> String) -> Result<V
     }
 }
 
+/// Mistral Vibe's values are literal too, and it reaches a remote server over streamable HTTP
+/// only. One header read whole from the environment goes in `api_key_env`, with
+/// `api_key_header` and `api_key_format` when they aren't `Authorization` and
+/// `Bearer {token}`.
+fn vibe_fields(
+    server: &McpServer,
+    harness: Harness,
+    cannot: impl Fn(&str) -> String,
+) -> Result<Vec<(&'static str, Field)>, String> {
+    let literal = |settings: &[Setting], what: &dyn Fn(&str) -> String| {
+        settings
+            .iter()
+            .map(|setting| {
+                write_value(&setting.value, Syntax::Literal)
+                    .map(|value| (setting.name.clone(), value))
+                    .ok_or_else(|| cannot(&what(&setting.name)))
+            })
+            .collect::<Result<Vec<_>, _>>()
+    };
+    match &server.transport {
+        Transport::Command { command, args } => Ok(vec![
+            ("transport", Field::Text("stdio".to_string())),
+            ("command", Field::Text(command.clone())),
+            ("args", Field::List(args.clone())),
+            ("env", Field::Map(literal(&server.env, &|name| format!("`{name}`"))?)),
+        ]),
+        Transport::Remote { url } => {
+            if url.trim_end_matches('/').ends_with("/sse") {
+                return Err(format!(
+                    "it's reached over SSE, and {} only reaches remote servers over streamable HTTP",
+                    harness.display_name()
+                ));
+            }
+            let mut headers = Vec::new();
+            let mut api_key: Option<(String, String, String)> = None;
+            for setting in &server.headers {
+                let format = match setting.value.as_slice() {
+                    [Part::Env(_)] => Some(String::from("{token}")),
+                    [Part::Text(prefix), Part::Env(_)] => Some(format!("{prefix}{{token}}")),
+                    _ => None,
+                };
+                match (
+                    format,
+                    setting.value.iter().find_map(|part| match part {
+                        Part::Env(variable) => Some(variable.clone()),
+                        Part::Text(_) => None,
+                    }),
+                ) {
+                    (Some(format), Some(variable)) if api_key.is_none() => {
+                        api_key = Some((setting.name.clone(), variable, format));
+                    }
+                    _ => headers.push(setting.clone()),
+                }
+            }
+            let mut fields = vec![
+                ("transport", Field::Text("streamable-http".to_string())),
+                ("url", Field::Text(url.clone())),
+                (
+                    "headers",
+                    Field::Map(literal(&headers, &|name| format!("the `{name}` header"))?),
+                ),
+            ];
+            if let Some((header, variable, format)) = api_key {
+                fields.push(("api_key_env", Field::Text(variable)));
+                if header != "Authorization" {
+                    fields.push(("api_key_header", Field::Text(header)));
+                }
+                if format != "Bearer {token}" {
+                    fields.push(("api_key_format", Field::Text(format)));
+                }
+            }
+            Ok(fields)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Writing files
 // ---------------------------------------------------------------------------
@@ -522,6 +602,7 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
     let new_text = match agent(harness).format {
         Format::Codex => write_toml(text, writes)?,
         Format::McpServers | Format::OpenCode => write_json(text, agent(harness), writes)?,
+        Format::Vibe => write_vibe(text, writes)?,
     };
     if new_text == text {
         return Ok(None);
@@ -671,6 +752,46 @@ fn write_toml(text: &str, writes: &[&Write]) -> Result<String, String> {
             table.insert(key, toml_item(field));
         }
         servers.insert(&write.name, Item::Table(table));
+    }
+    Ok(document.to_string())
+}
+
+/// Adds the servers as `[[mcp_servers]]` tables, each starting with its `name`, keeping the
+/// rest of the file as it is.
+fn write_vibe(text: &str, writes: &[&Write]) -> Result<String, String> {
+    let mut document: DocumentMut = text.parse().map_err(|error| format!("couldn't parse it: {error}"))?;
+    let servers = document
+        .entry("mcp_servers")
+        .or_insert_with(|| Item::ArrayOfTables(ArrayOfTables::new()));
+    let Some(servers) = servers.as_array_of_tables_mut() else {
+        return Err("its `mcp_servers` isn't a list of `[[mcp_servers]]` tables".to_string());
+    };
+    for write in writes {
+        let existing = servers
+            .iter_mut()
+            .find(|table| table.get("name").and_then(Item::as_str) == Some(write.name.as_str()));
+        match existing {
+            Some(table) if write.update => {
+                for (key, field) in &write.fields {
+                    if is_empty(field) {
+                        table.remove(key);
+                    } else {
+                        table.insert(key, toml_item(field));
+                    }
+                }
+            }
+            // Never over a server that's there.
+            Some(_) => {}
+            None if write.update => {}
+            None => {
+                let mut table = Table::new();
+                table.insert("name", toml_edit::value(write.name.as_str()));
+                for (key, field) in &write.fields {
+                    table.insert(key, toml_item(field));
+                }
+                servers.push(table);
+            }
+        }
     }
     Ok(document.to_string())
 }
