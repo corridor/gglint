@@ -2254,3 +2254,24 @@ fn a_continue_directory_without_servers_gets_them() {
     assert!(left.is_empty(), "{left:?}");
     assert_eq!(report.changed.len(), 2, "{:?}", report.changed);
 }
+
+#[test]
+fn a_continue_server_from_its_hub_is_named_not_compared() {
+    let dir = TempDir::new();
+    dir.write(
+        ".continue/mcpServers/docs.yaml",
+        "name: Docs\nversion: 0.0.1\nschema: v1\nmcpServers:\n  - uses: continuedev/continue-docs-mcp\n",
+    );
+
+    let configs = read_mcp(dir.path());
+
+    let continue_config = configs
+        .iter()
+        .find(|config| config.harness == Harness::Continue)
+        .unwrap();
+    assert!(continue_config.servers.is_empty());
+    assert_eq!(
+        continue_config.warnings,
+        ["`continuedev/continue-docs-mcp` comes from Continue's hub, so gglint can't compare it"]
+    );
+}

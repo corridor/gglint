@@ -997,6 +997,13 @@ fn read_continue_yaml(text: &str, config: &mut McpConfig) {
             continue;
         };
         for entry in servers {
+            // A block from Continue's hub, `uses: owner/name`, is set up there.
+            if let Some(block) = entry["uses"].as_str() {
+                config.warnings.push(format!(
+                    "`{block}` comes from Continue's hub, so gglint can't compare it"
+                ));
+                continue;
+            }
             let Some(name) = entry["name"].as_str().map(str::to_string) else {
                 config
                     .warnings
