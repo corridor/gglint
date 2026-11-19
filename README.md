@@ -7,7 +7,7 @@
 Keep every coding agent in your repository in sync, and keep secrets out of their config
 files.
 
-Claude Code, Codex, Cursor, Gemini CLI, Copilot CLI and nine other coding agents are each set
+Claude Code, Codex, Cursor, Gemini CLI, VS Code and fourteen other coding agents are each set
 up by their own files in a repository (see [Supported agents](#supported-agents)). gglint
 checks those files for two problems:
 
@@ -192,16 +192,21 @@ agent's docs say to keep it out of git, or it's where they say to put your API k
 | Codex         | `AGENTS.md`                                                                       |                                                                                     | `.codex/auth.json`                                                              |
 | Cursor        | `.cursorrules`, `.cursor/cli.json`                                                | `.cursor/rules/`, `.cursor/commands/`                                               |                                                                                 |
 | OpenCode      | `AGENTS.md`                                                                       | `.opencode/agents/`, `.opencode/agent/`, `.opencode/commands/`, `.opencode/command/` |                                                                                 |
+| Amp           | `AGENTS.md`, `AGENT.md`                                                           |                                                                                     |                                                                                 |
 | Antigravity   |                                                                                   | `.agents/rules/`, `.agents/workflows/`, `.agent/rules/`, `.agent/workflows/`        |                                                                                 |
 | Copilot CLI   | `.github/copilot-instructions.md`, `AGENTS.md`, `.github/copilot/settings.json`   | `.github/instructions/`, `.github/hooks/`                                           | `.github/copilot/settings.local.json`                                           |
+| Crush         | `AGENTS.md`, `CRUSH.md`, `.crushrc`, `crushrc`                                    |                                                                                     |                                                                                 |
 | Factory Droid | `AGENTS.md`, `.factory/settings.json`                                             | `.factory/droids/`, `.factory/commands/`                                            | `.factory/settings.local.json`                                                  |
 | Gemini CLI    | `GEMINI.md`                                                                       | `.gemini/commands/`                                                                 | `.gemini/.env`                                                                  |
 | Junie         |                                                                                   | `.junie/`                                                                           |                                                                                 |
+| Kilo Code     | `AGENTS.md`                                                                       |                                                                                     |                                                                                 |
 | Kimi Code     | `AGENTS.md`                                                                       |                                                                                     |                                                                                 |
 | Kiro          |                                                                                   | `.kiro/steering/`, `.kiro/hooks/`                                                   |                                                                                 |
 | Qoder         | `AGENTS.md`                                                                       |                                                                                     | `.qoder/settings.local.json`                                                    |
 | Qwen Code     | `QWEN.md`                                                                         | `.qwen/commands/`                                                                   | `.qwen/.env`                                                                    |
 | Trae          |                                                                                   | `.trae/rules/`                                                                      |                                                                                 |
+| VS Code       | `.github/copilot-instructions.md`, `AGENTS.md`                                    | `.github/instructions/`, `.github/prompts/`                                         |                                                                                 |
+| Zed           | `.rules`, `AGENTS.md`                                                             |                                                                                     |                                                                                 |
 
 It also reads `.windsurfrules` and `.clinerules`, the instructions of Windsurf and Cline, which
 keep their MCP servers outside the repository.
@@ -272,23 +277,43 @@ secrets.
 | Codex         | `codex`       | `.codex/config.toml`                | `.codex/`       | TOML, `[mcp_servers.<name>]`               |
 | Cursor        | `cursor`      | `.cursor/mcp.json`                  | `.cursor/`      | JSON, `mcpServers`                         |
 | OpenCode      | `opencode`    | `opencode.json`, `opencode.jsonc`   | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp` |
+| Amp           | `amp`         | `.amp/settings.json`                | `.amp/`         | JSON, `amp.mcpServers` among other settings |
 | Antigravity   | `antigravity` | `.agents/mcp_config.json`           | none            | JSON, `mcpServers`                         |
 | Copilot CLI   | `copilot-cli` | `.github/mcp.json`, or `.mcp.json`  | none            | JSON, `mcpServers` or servers at the top   |
+| Crush         | `crush`       | `.crush.json`, `crush.json`         | none            | JSON, `mcp`, each with a `type`            |
 | Factory Droid | `droid`       | `.factory/mcp.json`                 | `.factory/`     | JSON, `mcpServers`                         |
 | Gemini CLI    | `gemini-cli`  | `.gemini/settings.json`             | none            | JSON, `mcpServers` among other settings    |
 | Junie         | `junie`       | `.junie/mcp/mcp.json`               | `.junie/`       | JSON, `mcpServers`                         |
+| Kilo Code     | `kilo`        | `.kilo/kilo.json`, `kilo.json`, or `.jsonc` | `.kilo/` | JSON with comments, `mcp`                |
 | Kimi Code     | `kimi-code`   | `.kimi-code/mcp.json`               | `.kimi-code/`   | JSON, `mcpServers`                         |
 | Kiro          | `kiro`        | `.kiro/settings/mcp.json`           | `.kiro/`        | JSON, `mcpServers`                         |
 | Qoder         | `qoder`       | `.qoder/settings.json`, `.mcp.json` | `.qoder/`       | JSON, `mcpServers` among other settings    |
 | Qwen Code     | `qwen-code`   | `.qwen/settings.json`               | `.qwen/`        | JSON, `mcpServers` among other settings    |
 | Trae          | `trae`        | `.trae/mcp.json`                    | `.trae/`        | JSON, `mcpServers`                         |
+| VS Code       | `vscode`      | `.vscode/mcp.json`                  | none            | JSON, `servers`, each with a `type`        |
+| Zed           | `zed`         | `.zed/settings.json`                | none            | JSON with comments, `context_servers` among other settings |
 
 gglint compares the agents that have an MCP config file or their own directory at the
 repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't
 count, because it doesn't show that the agent is set up in the repository. Antigravity,
-Copilot CLI and Gemini CLI count only once they have their config file: many repositories
-have an `.agents/`, `.github/` or `.gemini/` directory for other reasons, such as skills,
-workflows or Gemini Code Assist's reviews.
+Copilot CLI, Gemini CLI, VS Code and Zed count only once they have their config file: many
+repositories have an `.agents/`, `.github/`, `.gemini/`, `.vscode/` or `.zed/` directory for
+other reasons, such as skills, workflows, Gemini Code Assist's reviews or editor settings.
+
+Crush's JSON files are its older format: gglint reads and fixes `.crush.json` or `crush.json`
+but never creates one. Crush also reads servers from `.crushrc` or `crushrc`, shell scripts
+gglint doesn't read, and gglint says so when one is there. Crush fills in `$VAR` and runs
+`$(command)` in every value, so a value with `$` in it isn't copied to Crush.
+
+Kilo Code reads no environment variable in a repository's config: though its docs show
+`{env:VAR}`, it skips a whole `kilo.json` that has one, with every server in it. So a server
+that reads a variable isn't copied to Kilo Code, and for a secret in its file, `gglint secrets`
+suggests your own Kilo Code config instead.
+
+VS Code can ask for a value once with `${input:id}`, such as a token; a server that uses one
+isn't copied to another agent. Zed doesn't fill in environment variables, so a server that
+reads one isn't copied to Zed, and a Zed server started by an extension is named but not
+compared.
 
 Qoder reads Claude Code's `.mcp.json` as well as its own file: a server there counts as
 Qoder's, and a server missing from both is added to `.mcp.json` only.
@@ -504,8 +529,7 @@ To run gglint without the action:
 - User-level settings such as `~/.claude.json` or `~/.codex/config.toml` aren't read.
 - Only config files at the repository's root are read, so each package of a monorepo is
   checked separately.
-- VS Code and GitHub Copilot in VS Code (`.vscode/mcp.json`), Zed, Kilo Code, Crush, Amp,
-  Continue and Mistral Vibe aren't supported yet
+- Continue and Mistral Vibe aren't supported yet
   ([#10](https://github.com/corridor/gglint/issues/10)).
 - Gemini CLI loads only the servers listed in `mcp.allowed`, when its settings have that
   list, and never those in `mcp.excluded`; gglint reports the servers these lists leave out
@@ -524,8 +548,8 @@ To run gglint without the action:
   instead.
 - Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
   nothing in a repository to compare.
-- Codex, Copilot CLI, Gemini CLI, Qoder and Qwen Code load a repository's MCP servers only
-  once you trust the project or approve its servers. Trae reads `.trae/mcp.json` once project
+- Amp, Codex, Copilot CLI, Gemini CLI, Qoder, Qwen Code and Zed load a repository's MCP
+  servers only once you trust the project or approve its servers. Trae reads `.trae/mcp.json` once project
   MCP is turned on in its settings.
 
 ## Development

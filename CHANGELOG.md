@@ -8,6 +8,18 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ### Added
 
+- Five agents, from step 3 of [#10](https://github.com/corridor/gglint/issues/10): Amp
+  (`.amp/settings.json`, under `amp.mcpServers`), Crush (`.crush.json` or `crush.json`, under
+  `mcp`), Kilo Code (`kilo.json` or `.kilo/kilo.json`, laid out like OpenCode's), VS Code
+  (`.vscode/mcp.json`, under `servers`) and Zed (`.zed/settings.json`, under
+  `context_servers`). `--fix` writes servers the way each one expects: a `type` on every VS
+  Code and Crush server, and `${env:VAR}` in VS Code. It never creates Crush's JSON file, its
+  older format, and says when Crush also reads a `crushrc` gglint can't read. Zed fills in no
+  environment variables, and Kilo Code skips a repository's whole config file that refers to
+  one, though its docs show `{env:VAR}`, so a server that reads one isn't copied to either. A
+  Zed server started by an extension is named but not compared. `gglint secrets` reads their
+  instruction files too, and Crush's `crushrc`.
+
 - `gglint secrets` reads every supported agent's own files, not only Claude Code's and
   Codex's: settings and hooks that hold commands (`.cursor/cli.json`,
   `.factory/settings.json`, `.github/copilot/settings.json`, `.github/hooks/`, `.kiro/hooks/`)
@@ -22,6 +34,10 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ### Changed
 
+- A value with `$(` isn't copied to an agent that fills in `$VAR`: Crush runs the command in
+  it.
+- The new agents come after Claude Code, Codex, Cursor and OpenCode, in alphabetical order
+  with the others.
 - A secret in a command an agent saved as allowed names that agent: `/permissions` in Claude
   Code, and the file for another agent. One in an instruction file or MCP config no longer
   mentions Claude Code.
