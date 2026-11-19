@@ -7,7 +7,7 @@
 Keep every coding agent in your repository in sync, and keep secrets out of their config
 files.
 
-Claude Code, Codex, Cursor, Gemini CLI, VS Code and fifteen other coding agents are each set
+Claude Code, Codex, Cursor, Gemini CLI, VS Code and sixteen other coding agents are each set
 up by their own files in a repository (see [Supported agents](#supported-agents)). gglint
 checks those files for two problems:
 
@@ -182,8 +182,8 @@ history: rotate it.
 ### Files it reads
 
 Besides each agent's MCP config file, listed in [Supported agents](#supported-agents),
-`gglint secrets` reads these files. In a folder, it reads the Markdown, JSON and TOML files at
-its top. A personal file is reported by `local-file` once it's in git, whatever is in it; the
+`gglint secrets` reads these files. In a folder, it reads the Markdown, JSON, TOML and YAML
+files at its top. A personal file is reported by `local-file` once it's in git, whatever is in it; the
 agent's docs say to keep it out of git, or it's where they say to put your API key.
 
 | Agent         | Instructions and settings                                                         | Rules, commands and hooks                                                           | Personal files                                                                  |
@@ -194,6 +194,7 @@ agent's docs say to keep it out of git, or it's where they say to put your API k
 | OpenCode      | `AGENTS.md`                                                                       | `.opencode/agents/`, `.opencode/agent/`, `.opencode/commands/`, `.opencode/command/` |                                                                                 |
 | Amp           | `AGENTS.md`, `AGENT.md`                                                           |                                                                                     |                                                                                 |
 | Antigravity   |                                                                                   | `.agents/rules/`, `.agents/workflows/`, `.agent/rules/`, `.agent/workflows/`        |                                                                                 |
+| Continue      |                                                                                   | `.continue/mcpServers/`, `.continue/models/`, `.continue/rules/`, `.continue/prompts/` | `.continue/.env`                                                             |
 | Copilot CLI   | `.github/copilot-instructions.md`, `AGENTS.md`, `.github/copilot/settings.json`   | `.github/instructions/`, `.github/hooks/`                                           | `.github/copilot/settings.local.json`                                           |
 | Crush         | `AGENTS.md`, `CRUSH.md`, `.crushrc`, `crushrc`                                    |                                                                                     |                                                                                 |
 | Factory Droid | `AGENTS.md`, `.factory/settings.json`                                             | `.factory/droids/`, `.factory/commands/`                                            | `.factory/settings.local.json`                                                  |
@@ -280,6 +281,7 @@ secrets.
 | OpenCode      | `opencode`    | `opencode.json`, `opencode.jsonc`   | `.opencode/`    | JSON with comments, `mcp.servers` or `mcp` |
 | Amp           | `amp`         | `.amp/settings.json`                | `.amp/`         | JSON, `amp.mcpServers` among other settings |
 | Antigravity   | `antigravity` | `.agents/mcp_config.json`           | none            | JSON, `mcpServers`                         |
+| Continue      | `continue`    | `.continue/mcpServers/`, every YAML and JSON file | `.continue/` | YAML, an `mcpServers` list in each file; or JSON, `mcpServers` |
 | Copilot CLI   | `copilot-cli` | `.github/mcp.json`, or `.mcp.json`  | none            | JSON, `mcpServers` or servers at the top   |
 | Crush         | `crush`       | `.crush.json`, `crush.json`         | none            | JSON, `mcp`, each with a `type`            |
 | Factory Droid | `droid`       | `.factory/mcp.json`                 | `.factory/`     | JSON, `mcpServers`                         |
@@ -316,6 +318,11 @@ VS Code can ask for a value once with `${input:id}`, such as a token; a server t
 isn't copied to another agent. Zed doesn't fill in environment variables, so a server that
 reads one isn't copied to Zed, and a Zed server started by an extension is named but not
 compared.
+
+Continue reads every YAML and JSON file in `.continue/mcpServers/`. In a YAML file, it fills
+in `${{ secrets.NAME }}` from its `.env` files and then the environment; in a JSON file, written
+as Claude Code writes it, only `${NAME}` in `env`. `--fix` adds each missing server in a YAML
+file of its own, named after the server, and never changes a file that's there.
 
 Mistral Vibe writes values as they are, and reads a header from the environment with
 `api_key_env`, so a server that reads a variable another way isn't copied to it. It reaches
@@ -536,8 +543,6 @@ To run gglint without the action:
 - User-level settings such as `~/.claude.json` or `~/.codex/config.toml` aren't read.
 - Only config files at the repository's root are read, so each package of a monorepo is
   checked separately.
-- Continue isn't supported yet
-  ([#10](https://github.com/corridor/gglint/issues/10)).
 - Gemini CLI loads only the servers listed in `mcp.allowed`, when its settings have that
   list, and never those in `mcp.excluded`; gglint reports the servers these lists leave out
   as turned off. `--fix` doesn't edit the lists, so a server it adds while `mcp.allowed` is

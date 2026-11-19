@@ -19,7 +19,8 @@ pub(super) struct Agent {
     pub directory: Option<&'static str>,
     /// The files it reads a repository's MCP servers from, relative to its root. A new
     /// config file is created at the first. Codex only reads `.codex/config.toml` in
-    /// projects the user has trusted.
+    /// projects the user has trusted. A path ending in `/` is a folder whose YAML and JSON
+    /// files it reads, each a file of servers: Continue's.
     pub files: &'static [&'static str],
     /// How those files list the servers.
     pub format: Format,
@@ -108,13 +109,16 @@ pub(super) enum Remote {
     HttpUrl,
     /// `serverUrl`, over streamable HTTP only: a URL ending in `/sse` can't be written.
     ServerUrl,
+    /// `url` with a `type`: `"sse"` for a URL ending in `/sse`, and `"streamable-http"`
+    /// otherwise: Continue.
+    TypedStreamable,
 }
 
 impl Remote {
     /// The keys an entry's URL can be read from, in the order they're looked for.
     pub fn keys(self) -> &'static [&'static str] {
         match self {
-            Remote::Url | Remote::TypedUrl | Remote::TransportSse => &["url"],
+            Remote::Url | Remote::TypedUrl | Remote::TransportSse | Remote::TypedStreamable => &["url"],
             Remote::HttpUrl => &["httpUrl", "url"],
             Remote::ServerUrl => &["serverUrl", "url"],
         }
@@ -290,6 +294,44 @@ pub(super) const AGENTS: &[Agent] = &[
         // `.agent` is the older name, and still read.
         rule_directories: &[".agents/rules", ".agents/workflows", ".agent/rules", ".agent/workflows"],
         personal_files: &[],
+        unreadable_files: &[],
+    },
+    Agent {
+        harness: Harness::Continue,
+        id: "continue",
+        aliases: &[],
+        name: "Continue",
+        directory: Some(".continue"),
+        // Each YAML file is a block with its own list of servers, and a JSON file lists them
+        // as Claude Code does. `--fix` adds a server in a YAML file of its own.
+        files: &[".continue/mcpServers/"],
+        format: Format::Continue,
+        servers_key: "mcpServers",
+        nested_key: None,
+        schema: None,
+        // `${{ secrets.NAME }}` anywhere in a YAML file, read from its `.env` files and then
+        // the environment.
+        syntax: Syntax::Secrets,
+        command_line_syntax: Syntax::Secrets,
+        remote: Remote::TypedStreamable,
+        off: Off::Never,
+        bearer_token_key: None,
+        command_type: None,
+        also_reads: &[],
+        servers_at_top: false,
+        read_instead: None,
+        other_files: &[],
+        // Its models can hold an `apiKey`.
+        rule_directories: &[
+            ".continue/mcpServers",
+            ".continue/models",
+            ".continue/rules",
+            ".continue/prompts",
+        ],
+        personal_files: &[(
+            ".continue/.env",
+            "Continue's secrets file, which `${{ secrets.NAME }}` reads",
+        )],
         unreadable_files: &[],
     },
     Agent {

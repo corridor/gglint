@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use jsonc_parser::ast::{Array, Object, Value};
 use jsonc_parser::{CollectOptions, ParseOptions};
 use toml::de::{DeTable, DeValue};
+use yaml_rust2::{Yaml, YamlLoader};
 
 use super::Harness;
 use super::Location;
@@ -28,6 +29,9 @@ pub(super) enum Format {
     OpenCode,
     /// TOML: `[[mcp_servers]]` tables, each with its `name` and `transport`: Mistral Vibe.
     Vibe,
+    /// A folder of YAML files, each with an `mcpServers` list of servers with a `name`, and
+    /// JSON files in the `mcpServers` format: Continue.
+    Continue,
 }
 
 /// One harness's MCP config file.
@@ -103,6 +107,9 @@ pub(super) enum Syntax {
     BraceEnv,
     /// `$KEY` or `${KEY}`, written `${KEY}`: Gemini CLI. Crush runs `$(command)` too.
     Shell,
+    /// `${{ secrets.KEY }}`: Continue, which reads it from its `.env` files and then the
+    /// environment.
+    Secrets,
     /// It doesn't: Codex reads a whole value from the environment with other keys.
     Literal,
 }
@@ -124,6 +131,8 @@ impl Syntax {
             Syntax::DollarEnv => Some("${env:"),
             Syntax::BraceEnv => Some("{env:"),
             Syntax::Shell => Some("$"),
+            // Read by `parse_secrets`.
+            Syntax::Secrets => None,
             Syntax::Literal => None,
         }
     }
@@ -132,6 +141,9 @@ impl Syntax {
 /// Splits `text` into text and references to environment variables written in `syntax`.
 /// Anything else, such as `${KEY:-default}`, stays text.
 pub(super) fn parse_value(text: &str, syntax: Syntax) -> Vec<Part> {
+    if syntax == Syntax::Secrets {
+        return parse_secrets(text);
+    }
     let mut parts = Vec::new();
     let mut plain = String::new();
     let mut rest = text;
@@ -169,6 +181,44 @@ pub(super) fn parse_value(text: &str, syntax: Syntax) -> Vec<Part> {
     parts
 }
 
+/// Splits `text` into text and Continue's references to secrets, `${{ secrets.KEY }}`, with or
+/// without the spaces.
+fn parse_secrets(text: &str) -> Vec<Part> {
+    let mut parts = Vec::new();
+    let mut plain = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("${{") {
+        let after = &rest[start + 3..];
+        let body = after.trim_start();
+        let reference = body.strip_prefix("secrets.").and_then(|name_on| {
+            let length = name_on
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .unwrap_or(name_on.len());
+            let tail = name_on[length..].trim_start().strip_prefix("}}")?;
+            (length > 0).then(|| (name_on[..length].to_string(), tail))
+        });
+        match reference {
+            Some((name, tail)) => {
+                plain.push_str(&rest[..start]);
+                if !plain.is_empty() {
+                    parts.push(Part::Text(std::mem::take(&mut plain)));
+                }
+                parts.push(Part::Env(name));
+                rest = tail;
+            }
+            None => {
+                plain.push_str(&rest[..start + 3]);
+                rest = after;
+            }
+        }
+    }
+    plain.push_str(rest);
+    if !plain.is_empty() {
+        parts.push(Part::Text(plain));
+    }
+    parts
+}
+
 /// `text`, written in `from`'s syntax, rewritten in `to`'s, if it can be.
 pub(super) fn translate(text: &str, from: Syntax, to: Syntax) -> Option<String> {
     if from == to {
@@ -189,6 +239,7 @@ pub(super) fn write_value(parts: &[Part], syntax: Syntax) -> Option<String> {
                 Syntax::Dollar | Syntax::Shell => value.push_str(&format!("${{{name}}}")),
                 Syntax::DollarEnv => value.push_str(&format!("${{env:{name}}}")),
                 Syntax::BraceEnv => value.push_str(&format!("{{env:{name}}}")),
+                Syntax::Secrets => value.push_str(&format!("${{{{ secrets.{name} }}}}")),
                 Syntax::Literal => return None,
             },
         }
@@ -235,8 +286,15 @@ pub(super) const BYTE_ORDER_MARK: char = '\u{feff}';
 pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
     AGENTS
         .iter()
-        .flat_map(|agent| agent.files.iter().map(move |&relative| (agent, relative)))
+        .flat_map(|agent| {
+            agent
+                .files
+                .iter()
+                .flat_map(|&relative| files_at(root, relative))
+                .map(move |relative| (agent, relative))
+        })
         .filter_map(|(agent, relative)| {
+            let relative = relative.as_str();
             let path = root.join(relative);
             let mut config = McpConfig {
                 harness: agent.harness,
@@ -264,6 +322,10 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
                         Format::Codex => read_codex(text, &mut config),
                         Format::OpenCode => read_json(text, agent.servers_key, opencode_entry, &mut config),
                         Format::Vibe => read_vibe(text, &mut config),
+                        Format::Continue if relative.ends_with(".json") => {
+                            read_json(text, agent.servers_key, continue_json_entry, &mut config)
+                        }
+                        Format::Continue => read_continue_yaml(text, &mut config),
                     }
                 }
                 // `NotADirectory`: `.codex/config.toml` where `.codex` is a file.
@@ -288,6 +350,30 @@ pub fn read_mcp(root: &Path) -> Vec<McpConfig> {
             Some(config)
         })
         .collect()
+}
+
+/// The config files at `relative`: itself, or for a folder, written with a `/` at its end, its
+/// YAML and JSON files in the order of their names.
+fn files_at(root: &Path, relative: &str) -> Vec<String> {
+    if !relative.ends_with('/') {
+        return vec![relative.to_string()];
+    }
+    let Ok(entries) = std::fs::read_dir(root.join(relative)) else {
+        return Vec::new();
+    };
+    let mut files: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| {
+            Path::new(name)
+                .extension()
+                .is_some_and(|extension| ["yaml", "yml", "json"].contains(&extension.to_str().unwrap_or_default()))
+        })
+        .map(|name| format!("{relative}{name}"))
+        .collect();
+    files.sort();
+    files
 }
 
 /// The warning for a server with neither a command nor a URL under one of `keys`.
@@ -438,6 +524,30 @@ fn json_settings(object: Option<&Object>, syntax: Syntax) -> Vec<Setting> {
 /// with `command` or reached at `url`, whatever its `type` says.
 fn mcp_servers_entry(name: String, location: Location, object: &Object, harness: Harness) -> Result<McpServer, String> {
     let syntax = Syntax::of(harness);
+    entry_with(name, location, object, harness, syntax, syntax)
+}
+
+/// An entry in a JSON file in Continue's folder, written as Claude Code writes it: Continue
+/// reads `${KEY}` in `env` as one of its secrets, and nothing else.
+fn continue_json_entry(
+    name: String,
+    location: Location,
+    object: &Object,
+    harness: Harness,
+) -> Result<McpServer, String> {
+    entry_with(name, location, object, harness, Syntax::Dollar, Syntax::Literal)
+}
+
+/// An `mcpServers` entry whose environment variables are written in `env_syntax` and its
+/// headers in `header_syntax`.
+fn entry_with(
+    name: String,
+    location: Location,
+    object: &Object,
+    harness: Harness,
+    env_syntax: Syntax,
+    header_syntax: Syntax,
+) -> Result<McpServer, String> {
     // Zed's older layout nests the command: `"command": { "path", "args", "env" }`.
     let nested = object
         .get_object("command")
@@ -467,7 +577,7 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
     } else {
         return Err(no_transport(&name, agent(harness).remote.keys()));
     };
-    let mut headers = json_settings(object.get_object("headers"), syntax);
+    let mut headers = json_settings(object.get_object("headers"), header_syntax);
     if let Some(key) = agent(harness).bearer_token_key
         && let Some(variable) = json_string(object, key)
     {
@@ -480,7 +590,7 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
         name,
         location,
         transport,
-        env: json_settings(launch.get_object("env"), syntax),
+        env: json_settings(launch.get_object("env"), env_syntax),
         headers: sorted(headers),
         enabled: match agent(harness).off {
             Off::Disabled => json_bool(object, "disabled") != Some(true),
@@ -808,5 +918,114 @@ fn read_vibe(text: &str, config: &mut McpConfig) {
             enabled_tools: None,
             disabled_tools: toml_strings(table, "disabled_tools").unwrap_or_default(),
         });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// YAML: Continue
+// ---------------------------------------------------------------------------
+
+fn yaml_strings(value: &Yaml) -> Vec<String> {
+    value
+        .as_vec()
+        .map(|items| items.iter().filter_map(yaml_text).collect())
+        .unwrap_or_default()
+}
+
+/// A scalar as the text Continue reads, whatever YAML takes it for: `1` is `"1"`.
+fn yaml_text(value: &Yaml) -> Option<String> {
+    match value {
+        Yaml::String(text) | Yaml::Real(text) => Some(text.clone()),
+        Yaml::Integer(number) => Some(number.to_string()),
+        Yaml::Boolean(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn yaml_settings(value: &Yaml, syntax: Syntax) -> Vec<Setting> {
+    let Some(map) = value.as_hash() else {
+        return Vec::new();
+    };
+    sorted(
+        map.iter()
+            .filter_map(|(name, value)| {
+                Some(Setting {
+                    name: yaml_text(name)?,
+                    value: parse_value(&yaml_text(value)?, syntax),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Where the server named `name` starts: the first line after `after` that's an item of a
+/// list with that `name`. The parser doesn't keep where it read each value.
+fn yaml_location(text: &str, name: &str, after: usize) -> (Location, usize) {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+        if start < after {
+            continue;
+        }
+        let item = line.trim_start().strip_prefix("- ").map(str::trim_start);
+        let Some(value) = item.and_then(|item| item.strip_prefix("name:")) else {
+            continue;
+        };
+        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
+        if value == name {
+            let column = line.len() - line.trim_start().len();
+            return (location(text, start + column), offset);
+        }
+    }
+    (Location { line: 1, column: 1 }, after)
+}
+
+/// A YAML file in Continue's folder: a block with its `mcpServers` list.
+fn read_continue_yaml(text: &str, config: &mut McpConfig) {
+    let documents = match YamlLoader::load_from_str(text) {
+        Ok(documents) => documents,
+        Err(error) => {
+            config.warnings.push(format!("couldn't parse: {error}"));
+            return;
+        }
+    };
+    let syntax = Syntax::of(config.harness);
+    let mut after = 0;
+    for document in &documents {
+        let Some(servers) = document["mcpServers"].as_vec() else {
+            continue;
+        };
+        for entry in servers {
+            let Some(name) = entry["name"].as_str().map(str::to_string) else {
+                config
+                    .warnings
+                    .push("an entry of `mcpServers` has no `name`".to_string());
+                continue;
+            };
+            let transport = if let Some(command) = yaml_text(&entry["command"]) {
+                Transport::Command {
+                    command,
+                    args: yaml_strings(&entry["args"]),
+                }
+            } else if let Some(url) = yaml_text(&entry["url"]) {
+                Transport::Remote { url }
+            } else {
+                config.warnings.push(no_transport(&name, &["url"]));
+                continue;
+            };
+            let (location, next) = yaml_location(text, &name, after);
+            after = next;
+            config.servers.push(McpServer {
+                name,
+                location,
+                transport,
+                env: yaml_settings(&entry["env"], syntax),
+                headers: yaml_settings(&entry["requestOptions"]["headers"], syntax),
+                enabled: true,
+                enabled_tools: None,
+                disabled_tools: Vec::new(),
+            });
+        }
     }
 }

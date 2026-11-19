@@ -26,8 +26,21 @@ fn copy(repo: &Path) -> TempDir {
             std::fs::create_dir_all(dir.path().join(directory)).unwrap();
         }
         for file in harness.mcp_files() {
-            if let Ok(text) = std::fs::read(repo.join(file)) {
-                dir.write(file, text);
+            // A folder of config files, such as Continue's, is copied file by file.
+            let files: Vec<String> = match file.strip_suffix('/') {
+                Some(folder) => std::fs::read_dir(repo.join(folder))
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .map(|name| format!("{folder}/{name}"))
+                    .collect(),
+                None => vec![file.to_string()],
+            };
+            for file in files {
+                if let Ok(text) = std::fs::read(repo.join(&file)) {
+                    dir.write(&file, text);
+                }
             }
         }
     }
