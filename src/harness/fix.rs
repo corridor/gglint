@@ -94,14 +94,18 @@ pub fn fix_mcp(root: &Path, configs: &[McpConfig], check: &McpCheck) -> FixRepor
             if cell != Cell::Missing || shares_file_with(harness, &check.harnesses).is_some() {
                 continue;
             }
-            // An agent compared without a config file has its own directory: it gets one.
-            let relative_path = configs
-                .iter()
-                .find(|config| config.harness == harness && !config.ignored)
-                .map_or_else(
-                    || PathBuf::from(harness.mcp_file()),
-                    |config| config.relative_path.clone(),
-                );
+            // An agent compared without a config file has its own directory: it gets one. An
+            // agent that reads a folder of files gets a file for the server.
+            let relative_path = match harness.mcp_file().strip_suffix('/') {
+                Some(folder) => PathBuf::from(format!("{folder}/{}.yaml", file_name(&source.server.name))),
+                None => configs
+                    .iter()
+                    .find(|config| config.harness == harness && !config.ignored)
+                    .map_or_else(
+                        || PathBuf::from(harness.mcp_file()),
+                        |config| config.relative_path.clone(),
+                    ),
+            };
             match fields(&source.server, source.site.harness, harness) {
                 Ok(fields) => writes.push(Write {
                     harness,
@@ -392,6 +396,10 @@ fn fields(server: &McpServer, source: Harness, harness: Harness) -> Result<Vec<(
             match agent(harness).remote {
                 Remote::Url => {}
                 Remote::TypedUrl => add("type", Field::Text(if sse { "sse" } else { "http" }.to_string())),
+                Remote::TypedStreamable => add(
+                    "type",
+                    Field::Text(if sse { "sse" } else { "streamable-http" }.to_string()),
+                ),
                 Remote::TransportSse if sse => add("transport", Field::Text("sse".to_string())),
                 Remote::TransportSse => {}
                 Remote::HttpUrl if !sse => url_key = "httpUrl",
@@ -603,6 +611,7 @@ fn write_file(root: &Path, harness: Harness, relative_path: &Path, writes: &[&Wr
         Format::Codex => write_toml(text, writes)?,
         Format::McpServers | Format::OpenCode => write_json(text, agent(harness), writes)?,
         Format::Vibe => write_vibe(text, writes)?,
+        Format::Continue => write_continue(text, writes)?,
     };
     if new_text == text {
         return Ok(None);
@@ -794,4 +803,86 @@ fn write_vibe(text: &str, writes: &[&Write]) -> Result<String, String> {
         }
     }
     Ok(document.to_string())
+}
+
+/// A file name for a server named `name`: its letters, digits, `-` and `_`, with `-` for the
+/// rest.
+fn file_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    match name.trim_matches('-') {
+        "" => "server".to_string(),
+        name => name.to_string(),
+    }
+}
+
+/// `text` as a YAML string in double quotes, escaped as in JSON, which YAML reads the same.
+fn yaml_string(text: &str) -> String {
+    let mut quoted = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\t' => quoted.push_str("\\t"),
+            '\r' => quoted.push_str("\\r"),
+            c if c.is_control() => quoted.push_str(&format!("\\u{:04x}", c as u32)),
+            c => quoted.push(c),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+/// A new Continue file listing the servers in `writes`, a block named after the first. A
+/// file that's there isn't changed: its comments and layout couldn't be kept.
+fn write_continue(text: &str, writes: &[&Write]) -> Result<String, String> {
+    if !text.trim().is_empty() || writes.iter().any(|write| write.update) {
+        return Err(
+            "gglint adds a Continue server in a file of its own, and doesn't change one that's there".to_string(),
+        );
+    }
+    let Some(first) = writes.first() else {
+        return Ok(String::new());
+    };
+    let mut yaml = format!(
+        "name: {}\nversion: 0.0.1\nschema: v1\nmcpServers:\n",
+        yaml_string(&first.name)
+    );
+    for write in writes {
+        yaml.push_str(&format!("  - name: {}\n", yaml_string(&write.name)));
+        for (key, field) in &write.fields {
+            // Continue reads a remote server's headers from its `requestOptions`.
+            let (key, indent) = if *key == "headers" {
+                yaml.push_str("    requestOptions:\n");
+                ("headers", "      ")
+            } else {
+                (*key, "    ")
+            };
+            match field {
+                Field::Text(text) => yaml.push_str(&format!("{indent}{key}: {}\n", yaml_string(text))),
+                Field::List(list) => {
+                    yaml.push_str(&format!("{indent}{key}:\n"));
+                    for item in list {
+                        yaml.push_str(&format!("{indent}  - {}\n", yaml_string(item)));
+                    }
+                }
+                Field::Map(map) => {
+                    yaml.push_str(&format!("{indent}{key}:\n"));
+                    for (name, value) in map {
+                        yaml.push_str(&format!("{indent}  {}: {}\n", yaml_string(name), yaml_string(value)));
+                    }
+                }
+            }
+        }
+    }
+    Ok(yaml)
 }

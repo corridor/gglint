@@ -579,6 +579,7 @@ const PERSONAL_FILES: &[&str] = &[
     ".gemini/.env",
     ".qoder/settings.local.json",
     ".qwen/.env",
+    ".continue/.env",
 ];
 
 #[test]
@@ -619,6 +620,8 @@ const OTHER_AGENT_FILES: &[&str] = &[
     ".kiro/hooks/deploy.kiro.hook",
     ".qwen/commands/deploy.md",
     ".trae/rules/project_rules.md",
+    ".continue/models/deploy.yaml",
+    ".continue/mcpServers/deploy.yml",
 ];
 
 #[test]

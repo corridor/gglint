@@ -27,6 +27,7 @@ pub enum Harness {
     OpenCode,
     Amp,
     Antigravity,
+    Continue,
     CopilotCli,
     Crush,
     FactoryDroid,
@@ -44,13 +45,14 @@ pub enum Harness {
 }
 
 /// All of them, in the order they're reported.
-pub const HARNESSES: [Harness; 20] = [
+pub const HARNESSES: [Harness; 21] = [
     Harness::ClaudeCode,
     Harness::Codex,
     Harness::Cursor,
     Harness::OpenCode,
     Harness::Amp,
     Harness::Antigravity,
+    Harness::Continue,
     Harness::CopilotCli,
     Harness::Crush,
     Harness::FactoryDroid,

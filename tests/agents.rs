@@ -2034,3 +2034,223 @@ fn vibe_names_mistral_vibe() {
     assert_eq!(Harness::parse("vibe"), Some(Harness::MistralVibe));
     assert_eq!(Harness::parse("mistral-vibe"), Some(Harness::MistralVibe));
 }
+
+// ---------------------------------------------------------------------------
+// Continue
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reads_continue_servers_from_every_file_in_its_folder() {
+    let dir = TempDir::new();
+    dir.write(
+        ".continue/mcpServers/playwright-mcp.yaml",
+        r#"name: Playwright mcpServer
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: Browser search
+    command: npx
+    args:
+      - "@playwright/mcp@latest"
+"#,
+    );
+    dir.write(
+        ".continue/mcpServers/supabase.yml",
+        r#"name: Supabase
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: supabase
+    command: npx
+    args: ["-y", "@supabase/mcp-server-supabase@latest", "--access-token", "${{ secrets.SUPABASE_TOKEN }}"]
+    env:
+      SUPABASE_TOKEN: ${{ secrets.SUPABASE_TOKEN }}
+  - name: docs
+    type: streamable-http
+    url: https://docs.example.com/mcp
+    requestOptions:
+      headers:
+        X-Team: web
+"#,
+    );
+    // Continue reads `mcpServers` JSON files, as Claude Code writes them, from the folder too.
+    dir.write(
+        ".continue/mcpServers/mcp.json",
+        r#"{ "mcpServers": { "files": { "command": "npx", "args": ["files-mcp"], "env": { "TOKEN": "${FILES_TOKEN}" } } } }"#,
+    );
+
+    let configs: Vec<McpConfig> = read_mcp(dir.path())
+        .into_iter()
+        .filter(|config| config.harness == Harness::Continue)
+        .collect();
+
+    let files: Vec<String> = configs
+        .iter()
+        .map(|config| config.relative_path.display().to_string())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ".continue/mcpServers/mcp.json",
+            ".continue/mcpServers/playwright-mcp.yaml",
+            ".continue/mcpServers/supabase.yml",
+        ]
+    );
+    for config in &configs {
+        assert!(config.warnings.is_empty(), "{:?}", config.warnings);
+    }
+    let files = server(&configs[0], "files");
+    assert_eq!(files.env, [setting("TOKEN", &[env("FILES_TOKEN")])]);
+    let browser = server(&configs[1], "Browser search");
+    assert_eq!(browser.transport, command("npx", &["@playwright/mcp@latest"]));
+    assert_eq!(browser.location.line, 5);
+    let supabase = server(&configs[2], "supabase");
+    assert_eq!(
+        supabase.transport,
+        command(
+            "npx",
+            &[
+                "-y",
+                "@supabase/mcp-server-supabase@latest",
+                "--access-token",
+                "${{ secrets.SUPABASE_TOKEN }}"
+            ]
+        )
+    );
+    assert_eq!(supabase.env, [setting("SUPABASE_TOKEN", &[env("SUPABASE_TOKEN")])]);
+    let docs = server(&configs[2], "docs");
+    assert_eq!(docs.transport, remote("https://docs.example.com/mcp"));
+    assert_eq!(docs.headers, [setting("X-Team", &[text("web")])]);
+}
+
+#[test]
+fn fix_adds_each_continue_server_in_a_file_of_its_own() {
+    let dir = TempDir::new();
+    dir.write(".mcp.json", CLAUDE_CODE);
+    dir.write(".continue/rules/style.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    let created: Vec<(String, bool)> = report
+        .changed
+        .iter()
+        .map(|changed| (changed.relative_path.display().to_string(), changed.created))
+        .collect();
+    assert_eq!(
+        created,
+        [
+            (".continue/mcpServers/playwright.yaml".to_string(), true),
+            (".continue/mcpServers/docs.yaml".to_string(), true),
+        ]
+    );
+    assert_eq!(
+        read(&dir, ".continue/mcpServers/playwright.yaml"),
+        r#"name: "playwright"
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: "playwright"
+    command: "npx"
+    args:
+      - "-y"
+      - "@playwright/mcp@0.0.78"
+    env:
+      "CI": "1"
+"#
+    );
+    assert_eq!(
+        read(&dir, ".continue/mcpServers/docs.yaml"),
+        r#"name: "docs"
+version: 0.0.1
+schema: v1
+mcpServers:
+  - name: "docs"
+    type: "streamable-http"
+    url: "https://docs.example.com/mcp"
+    requestOptions:
+      headers:
+        "X-Team": "web"
+"#
+    );
+}
+
+#[test]
+fn continue_gets_values_and_command_lines_that_read_the_environment() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "search": { "command": "uvx", "args": ["search-mcp", "${ROOT}"], "env": { "TOKEN": "${TOKEN}" } } } }"#,
+    );
+    dir.write(".continue/rules/style.md", "Be brief.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(
+        left.is_empty() && report.unfixed.is_empty(),
+        "{left:?} {:?}",
+        report.unfixed
+    );
+    let written = read(&dir, ".continue/mcpServers/search.yaml");
+    assert!(written.contains(r#"- "${{ secrets.ROOT }}""#), "{written}");
+    assert!(written.contains(r#""TOKEN": "${{ secrets.TOKEN }}""#), "{written}");
+}
+
+#[test]
+fn fix_names_a_continue_file_after_its_server() {
+    let dir = TempDir::new();
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "Browser search": { "command": "npx", "args": ["browser-mcp"] } } }"#,
+    );
+    dir.write(".continue/rules/style.md", "Be brief.\n");
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.changed[0].relative_path,
+        Path::new(".continue/mcpServers/Browser-search.yaml")
+    );
+    assert!(read(&dir, ".continue/mcpServers/Browser-search.yaml").contains("  - name: \"Browser search\"\n"));
+}
+
+#[test]
+fn fix_leaves_a_continue_file_that_is_there_as_it_is() {
+    let dir = TempDir::new();
+    dir.write(
+        ".continue/mcpServers/docs.yaml",
+        "name: Docs\nversion: 0.0.1\nschema: v1\nmcpServers:\n  - name: docs\n    command: npx\n    args: [\"-y\", \"docs-mcp@1\"]\n",
+    );
+    dir.write(
+        ".mcp.json",
+        r#"{ "mcpServers": { "docs": { "command": "npx", "args": ["-y", "docs-mcp@2"] } } }"#,
+    );
+
+    let (report, _) = fix(&dir);
+
+    assert_eq!(
+        report.unfixed,
+        [Unfixed {
+            harness: Harness::Continue,
+            server: "docs".to_string(),
+            reason: ".continue/mcpServers/docs.yaml: gglint adds a Continue server in a file of its own, and doesn't change one that's there"
+                .to_string(),
+        }]
+    );
+}
+
+#[test]
+fn a_continue_directory_without_servers_gets_them() {
+    let dir = TempDir::new();
+    dir.write(".cursor/mcp.json", CURSOR);
+    dir.write(".continue/prompts/review.md", "Review.\n");
+
+    let (report, left) = fix(&dir);
+
+    assert!(left.is_empty(), "{left:?}");
+    assert_eq!(report.changed.len(), 2, "{:?}", report.changed);
+}

@@ -19,6 +19,12 @@ All notable changes to gglint are recorded in this file. The format follows
   one, though its docs show `{env:VAR}`, so a server that reads one isn't copied to either. A
   Zed server started by an extension is named but not compared. `gglint secrets` reads their
   instruction files too, and Crush's `crushrc`.
+- Continue, from step 4 of #10: every YAML and JSON file in `.continue/mcpServers/`. A YAML
+  file lists servers under `mcpServers`, with `${{ secrets.NAME }}` read from Continue's `.env`
+  files and then the environment; a JSON file is written as Claude Code writes it. `--fix`
+  adds each missing server in a YAML file of its own and never changes a file that's there.
+  `gglint secrets` reads Continue's models, rules and prompts, and `local-file` covers its
+  `.continue/.env`. gglint now bundles `yaml-rust2` to read YAML.
 - Mistral Vibe, from step 4 of #10: `.vibe/config.toml`, a list of `[[mcp_servers]]` tables
   with a `name` each. A header read from the environment is written with `api_key_env`, and a
   server reached over SSE isn't copied to it, as it reaches remote servers over streamable

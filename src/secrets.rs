@@ -900,7 +900,7 @@ fn is_config(path: &Path) -> bool {
     // Kiro's older hooks are JSON files named `*.kiro.hook`.
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("json" | "jsonc" | "toml" | "hook")
+        Some("json" | "jsonc" | "toml" | "hook" | "yaml" | "yml")
     )
 }
 
@@ -913,7 +913,7 @@ fn slashed(path: &Path) -> String {
 fn wanted_in_directory(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|extension| extension.to_str()),
-        Some("md" | "mdc" | "json" | "toml" | "hook")
+        Some("md" | "mdc" | "json" | "toml" | "hook" | "yaml" | "yml")
     )
 }
 
