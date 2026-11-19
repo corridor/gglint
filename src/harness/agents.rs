@@ -45,6 +45,15 @@ pub(super) struct Agent {
     /// A file it reads instead of its own while that one exists, so its own file's servers
     /// aren't its servers then.
     pub read_instead: Option<&'static str>,
+    /// Its other files that can hold a secret, relative to the root: instructions, and
+    /// settings and hooks that hold commands. `gglint secrets` reads them with `files`.
+    pub other_files: &'static [&'static str],
+    /// Directories of its rules, commands, agents and hooks, relative to the root: `gglint
+    /// secrets` reads the files in them.
+    pub rule_directories: &'static [&'static str],
+    /// Its files meant for one person's machine and never for git, which its docs say to keep
+    /// out of it, and what each one is.
+    pub personal_files: &'static [(&'static str, &'static str)],
 }
 
 /// The agent whose config file `harness` reads too and gets a server from, among those
@@ -117,6 +126,16 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["CLAUDE.md", ".claude/settings.json"],
+        rule_directories: &[".claude/commands", ".claude/agents"],
+        personal_files: &[
+            (
+                ".claude/settings.local.json",
+                "Claude Code's personal settings, where it saves the commands you allow, secrets and all",
+            ),
+            ("CLAUDE.local.md", "Claude Code's personal notes for this project"),
+            (".claude/.credentials.json", "Claude Code's login"),
+        ],
     },
     Agent {
         harness: Harness::Codex,
@@ -135,6 +154,9 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["AGENTS.md"],
+        rule_directories: &[],
+        personal_files: &[(".codex/auth.json", "Codex's login")],
     },
     Agent {
         harness: Harness::Cursor,
@@ -153,6 +175,10 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        // `cli.json` holds the commands Cursor's CLI may run.
+        other_files: &[".cursorrules", ".cursor/cli.json"],
+        rule_directories: &[".cursor/rules", ".cursor/commands"],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::OpenCode,
@@ -171,6 +197,15 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["AGENTS.md"],
+        // The singular names are older, and still read.
+        rule_directories: &[
+            ".opencode/agents",
+            ".opencode/agent",
+            ".opencode/commands",
+            ".opencode/command",
+        ],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::Antigravity,
@@ -191,6 +226,10 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &[],
+        // `.agent` is the older name, and still read.
+        rule_directories: &[".agents/rules", ".agents/workflows", ".agent/rules", ".agent/workflows"],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::CopilotCli,
@@ -212,6 +251,16 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[Harness::ClaudeCode],
         servers_at_top: true,
         read_instead: Some(".mcp.json"),
+        other_files: &[
+            ".github/copilot-instructions.md",
+            "AGENTS.md",
+            ".github/copilot/settings.json",
+        ],
+        rule_directories: &[".github/instructions", ".github/hooks"],
+        personal_files: &[(
+            ".github/copilot/settings.local.json",
+            "Copilot CLI's personal settings for this repository",
+        )],
     },
     Agent {
         harness: Harness::FactoryDroid,
@@ -231,6 +280,13 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        // `settings.json` can list the commands Droid may run.
+        other_files: &["AGENTS.md", ".factory/settings.json"],
+        rule_directories: &[".factory/droids", ".factory/commands"],
+        personal_files: &[(
+            ".factory/settings.local.json",
+            "Factory Droid's personal settings for this project",
+        )],
     },
     Agent {
         harness: Harness::GeminiCli,
@@ -251,6 +307,12 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["GEMINI.md"],
+        rule_directories: &[".gemini/commands"],
+        personal_files: &[(
+            ".gemini/.env",
+            "Gemini CLI's environment file, where its docs put your API key",
+        )],
     },
     Agent {
         harness: Harness::Junie,
@@ -270,6 +332,9 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &[],
+        rule_directories: &[".junie"],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::KimiCode,
@@ -290,6 +355,9 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["AGENTS.md"],
+        rule_directories: &[],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::Kiro,
@@ -309,6 +377,10 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &[],
+        // Hooks run commands.
+        rule_directories: &[".kiro/steering", ".kiro/hooks"],
+        personal_files: &[],
     },
     Agent {
         harness: Harness::Qoder,
@@ -330,6 +402,12 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[Harness::ClaudeCode],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["AGENTS.md"],
+        rule_directories: &[],
+        personal_files: &[(
+            ".qoder/settings.local.json",
+            "Qoder's personal settings, where it saves the commands you allow",
+        )],
     },
     Agent {
         harness: Harness::QwenCode,
@@ -349,6 +427,12 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &["QWEN.md"],
+        rule_directories: &[".qwen/commands"],
+        personal_files: &[(
+            ".qwen/.env",
+            "Qwen Code's environment file, where its docs put your API key",
+        )],
     },
     Agent {
         harness: Harness::Trae,
@@ -369,6 +453,9 @@ pub(super) const AGENTS: &[Agent] = &[
         also_reads: &[],
         servers_at_top: false,
         read_instead: None,
+        other_files: &[],
+        rule_directories: &[".trae/rules"],
+        personal_files: &[],
     },
 ];
 

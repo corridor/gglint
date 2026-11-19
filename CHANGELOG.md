@@ -14,6 +14,18 @@ All notable changes to gglint are recorded in this file. The format follows
   and its Quick start runs `gglint secrets` and shows a workflow that checks every pull
   request for secrets.
 
+### Fixed
+
+- `gglint secrets` took `"Authorization": "Bearer $GITHUB_PERSONAL_ACCESS_TOKEN"` for a
+  written-out secret, and `--fix` replaced the variable with another one. A reference after
+  `Bearer`, `Basic` or `Token` is now read as one, as `$GITHUB_PERSONAL_ACCESS_TOKEN` alone
+  was. Gemini CLI, Qwen Code, Qoder and Crush fill in `$VAR`.
+- A secret in the MCP config of an agent with no way gglint knows of to read a variable
+  there, such as Junie, is no longer advised to be read from one: the advice is to keep the
+  server in your own config, or for Kimi Code to name the variable in `bearerTokenEnvVar`.
+- On Windows, a file in an agent's folder of rules or commands is named with `/`, as
+  `.claude/commands/deploy.md`, like every other file, instead of `.claude/commands\deploy.md`.
+
 ## [0.4.0] - 2026-11-18
 
 gglint now keeps secrets out of the files that configure coding agents, as well as keeping

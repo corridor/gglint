@@ -15,7 +15,7 @@
   entry: uvx gglint@0.4.0 secrets
   language: system
   pass_filenames: true
-  files: '^(\.mcp\.json|opencode\.jsonc?|(CLAUDE|AGENTS|GEMINI|QWEN)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|instructions/.*)|\.(claude|codex|cursor|gemini|qwen|qoder|factory|junie|kimi-code|kiro|trae|agents)/.*)$'
+  files: '^(\.mcp\.json|opencode\.jsonc?|(CLAUDE|AGENTS|GEMINI|QWEN)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|copilot/settings(\.local)?\.json|instructions/.*|hooks/.*)|\.(claude|codex|cursor|opencode|agents|agent|factory|gemini|junie|kimi-code|kiro|qoder|qwen|trae)/.*)$'
 
 - id: gglint-mcp
   name: gglint mcp
