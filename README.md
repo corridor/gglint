@@ -51,10 +51,12 @@ hover:
 - **Each agent's own format.** A server is translated between JSON and TOML, between each
   agent's syntax for environment variables, and between local and remote server types.
 - **Secrets in the forms they leak in.** Tokens in known formats, passwords in database URLs,
-  keys in the commands Claude Code saves as allowed, and values under names such as
-  `password` or `Authorization`. A secret's value is never printed.
+  keys in the commands agents save as allowed, and values under names such as `password` or
+  `Authorization`, in every supported agent's config, settings, hooks, rules and instructions.
+  A secret's value is never printed.
 - **Personal files stay personal.** Committing `.claude/settings.local.json`,
-  `CLAUDE.local.md` or an agent's login file fails the check, whatever is in it.
+  `CLAUDE.local.md`, another agent's personal settings, or an agent's login or `.env` file
+  fails the check, whatever is in it.
 - **Fast and read-only by default.** gglint reads a few files at fixed paths and typically
   finishes in under a millisecond. It never starts a server or downloads anything.
 - **Built for CI.** It exits with status 1 when it finds a problem, prints annotations for a
@@ -145,9 +147,11 @@ line, with counts and timing, goes to standard error.
 ## Finding secrets
 
 `gglint secrets` finds credentials written out in the files that configure your coding
-agents: their MCP config files, settings, and instruction files such as `CLAUDE.md`. These
-files are committed, so a token pasted into `.mcp.json` ends up in git history. It also stops
-the agents' personal files, such as `.claude/settings.local.json`, from being committed at all.
+agents: for every [supported agent](#supported-agents), its MCP config files, settings, hooks,
+rules, commands and instruction files such as `CLAUDE.md` (see
+[Files it reads](#files-it-reads)). These files are committed, so a token pasted into
+`.mcp.json` ends up in git history. It also stops the agents' personal files, such as
+`.claude/settings.local.json`, from being committed at all.
 
 ```sh
 uvx gglint secrets                 # report every secret
@@ -160,7 +164,7 @@ uvx gglint secrets FILE...         # only these, where they're agent files, as a
 | ------------------- | ------------------------------------------------------------------------------------------------- |
 | `inline-secret`     | Text has the format of a known credential: GitHub, GitLab, Anthropic, Slack, Stripe, Google and npm tokens, AWS access key IDs, API keys starting with `sk-`, and private key blocks. |
 | `inline-credential` | A JSON or TOML value under a name such as `token`, `password`, `api_key` or `Authorization` is written out instead of being a reference to an environment variable; a password is written into a URL (`postgresql://admin:secret@db/app`); or a command carries one, as a command Claude Code saves as allowed does: a header (`curl -H "Authorization: Bearer …"`), a variable set for the command (`PGPASSWORD=… psql`) or an option (`--token …`, `sshpass -p …`, `mysql -p…`). |
-| `local-file`        | An agent file meant for one person's machine is in git: `.claude/settings.local.json`, where Claude Code saves the commands you allow, secrets and all, `CLAUDE.local.md`, `.claude/.credentials.json` or `.codex/auth.json`. Whatever it holds, so a secret no pattern recognises is stopped too. It's a warning while the file is on disk and git doesn't ignore it yet. |
+| `local-file`        | An agent file meant for one person's machine is in git, such as `.claude/settings.local.json`, where Claude Code saves the commands you allow, secrets and all: see the personal files in [Files it reads](#files-it-reads). Whatever it holds, so a secret no pattern recognises is stopped too. It's a warning while the file is on disk and git doesn't ignore it yet. |
 
 Placeholders (`your-token-here`, `ghp_xxxx…`), references (`${GITHUB_TOKEN}`) and values that
 name a variable (`bearer_token_env_var = "GITHUB_TOKEN"`) aren't reported. A secret's value is
@@ -170,10 +174,37 @@ git ignores is a warning, since it isn't committed; only errors fail.
 `--fix` writes the reference in the agent's own syntax, such as `Bearer ${env:GITHUB_TOKEN}`
 in Cursor, and keeps everything else in the file as it was. An agent with no way to refer to
 an environment variable, such as Codex in a `http_headers` table, is reported and left alone,
-and so is a secret in a command: take it out of the command, or remove the command with
-`/permissions` in Claude Code. `--fix` also adds a personal agent file to `.gitignore`; one
+and so is a secret in a command: take it out of the command, or remove the command the agent
+saved as allowed, with `/permissions` in Claude Code. `--fix` also adds a personal agent file to `.gitignore`; one
 that's already in git needs `git rm --cached` too. A secret that was ever committed is in git
 history: rotate it.
+
+### Files it reads
+
+Besides each agent's MCP config file, listed in [Supported agents](#supported-agents),
+`gglint secrets` reads these files. In a folder, it reads the Markdown, JSON and TOML files at
+its top. A personal file is reported by `local-file` once it's in git, whatever is in it; the
+agent's docs say to keep it out of git, or it's where they say to put your API key.
+
+| Agent         | Instructions and settings                                                         | Rules, commands and hooks                                                           | Personal files                                                                  |
+| ------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Claude Code   | `CLAUDE.md`, `.claude/settings.json`                                              | `.claude/commands/`, `.claude/agents/`                                              | `.claude/settings.local.json`, `CLAUDE.local.md`, `.claude/.credentials.json`   |
+| Codex         | `AGENTS.md`                                                                       |                                                                                     | `.codex/auth.json`                                                              |
+| Cursor        | `.cursorrules`, `.cursor/cli.json`                                                | `.cursor/rules/`, `.cursor/commands/`                                               |                                                                                 |
+| OpenCode      | `AGENTS.md`                                                                       | `.opencode/agents/`, `.opencode/agent/`, `.opencode/commands/`, `.opencode/command/` |                                                                                 |
+| Antigravity   |                                                                                   | `.agents/rules/`, `.agents/workflows/`, `.agent/rules/`, `.agent/workflows/`        |                                                                                 |
+| Copilot CLI   | `.github/copilot-instructions.md`, `AGENTS.md`, `.github/copilot/settings.json`   | `.github/instructions/`, `.github/hooks/`                                           | `.github/copilot/settings.local.json`                                           |
+| Factory Droid | `AGENTS.md`, `.factory/settings.json`                                             | `.factory/droids/`, `.factory/commands/`                                            | `.factory/settings.local.json`                                                  |
+| Gemini CLI    | `GEMINI.md`                                                                       | `.gemini/commands/`                                                                 | `.gemini/.env`                                                                  |
+| Junie         |                                                                                   | `.junie/`                                                                           |                                                                                 |
+| Kimi Code     | `AGENTS.md`                                                                       |                                                                                     |                                                                                 |
+| Kiro          |                                                                                   | `.kiro/steering/`, `.kiro/hooks/`                                                   |                                                                                 |
+| Qoder         | `AGENTS.md`                                                                       |                                                                                     | `.qoder/settings.local.json`                                                    |
+| Qwen Code     | `QWEN.md`                                                                         | `.qwen/commands/`                                                                   | `.qwen/.env`                                                                    |
+| Trae          |                                                                                   | `.trae/rules/`                                                                      |                                                                                 |
+
+It also reads `.windsurfrules` and `.clinerules`, the instructions of Windsurf and Cline, which
+keep their MCP servers outside the repository.
 
 ### Before every commit
 
@@ -486,7 +517,8 @@ To run gglint without the action:
   (`"hunter"`) or shorter than 8 characters, and in a command one with no digit or symbol
   (`app-reader`), as commands and the text around them are full of words and names. It doesn't
   read `.env` files or other source, and doesn't search git history: a secret that was ever
-  committed has to be rotated.
+  committed has to be rotated. An agent's `.env` file is reported once it's in git, but not
+  read.
 - `gglint secrets --fix` can't change a value for an agent that has no way to refer to an
   environment variable, such as Codex in `http_headers`; it reports it and says what to use
   instead.

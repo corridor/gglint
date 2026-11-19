@@ -6,8 +6,26 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `gglint secrets` reads every supported agent's own files, not only Claude Code's and
+  Codex's: settings and hooks that hold commands (`.cursor/cli.json`,
+  `.factory/settings.json`, `.github/copilot/settings.json`, `.github/hooks/`, `.kiro/hooks/`)
+  and the folders of rules and commands of Cursor, OpenCode, Antigravity, Factory Droid,
+  Gemini CLI, Qwen Code and Trae. Each agent's files are listed in its row of the agent table,
+  and in the README.
+- `local-file` covers the personal files of more agents: `.qoder/settings.local.json`, where
+  Qoder saves the commands you allow, `.github/copilot/settings.local.json`,
+  `.factory/settings.local.json`, and `.gemini/.env` and `.qwen/.env`, where Gemini CLI's and
+  Qwen Code's docs put your API key. GitHub's code search finds 148 committed
+  `.qoder/settings.local.json` files, 117 `.gemini/.env` and 33 `.qwen/.env`.
+
 ### Changed
 
+- A secret in a command an agent saved as allowed names that agent: `/permissions` in Claude
+  Code, and the file for another agent. One in an instruction file or MCP config no longer
+  mentions Claude Code.
+- The `gglint-secrets` pre-commit hook passes these files to gglint too.
 - `gglint --help` says gglint keeps secrets out of the agents' files as well as their MCP
   servers in sync.
 - The README introduces both checks, with the secrets results of the November 2026 survey,
