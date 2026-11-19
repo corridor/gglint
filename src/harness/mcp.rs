@@ -435,9 +435,19 @@ fn json_settings(object: Option<&Object>, syntax: Syntax) -> Vec<Setting> {
 /// with `command` or reached at `url`, whatever its `type` says.
 fn mcp_servers_entry(name: String, location: Location, object: &Object, harness: Harness) -> Result<McpServer, String> {
     let syntax = Syntax::of(harness);
-    let transport = if let Some(command) = json_string(object, "command") {
-        let args = object.get_array("args").map(json_strings).unwrap_or_default();
+    // Zed's older layout nests the command: `"command": { "path", "args", "env" }`.
+    let nested = object
+        .get_object("command")
+        .filter(|nested| nested.get("path").is_some());
+    let (launch, program) = match nested {
+        Some(nested) => (nested, "path"),
+        None => (object, "command"),
+    };
+    let transport = if let Some(command) = json_string(launch, program) {
+        let args = launch.get_array("args").map(json_strings).unwrap_or_default();
         Transport::Command { command, args }
+    } else if object.get("command").is_some() {
+        return Err(format!("`{name}` has a `command` that isn't a string"));
     } else if let Some(url) = agent(harness)
         .remote
         .keys()
@@ -467,7 +477,7 @@ fn mcp_servers_entry(name: String, location: Location, object: &Object, harness:
         name,
         location,
         transport,
-        env: json_settings(object.get_object("env"), syntax),
+        env: json_settings(launch.get_object("env"), syntax),
         headers: sorted(headers),
         enabled: match agent(harness).off {
             Off::Disabled => json_bool(object, "disabled") != Some(true),

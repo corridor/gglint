@@ -585,7 +585,19 @@ fn write_json(text: &str, agent: &Agent, writes: &[&Write]) -> Result<String, St
         let existing = servers.get(&write.name).and_then(|property| property.object_value());
         match existing {
             Some(entry) if write.update => {
+                // Zed's older layout keeps the command and its arguments in a `command` object,
+                // as `path` and `args`.
+                let nested = entry
+                    .get("command")
+                    .and_then(|property| property.object_value())
+                    .filter(|nested| nested.get("path").is_some());
+                let entry = nested.clone().unwrap_or(entry);
                 for (key, field) in &write.fields {
+                    let key = if nested.is_some() && *key == "command" {
+                        "path"
+                    } else {
+                        key
+                    };
                     match entry.get(key) {
                         Some(property) if is_empty(field) => property.remove(),
                         Some(property) => property.set_value(json_value(field)),
