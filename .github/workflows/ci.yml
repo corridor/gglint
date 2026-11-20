@@ -1,6 +1,7 @@
 # Lints and tests the code, builds the wheels and source distribution that are published to
-# PyPI, and tests the npm packages built from the same program. Runs on every push to main
-# and every pull request, and is called by pypi_release.yml when a release is published.
+# PyPI, and tests the npm packages and pre-commit hooks built from them. Runs on every push
+# to main and every pull request, and is called by pypi_release.yml when a release is
+# published.
 
 name: CI
 
@@ -143,6 +144,68 @@ jobs:
           printf '{"name":"test","version":"1.0.0"}\n' > package.json
           pnpm add ../*.tgz
           pnpm exec gglint --version
+
+  pre-commit:
+    name: pre-commit hooks (${{ matrix.os }})
+    needs: wheels
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, wheel: linux-x86_64 }
+          - { os: macos-latest, wheel: macos-arm64 }
+          - { os: windows-latest, wheel: windows-x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.wheel }}
+          path: ${{ runner.temp }}/wheels
+      - run: python -m pip install pre-commit prek
+      - name: Build gglint-pre-commit, and a repository that uses its hooks
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          mirror="$RUNNER_TEMP/gglint-pre-commit"
+          python pre-commit/build.py --version "$version" --out "$mirror"
+          cd "$mirror"
+          git init -q
+          git add .
+          git -c user.name=ci -c user.email=ci@example.com commit -q -m "gglint $version"
+          git tag "v$version"
+          # A path git can clone from on Windows too.
+          if command -v cygpath > /dev/null; then mirror=$(cygpath -m "$mirror"); fi
+
+          mkdir "$RUNNER_TEMP/project" && cd "$RUNNER_TEMP/project"
+          git init -q
+          printf 'repos:\n  - repo: %s\n    rev: v%s\n    hooks:\n      - id: gglint-secrets\n      - id: gglint-mcp\n' "$mirror" "$version" > .pre-commit-config.yaml
+          cat .pre-commit-config.yaml
+      - name: Stop a secret with pre-commit and prek, and pass a reference
+        shell: bash
+        env:
+          # pre-commit installs the hooks' gglint with pip, prek with uv: this build, which
+          # PyPI doesn't have yet when the pull request is a release.
+          PIP_FIND_LINKS: ${{ runner.temp }}/wheels
+          UV_FIND_LINKS: ${{ runner.temp }}/wheels
+        run: |
+          cd "$RUNNER_TEMP/project"
+          # A token's shape, assembled here so no file in the repository looks like one.
+          token="ghp_$(printf '%s%s' aB3dE6gH9jK2mN5pQ8sT1vW4yZ7 aB3dE6gH9)"
+          mkdir .cursor
+          printf '{"mcpServers":{"github":{"url":"https://x","headers":{"Authorization":"Bearer %s"}}}}\n' "$token" > .cursor/mcp.json
+          git add -A
+          for tool in pre-commit prek; do
+            if $tool run; then echo "$tool passed a file with a secret"; exit 1; fi
+          done
+          printf '{"mcpServers":{"github":{"url":"https://x","headers":{"Authorization":"Bearer ${GITHUB_TOKEN}"}}}}\n' > .cursor/mcp.json
+          git add -A
+          pre-commit run
+          prek run
 
   msrv:
     name: Minimum Rust version

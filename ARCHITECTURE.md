@@ -40,8 +40,9 @@ and the exit status are the same for all of them.
 | `src/report.rs`          | `Diagnostic` and `Severity`, the `lines`, `github`, `sarif` and `markdown` formats, colours, and the exit status. |
 | `src/hook.rs`            | `gglint hook`: detects husky, git, pre-commit, lefthook or lint-staged, and installs or prints the hook. In a repository with a `package.json`, adds `@gglint/cli` to the dev dependencies with its package manager, and the hook runs that copy. |
 | `npm/`                   | The npm package `@gglint/cli`: `gglint.js` runs the program from the platform's optional dependency, and `build.py` builds the packages from the release's wheels. |
+| `pre-commit/`            | `build.py` writes [gglint-pre-commit](https://github.com/corridor/gglint-pre-commit), where pre-commit gets gglint's hooks without uv: `.pre-commit-hooks.yaml` started as `gglint`, and a `pyproject.toml` that installs gglint from PyPI. A workflow there runs it for each release. |
 | `action.yml`, `scripts/` | The GitHub Action: a composite action that runs gglint with uv and posts the comment.        |
-| `.pre-commit-hooks.yaml` | The hooks gglint provides to the pre-commit framework.                                      |
+| `.pre-commit-hooks.yaml` | The hooks gglint provides to the pre-commit framework, with uvx; gglint-pre-commit's are written from them. |
 | `docs/`                  | The documentation site, built with Starlight. See `docs/README.md`.                         |
 
 ## Rules the code keeps

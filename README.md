@@ -243,20 +243,25 @@ dependencies, pinned to its version, with the repository's package manager: npm,
 or bun, from its `packageManager` field or its lockfile. The hook then runs that copy, with
 `npx --no -- gglint`, `pnpm exec gglint`, `yarn gglint` or `bun run gglint`, so every
 contributor has it once they've installed the repository's packages, and nobody needs uv. If
-the package manager fails, the hook isn't written. In any other repository, the hooks run
-`uvx gglint@<version>`, pinned to the version that wrote them, so uv has to be installed.
+the package manager fails, the hook isn't written.
 
-With the [pre-commit](https://pre-commit.com) framework, gglint is also a source of hooks:
+With the [pre-commit](https://pre-commit.com) framework, or [prek](https://github.com/j178/prek),
+the hooks come from [gglint-pre-commit](https://github.com/corridor/gglint-pre-commit), and
+pre-commit installs gglint from PyPI itself. Nobody needs uv, in any repository:
 
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/corridor/gglint
+  - repo: https://github.com/corridor/gglint-pre-commit
     rev: v0.5.0
     hooks:
       - id: gglint-secrets
       - id: gglint-mcp      # optional: the MCP servers of every agent match
 ```
+
+Each release is published there within the hour, and `pre-commit autoupdate` moves to it. In
+any other repository, the hooks of husky, git and lefthook run `uvx gglint@<version>`,
+pinned to the version that wrote them, so uv has to be installed.
 
 ## What gglint checks
 

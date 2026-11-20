@@ -4,8 +4,9 @@
 //! exists: the command is appended once. For pre-commit, lefthook and lint-staged, whose
 //! configuration is YAML or JSON that gglint doesn't edit, it prints the lines to add.
 //!
-//! A JavaScript repository, one with a `package.json`, gets gglint as a dev dependency,
-//! added with its own package manager, so every contributor has it after installing the
+//! pre-commit installs gglint itself, from PyPI, for the hooks of gglint-pre-commit. A
+//! JavaScript repository, one with a `package.json`, gets gglint as a dev dependency, added
+//! with its own package manager, so every contributor has it after installing the
 //! repository's packages, and its hook runs that copy. Any other repository's hook runs
 //! `uvx gglint@<version>`.
 
@@ -61,6 +62,12 @@ pub enum Outcome {
     /// gglint doesn't edit this tool's configuration: add `snippet` to `file`.
     Print { file: &'static str, snippet: String },
 }
+
+/// The repository pre-commit installs gglint's hooks from. It holds them with a
+/// `pyproject.toml` that depends on gglint, so pre-commit installs gglint's wheel from PyPI;
+/// this repository's own hooks would make it build gglint from source. `pre-commit/build.py`
+/// writes it, for each release.
+pub const PRE_COMMIT_REPOSITORY: &str = "https://github.com/corridor/gglint-pre-commit";
 
 /// gglint's package on npm. npm refuses `gglint` alone, as too close to eslint, oxlint and
 /// tslint; its command is still `gglint`.
@@ -125,6 +132,8 @@ pub enum Runner {
     Uvx,
     /// The gglint in a JavaScript repository's dev dependencies.
     Package(PackageManager),
+    /// The gglint pre-commit installs for the hooks of `PRE_COMMIT_REPOSITORY`.
+    PreCommit,
 }
 
 fn package_json(root: &Path) -> Option<String> {
@@ -165,12 +174,13 @@ pub fn package_manager(root: &Path) -> Option<PackageManager> {
     }))
 }
 
-/// How `tool`'s hook starts gglint in the repository at `root`. pre-commit runs gglint's own
-/// hook definition, which uses uvx, whatever the repository is.
+/// How `tool`'s hook starts gglint in the repository at `root`. pre-commit installs it
+/// itself, whatever the repository is.
 pub fn runner(root: &Path, tool: Tool) -> Runner {
-    match package_manager(root) {
-        Some(manager) if tool != Tool::PreCommit => Runner::Package(manager),
-        _ => Runner::Uvx,
+    match (tool, package_manager(root)) {
+        (Tool::PreCommit, _) => Runner::PreCommit,
+        (_, Some(manager)) => Runner::Package(manager),
+        (_, None) => Runner::Uvx,
     }
 }
 
@@ -218,6 +228,7 @@ fn command(runner: Runner, subcommand: &str) -> String {
     match runner {
         Runner::Uvx => format!("uvx gglint@{} {subcommand}", env!("CARGO_PKG_VERSION")),
         Runner::Package(manager) => format!("{} {subcommand}", manager.exec()),
+        Runner::PreCommit => format!("gglint {subcommand}"),
     }
 }
 
@@ -255,7 +266,7 @@ fn snippet(tool: Tool, runner: Runner, with_mcp: bool) -> (&'static str, String)
         Tool::PreCommit => (
             ".pre-commit-config.yaml",
             format!(
-                "repos:\n  - repo: https://github.com/corridor/gglint\n    rev: v{}\n    hooks:\n      - id: gglint-secrets\n{}",
+                "repos:\n  - repo: {PRE_COMMIT_REPOSITORY}\n    rev: v{}\n    hooks:\n      - id: gglint-secrets\n{}",
                 env!("CARGO_PKG_VERSION"),
                 if with_mcp { "      - id: gglint-mcp\n" } else { "" }
             ),
@@ -430,6 +441,18 @@ mod tests {
     }
 
     #[test]
+    fn pre_commit_gets_the_hooks_that_need_no_uv_at_this_version() {
+        let (_, snippet) = print(Tool::PreCommit, Runner::PreCommit, true);
+        assert_eq!(
+            snippet,
+            format!(
+                "repos:\n  - repo: https://github.com/corridor/gglint-pre-commit\n    rev: v{}\n    hooks:\n      - id: gglint-secrets\n      - id: gglint-mcp\n",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+    }
+
+    #[test]
     fn finds_a_javascript_repositorys_package_manager() {
         let dir = temp("manager");
         assert_eq!(package_manager(&dir), None);
@@ -456,8 +479,8 @@ mod tests {
         std::fs::write(dir.join("package.json"), "{}").unwrap();
         std::fs::write(dir.join("pnpm-lock.yaml"), "").unwrap();
         assert_eq!(runner(&dir, Tool::Husky), Runner::Package(PackageManager::Pnpm));
-        // pre-commit runs gglint's own hook definition, with uvx.
-        assert_eq!(runner(&dir, Tool::PreCommit), Runner::Uvx);
+        // pre-commit installs gglint itself, in a JavaScript repository too.
+        assert_eq!(runner(&dir, Tool::PreCommit), Runner::PreCommit);
 
         for (manager, line) in [
             (PackageManager::Npm, "npx --no -- gglint secrets --staged\n"),
