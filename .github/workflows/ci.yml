@@ -124,7 +124,7 @@ jobs:
         shell: bash
         run: |
           cd "$RUNNER_TEMP/npm"
-          for package in gglint cli-*; do (cd "$package" && npm pack --pack-destination ..); done
+          for package in */; do (cd "$package" && npm pack --pack-destination ..); done
           # A token's shape, assembled here so no file in the repository looks like one.
           token="ghp_$(printf '%s%s' aB3dE6gH9jK2mN5pQ8sT1vW4yZ7 aB3dE6gH9)"
           mkdir -p dirty/.cursor clean
@@ -132,7 +132,7 @@ jobs:
 
           mkdir npm-project && cd npm-project
           npm init -y > /dev/null
-          npm install --no-audit --no-fund ../gglint-cli-*.tgz ../gglint-0.0.0-ci.tgz
+          npm install --no-audit --no-fund ../*.tgz
           npx gglint --version
           # gglint's exit code comes through: 1 for a secret, 0 for none.
           if npx gglint secrets ../dirty; then echo "gglint passed a file with a secret"; exit 1; fi
@@ -141,7 +141,7 @@ jobs:
           npm install --global pnpm@10
           mkdir ../pnpm-project && cd ../pnpm-project
           printf '{"name":"test","version":"1.0.0"}\n' > package.json
-          pnpm add ../gglint-cli-*.tgz ../gglint-0.0.0-ci.tgz
+          pnpm add ../*.tgz
           pnpm exec gglint --version
 
   msrv:

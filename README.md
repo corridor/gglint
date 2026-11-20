@@ -76,20 +76,20 @@ GitHub, GitGuardian counted about 31,000 secrets in `.claude/settings.local.json
 
 ## Quick start
 
-gglint is on [npm](https://www.npmjs.com/package/gglint) and
+gglint is on [npm](https://www.npmjs.com/package/@gglint/cli), as `@gglint/cli`, and
 [PyPI](https://pypi.org/project/gglint/), so it runs with whichever your machine has: `npx`,
 `pnpm dlx` or `bunx` with Node, or `uvx` with [uv](https://docs.astral.sh/uv/). From the root
 of a repository, run both checks:
 
 ```sh
-npx gglint mcp          # or: pnpm dlx gglint mcp, bunx gglint mcp, uvx gglint mcp
-npx gglint secrets
+npx @gglint/cli mcp     # or: pnpm dlx @gglint/cli mcp, bunx @gglint/cli mcp, uvx gglint mcp
+npx @gglint/cli secrets
 ```
 
 Each reports what it finds. To fix what it can, run each one again with `--fix`, then
 `git diff` to see what changed. The first run downloads gglint and later runs reuse it;
 there's nothing else to install. It works on Linux, macOS and Windows. A JavaScript project
-can pin a version with `npm install --save-dev gglint`, as [`gglint hook`](#before-every-commit)
+can pin a version with `npm install --save-dev @gglint/cli`, as [`gglint hook`](#before-every-commit)
 does.
 
 To check every pull request for secrets, add this workflow as
@@ -612,8 +612,8 @@ starts with a row in `agents.rs`. `report.rs` is what every check prints through
 
 The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
 builds and tests every wheel, publishes them to PyPI, publishes the npm packages built from
-the same programs, and attaches the wheels to the release. On npm, `gglint` runs the program
-from `@gglint/cli-<platform>-<arch>`, an optional dependency npm installs only on the
+the same programs, and attaches the wheels to the release. On npm, `@gglint/cli` runs the
+program from `@gglint/cli-<platform>-<arch>`, an optional dependency npm installs only on the
 platform it's built for. Both registries trust the workflow through trusted publishing, so no
 token is stored in the repository.
 
