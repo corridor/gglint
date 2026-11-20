@@ -74,7 +74,7 @@ as tutorials (`start/`), how-to guides (`guides/`), reference (`reference/`) and
 
 1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
 2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.4.5`.
+3. Publish a GitHub release tagged `v<version>`, for example `v0.5.0`.
 4. Move the `v1` tag to the release's commit, so `uses: corridor/gglint@v1` runs it:
    `git tag -f v1 v<version> && git push -f origin v1`.
 

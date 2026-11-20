@@ -82,8 +82,8 @@ In any CI, run gglint with uv and the `github` format, or another
 
 ```yaml
       - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.4.5 mcp --format github
-      - run: uvx gglint@0.4.5 secrets --format github
+      - run: uvx gglint@0.5.0 mcp --format github
+      - run: uvx gglint@0.5.0 secrets --format github
 ```
 
 Every input of the action is listed in the [GitHub Action reference](/gglint/reference/github-action/).

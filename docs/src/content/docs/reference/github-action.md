@@ -36,5 +36,5 @@ fetch anything else. It only reports: it never changes a file. For a walkthrough
 ## Versions
 
 The `v1` tag is moved to each new release of gglint, so `corridor/gglint@v1` runs the latest
-release. To stay on one, pin the action to its release tag, such as `@v0.4.5`, or set
+release. To stay on one, pin the action to its release tag, such as `@v0.5.0`, or set
 `version`.

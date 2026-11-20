@@ -4,7 +4,12 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-20
+
+gglint is now on npm as `@gglint/cli`, so it runs with `npx`, `pnpm dlx` and `bunx` as well
+as `uvx`, and every release publishes it there with no one involved. In a JavaScript
+repository, `gglint hook` adds it to the dev dependencies, so contributors no longer need uv
+for the hook to run. gglint also has a documentation site.
 
 ### Added
 
@@ -246,6 +251,7 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.5.0]: https://github.com/corridor/gglint/releases/tag/v0.5.0
 [0.4.5]: https://github.com/corridor/gglint/releases/tag/v0.4.5
 [0.4.0]: https://github.com/corridor/gglint/releases/tag/v0.4.0
 [0.3.0]: https://github.com/corridor/gglint/releases/tag/v0.3.0
