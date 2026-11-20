@@ -38,7 +38,8 @@ and the exit status are the same for all of them.
 | `src/harness/fix.rs`     | `--fix`: writes each server in each agent's format, editing JSON with `jsonc-parser` and TOML with `toml_edit` so comments and formatting are kept. |
 | `src/secrets.rs`         | `gglint secrets`: which files are agent files, the token formats, the names that hold credentials, commands, URLs, placeholders, and the fixes. Never keeps or prints a secret's value. |
 | `src/report.rs`          | `Diagnostic` and `Severity`, the `lines`, `github`, `sarif` and `markdown` formats, colours, and the exit status. |
-| `src/hook.rs`            | `gglint hook`: detects husky, git, pre-commit, lefthook or lint-staged, and installs or prints the hook. |
+| `src/hook.rs`            | `gglint hook`: detects husky, git, pre-commit, lefthook or lint-staged, and installs or prints the hook. In a repository with a `package.json`, adds `@gglint/cli` to the dev dependencies with its package manager, and the hook runs that copy. |
+| `npm/`                   | The npm package `@gglint/cli`: `gglint.js` runs the program from the platform's optional dependency, and `build.py` builds the packages from the release's wheels. |
 | `action.yml`, `scripts/` | The GitHub Action: a composite action that runs gglint with uv and posts the comment.        |
 | `.pre-commit-hooks.yaml` | The hooks gglint provides to the pre-commit framework.                                      |
 | `docs/`                  | The documentation site, built with Starlight. See `docs/README.md`.                         |
