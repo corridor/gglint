@@ -1,0 +1,59 @@
+---
+title: missing-server
+description: A server set up in one coding agent's MCP config file is missing from another agent's.
+---
+
+**Command:** `gglint mcp` · **Severity:** problem · **Fixed by `--fix`:** yes
+
+## What it finds
+
+A server that's set up in one agent's MCP config file and missing from another agent's.
+
+## Why it matters
+
+Each agent reads only its own file. A server added to `.mcp.json` for Claude Code isn't there
+for Cursor, so the same task works in one agent and fails in the other, and whoever uses
+Cursor doesn't know a server was meant to be there.
+
+## Example
+
+```json
+// .mcp.json (Claude Code)
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }
+    }
+  }
+}
+```
+
+`.cursor/mcp.json` has no `github` server.
+
+```text
+./.mcp.json:3:5  missing-server   `github` is set up for Claude Code but not for Cursor (.cursor/mcp.json)
+```
+
+## How to fix it
+
+Run `uvx gglint mcp --fix`. The server is added to each config file that lacks it, written in
+that agent's format, with references to environment variables in its syntax:
+
+```diff
+# .cursor/mcp.json
++    "github": {
++      "url": "https://api.githubcopilot.com/mcp/",
++      "headers": {
++        "Authorization": "Bearer ${env:GITHUB_TOKEN}"
++      }
++    }
+```
+
+A server is copied from the first config file where it's turned on, or from the agent named
+with `--source`. It's listed under `Not added:` instead when its setup can't be written in the
+other agent's format; see [How fixing works](/gglint/concepts/fixing/).
+
+If an agent shouldn't have the server, remove it from the other agents too: gglint compares
+the files, and can't know which one is right.

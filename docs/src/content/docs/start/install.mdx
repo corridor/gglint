@@ -1,0 +1,65 @@
+---
+title: Install
+description: Run gglint with uvx, or install it with uv, pipx or pip. It works on Linux, macOS and Windows.
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+gglint is one compiled program, published to [PyPI](https://pypi.org/project/gglint/) as
+wheels for Linux, macOS and Windows. The wheels hold no Python code, so any Python 3.8 or later
+can install them, and gglint doesn't need Python to run.
+
+<Tabs syncKey="installer">
+  <TabItem label="uvx">
+    Run it without installing anything. `uvx` comes with
+    [uv](https://docs.astral.sh/uv/getting-started/installation/); it downloads gglint the
+    first time and reuses it afterwards.
+
+    ```sh
+    uvx gglint mcp
+    ```
+
+    To run a fixed version, as the hooks and the GitHub Action do:
+
+    ```sh
+    uvx gglint@0.4.5 mcp
+    ```
+  </TabItem>
+  <TabItem label="uv">
+    ```sh
+    uv tool install gglint
+    gglint mcp
+    ```
+  </TabItem>
+  <TabItem label="pipx">
+    ```sh
+    pipx install gglint
+    gglint mcp
+    ```
+  </TabItem>
+  <TabItem label="pip">
+    ```sh
+    pip install gglint
+    gglint mcp
+    ```
+  </TabItem>
+  <TabItem label="From source">
+    With a [Rust toolchain](https://rustup.rs) 1.88 or later:
+
+    ```sh
+    cargo install --git https://github.com/corridor/gglint
+    gglint mcp
+    ```
+  </TabItem>
+</Tabs>
+
+Check that it works:
+
+```console
+$ gglint --version
+gglint 0.4.5
+```
+
+<Aside>
+  The rest of these docs write `uvx gglint`. If you installed gglint, drop the `uvx`.
+</Aside>

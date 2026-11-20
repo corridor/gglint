@@ -1,0 +1,69 @@
+---
+title: Check before every commit
+description: Run gglint secrets on staged files before each commit, through husky, git hooks, pre-commit, lefthook or lint-staged.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+`gglint hook` runs `gglint secrets --staged` before each commit, so a secret never gets
+committed in the first place. From the root of a repository:
+
+```sh
+uvx gglint hook
+```
+
+It uses the hook tool your repository already has:
+
+| Tool        | What `uvx gglint hook` does                                            |
+| ----------- | ---------------------------------------------------------------------- |
+| husky       | Adds the command to `.husky/pre-commit`, keeping what's there.         |
+| git         | Adds it to git's `pre-commit` hook, wherever `core.hooksPath` puts it. |
+| pre-commit  | Prints the lines for `.pre-commit-config.yaml`.                        |
+| lefthook    | Prints the lines for `lefthook.yml`.                                   |
+| lint-staged | Prints the lines for `package.json`.                                   |
+
+Running it twice changes nothing, and an existing hook script is extended once, never
+overwritten.
+
+## Options
+
+| Option         | Effect                                                     |
+| -------------- | ---------------------------------------------------------- |
+| `--tool NAME`  | Use this tool instead of detecting one.                    |
+| `--with-mcp`   | Also check that every agent gets the same MCP servers.     |
+| `hook print`   | Print the lines to add, and change nothing.                |
+| `PATH`         | The repository's root. Defaults to the current directory.  |
+
+The hooks run `uvx gglint@<version>`, pinned to the version that wrote them, so everyone who
+commits needs [uv](https://docs.astral.sh/uv/) installed.
+
+## With the pre-commit framework
+
+gglint is also a source of hooks for [pre-commit](https://pre-commit.com):
+
+<Tabs>
+  <TabItem label="Secrets only">
+    ```yaml
+    # .pre-commit-config.yaml
+    repos:
+      - repo: https://github.com/corridor/gglint
+        rev: v0.4.5
+        hooks:
+          - id: gglint-secrets
+    ```
+  </TabItem>
+  <TabItem label="Secrets and MCP">
+    ```yaml
+    # .pre-commit-config.yaml
+    repos:
+      - repo: https://github.com/corridor/gglint
+        rev: v0.4.5
+        hooks:
+          - id: gglint-secrets
+          - id: gglint-mcp
+    ```
+  </TabItem>
+</Tabs>
+
+`gglint-secrets` runs on the agent files staged in each commit. `gglint-mcp` runs when an MCP
+config file changes, and checks the whole repository.
