@@ -1,12 +1,13 @@
-# Publishes gglint to PyPI when a GitHub release is published.
+# Publishes gglint to PyPI and npm when a GitHub release is published.
 #
 # To release: bump `version` in Cargo.toml, merge to main, then publish a GitHub release
 # tagged `v<version>` (for example `v0.1.0`). This workflow runs CI, publishes the wheels
-# and source distribution to PyPI, and attaches them to the release.
+# and source distribution to PyPI, publishes the npm packages built from the same programs,
+# and attaches the wheels to the release.
 #
-# PyPI accepts the upload through trusted publishing: the project trusts this workflow
-# file in corridor/gglint, run in the `pypi` environment, so no API token is stored here.
-# Renaming this file or the environment means updating the publisher on PyPI too.
+# PyPI and npm accept the uploads through trusted publishing: each package trusts this
+# workflow file in corridor/gglint, run in the `pypi` or `npm` environment, so no token is
+# stored here. Renaming this file or an environment means updating the publishers too.
 
 name: Release
 
@@ -57,6 +58,53 @@ jobs:
           path: dist
       - run: ls -l dist
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    name: Publish to npm
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/gglint
+    permissions:
+      contents: read
+      # Trusted publishing, and the provenance npm shows with each package.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global npm@11
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+      - name: Build the packages from the wheels
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: python npm/build.py --version "${TAG#v}" --wheels dist --out "$RUNNER_TEMP/npm" > "$RUNNER_TEMP/npm-packages"
+      - name: Publish each package, the platforms' first
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          while read -r folder; do
+            name=$(node -p "require('$folder/package.json').name")
+            # A retried run skips what an earlier attempt published.
+            if npm view "$name@$version" version > /dev/null 2>&1; then
+              echo "$name@$version is already published"
+            else
+              npm publish "$folder" --access public
+            fi
+          done < "$RUNNER_TEMP/npm-packages"
 
   assets:
     name: Attach files to the release

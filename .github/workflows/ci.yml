@@ -1,6 +1,6 @@
-# Lints and tests the code, and builds the wheels and source distribution that are
-# published to PyPI. Runs on every push to main and every pull request, and is called by
-# pypi_release.yml when a release is published.
+# Lints and tests the code, builds the wheels and source distribution that are published to
+# PyPI, and tests the npm packages built from the same program. Runs on every push to main
+# and every pull request, and is called by pypi_release.yml when a release is published.
 
 name: CI
 
@@ -93,6 +93,56 @@ jobs:
           command: all
           path: ${{ runner.temp }}/clean
           comment: "false"
+
+  npm:
+    name: npm package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cargo build --locked
+      - name: Build the npm packages for this machine
+        shell: bash
+        run: |
+          platform=$(node -p 'process.platform + "-" + process.arch')
+          program=target/debug/gglint
+          if [ "$RUNNER_OS" = Windows ]; then program=target/debug/gglint.exe; fi
+          python npm/build.py --version 0.0.0-ci --out "$RUNNER_TEMP/npm" --binary "$platform=$program"
+      - name: Install them with npm and pnpm, and run gglint
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/npm"
+          for package in gglint cli-*; do (cd "$package" && npm pack --pack-destination ..); done
+          # A token's shape, assembled here so no file in the repository looks like one.
+          token="ghp_$(printf '%s%s' aB3dE6gH9jK2mN5pQ8sT1vW4yZ7 aB3dE6gH9)"
+          mkdir -p dirty/.cursor clean
+          printf '{"mcpServers":{"github":{"url":"https://x","headers":{"Authorization":"Bearer %s"}}}}\n' "$token" > dirty/.cursor/mcp.json
+
+          mkdir npm-project && cd npm-project
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund ../gglint-cli-*.tgz ../gglint-0.0.0-ci.tgz
+          npx gglint --version
+          # gglint's exit code comes through: 1 for a secret, 0 for none.
+          if npx gglint secrets ../dirty; then echo "gglint passed a file with a secret"; exit 1; fi
+          npx gglint secrets ../clean
+
+          npm install --global pnpm@10
+          mkdir ../pnpm-project && cd ../pnpm-project
+          printf '{"name":"test","version":"1.0.0"}\n' > package.json
+          pnpm add ../gglint-cli-*.tgz ../gglint-0.0.0-ci.tgz
+          pnpm exec gglint --version
 
   msrv:
     name: Minimum Rust version
