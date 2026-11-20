@@ -27,4 +27,11 @@ reader is doing:
 A new page also needs an entry in the `sidebar` of [`astro.config.mjs`](astro.config.mjs).
 Links between pages start with the site's base, `/gglint/`.
 
+## The look
+
+Ink, paper and one lime signal colour, set in Geist and Geist Mono: hairline rules, square
+corners, no gradients. The theme is [`src/styles/custom.css`](src/styles/custom.css), the
+landing page is [`src/components/Landing.astro`](src/components/Landing.astro), and rule pages
+open with [`RuleSpec`](src/components/RuleSpec.astro).
+
 `demo.svg`, the terminal animation, stays in this folder because the README links to it here.

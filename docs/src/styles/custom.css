@@ -1,20 +1,411 @@
-/* gglint's accent colour: a calm blue that matches the action's branding. */
+/*
+  gglint's look: ink, paper and one signal colour. Hairline rules, square corners, no
+  gradients. Colour carries meaning: lime is a fix or where you are, amber is a difference,
+  red is a problem. Starlight's own styles live in cascade layers, so these unlayered rules win.
+*/
+
 :root {
-  --sl-color-accent-low: #0d2847;
-  --sl-color-accent: #2f7ae5;
-  --sl-color-accent-high: #c3dcff;
-}
-:root[data-theme='light'] {
-  --sl-color-accent-low: #d6e6ff;
-  --sl-color-accent: #1f63c8;
-  --sl-color-accent-high: #0e2c57;
+  --gg-ink: #0a0a0a;
+  --gg-paper: #ffffff;
+  --gg-fog: #f1f1ef;
+  --gg-rule: #e3e3e3;
+  --gg-muted: #6a6a6a;
+  --gg-signal: #d4ff3a;
+  --gg-amber: #ffb800;
+  --gg-alarm: #e5243b;
+
+  --sl-font: 'Geist Variable';
+  --sl-font-mono: 'Geist Mono Variable';
+  --sl-content-width: 48rem;
+  --sl-sidebar-width: 17.5rem;
+  --sl-nav-height: 3.75rem;
+  --sl-line-height: 1.65;
+  --sl-line-height-headings: 1.05;
+  --sl-text-h1: clamp(2.5rem, 4vw, 3.5rem);
+  --sl-text-h2: 1.875rem;
+  --sl-text-h3: 1.375rem;
 }
 
-/* Wide tables, such as the agents table, scroll instead of squeezing their columns. */
-.sl-markdown-content table {
+/* Dark: the terminal. Ink ground, paper text, the same signal. */
+:root {
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #ededed;
+  --sl-color-gray-2: #cfcfcf;
+  --sl-color-gray-3: #a3a3a3;
+  --sl-color-gray-4: #6a6a6a;
+  --sl-color-gray-5: #2e2e2e;
+  --sl-color-gray-6: #1a1a1a;
+  --sl-color-black: #0a0a0a;
+  --sl-color-accent-low: #2b3300;
+  --sl-color-accent: #d4ff3a;
+  --sl-color-accent-high: #d4ff3a;
+  --sl-color-text-accent: #d4ff3a;
+  --sl-color-text-invert: #0a0a0a;
+  --sl-color-bg-nav: #0a0a0a;
+  --sl-color-bg-sidebar: #0a0a0a;
+  --sl-color-bg-inline-code: #1f1f1f;
+  --sl-color-hairline-light: #2e2e2e;
+  --sl-color-hairline: #2e2e2e;
+  --sl-color-hairline-shade: #4a4a4a;
+  --gg-fg: #ffffff;
+  --gg-line: #4a4a4a;
+  --gg-soft: #1a1a1a;
+}
+
+/* Light: paper, ink and lime. */
+:root[data-theme='light'] {
+  --sl-color-white: #0a0a0a;
+  --sl-color-gray-1: #1a1a1a;
+  --sl-color-gray-2: #2e2e2e;
+  --sl-color-gray-3: #4a4a4a;
+  --sl-color-gray-4: #6a6a6a;
+  --sl-color-gray-5: #cfcfcf;
+  --sl-color-gray-6: #f1f1ef;
+  --sl-color-gray-7: #f7f7f5;
+  --sl-color-black: #ffffff;
+  --sl-color-accent-low: #f2ffc4;
+  --sl-color-accent: #0a0a0a;
+  --sl-color-accent-high: #0a0a0a;
+  --sl-color-text-accent: #0a0a0a;
+  --sl-color-text-invert: #d4ff3a;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+  --sl-color-bg-inline-code: #f1f1ef;
+  --sl-color-hairline-light: #e3e3e3;
+  --sl-color-hairline: #e3e3e3;
+  --sl-color-hairline-shade: #0a0a0a;
+  --gg-fg: #0a0a0a;
+  --gg-line: #0a0a0a;
+  --gg-soft: #f1f1ef;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--gg-signal);
+  color: var(--gg-ink);
+}
+
+/* ---- Header ---- */
+.site-title {
+  font-weight: 800;
+  font-size: 1.375rem;
+  letter-spacing: -0.03em;
+  color: var(--gg-fg);
+  gap: 0.6rem;
+}
+.site-title img {
+  height: 1.375rem;
+  width: auto;
+}
+site-search button[data-open-modal] {
+  border-radius: 0;
+  border: 1px solid var(--gg-line);
+  background: transparent;
+  font-family: var(--__sl-font-mono);
+  font-size: 0.8125rem;
+}
+site-search button[data-open-modal] kbd {
+  border-radius: 0;
+  background: var(--gg-soft);
+}
+starlight-theme-select select,
+starlight-lang-select select {
+  font-family: var(--__sl-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+}
+
+/* ---- Sidebar: numbered mono groups, an ink bar with lime text for the current page ---- */
+#starlight__sidebar .top-level {
+  counter-reset: gg-group;
+}
+#starlight__sidebar .top-level > li {
+  counter-increment: gg-group;
+}
+#starlight__sidebar .top-level > li > details > summary .large {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-4);
+}
+#starlight__sidebar .top-level > li > details > summary .large::before {
+  content: counter(gg-group, decimal-leading-zero) ' — ';
+}
+#starlight__sidebar .top-level > li + li {
+  margin-top: 1.25rem;
+}
+#starlight__sidebar a {
+  border-radius: 0;
+  font-size: 0.9375rem;
+  color: var(--sl-color-gray-2);
+}
+#starlight__sidebar a:hover {
+  color: var(--gg-fg);
+  background: var(--gg-soft);
+}
+#starlight__sidebar ul ul li {
+  border-inline-start: 0;
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+}
+#starlight__sidebar [aria-current='page'],
+#starlight__sidebar [aria-current='page']:hover,
+#starlight__sidebar [aria-current='page']:focus {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--gg-ink);
+  background: var(--gg-signal);
+}
+:root[data-theme='light'] #starlight__sidebar [aria-current='page'],
+:root[data-theme='light'] #starlight__sidebar [aria-current='page']:hover,
+:root[data-theme='light'] #starlight__sidebar [aria-current='page']:focus {
+  color: var(--gg-signal);
+  background: var(--gg-ink);
+}
+/* Rule names in the sidebar read as code. */
+#starlight__sidebar a[href*='/reference/rules/'] {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.875rem;
+}
+
+/* ---- Right-hand table of contents ---- */
+starlight-toc h2,
+mobile-starlight-toc .toggle {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-4);
+}
+starlight-toc a[aria-current='true'],
+starlight-toc a[aria-current='true']:hover {
+  color: var(--gg-fg);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--gg-signal);
+  padding-inline-start: 0.5rem;
+}
+
+/* ---- Page title and headings ---- */
+.content-panel h1#_top {
+  font-weight: 800;
+  letter-spacing: -0.045em;
+}
+.content-panel h1#_top.gg-mono-title {
+  font-family: var(--__sl-font-mono);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+}
+.sl-markdown-content :is(h2, h3, h4) {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.sl-markdown-content h2 {
+  margin-top: 2.75rem;
+}
+
+/* ---- Body content ---- */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--gg-fg);
+  text-decoration-line: underline;
+  text-decoration-color: var(--gg-signal);
+  text-decoration-thickness: 0.18em;
+  text-underline-offset: 0.18em;
+}
+:root[data-theme='light'] .sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration-color: #9ccc00;
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  background: var(--gg-signal);
+  color: var(--gg-ink);
+  text-decoration-color: transparent;
+}
+.sl-markdown-content code:not(:where(.not-content *, pre *)) {
+  border-radius: 0;
+  font-size: 0.875em;
+  padding: 0.1em 0.35em;
+}
+.sl-markdown-content strong {
+  font-weight: 700;
+}
+
+/* Tables: a ruled spec sheet with mono caps headers. Wide ones scroll in their box. */
+.sl-markdown-content table:not(:where(.not-content *)) {
   display: block;
   overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
 }
-.sl-markdown-content table code {
+.sl-markdown-content table code:not(:where(.not-content *)) {
   white-space: nowrap;
+}
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  border: 0;
+  border-bottom: 1px solid var(--sl-color-hairline);
+  padding: 0.6rem 1rem 0.6rem 0;
+}
+.sl-markdown-content th:not(:where(.not-content *)) {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-4);
+  border-bottom: 1px solid var(--gg-line);
+  background: transparent;
+}
+.sl-markdown-content tr:nth-child(2n):not(:where(.not-content *)) {
+  background: transparent;
+}
+
+/* Asides: a square box with a sideways mono label. */
+.starlight-aside {
+  border: 1px solid var(--gg-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--gg-fg);
+  padding: 1rem 1.25rem;
+}
+.starlight-aside__title {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gg-fg);
+}
+.starlight-aside__icon {
+  display: none;
+}
+.starlight-aside--note .starlight-aside__title { box-shadow: inset 0 -0.6em 0 var(--gg-signal); color: var(--gg-ink); align-self: flex-start; }
+.starlight-aside--tip .starlight-aside__title { box-shadow: inset 0 -0.6em 0 var(--gg-signal); color: var(--gg-ink); align-self: flex-start; }
+.starlight-aside--caution { border-color: var(--gg-amber); box-shadow: inset 4px 0 0 var(--gg-amber); }
+.starlight-aside--danger { border-color: var(--gg-alarm); box-shadow: inset 4px 0 0 var(--gg-alarm); }
+:root:not([data-theme='light']) .starlight-aside--note .starlight-aside__title,
+:root:not([data-theme='light']) .starlight-aside--tip .starlight-aside__title { color: var(--gg-ink); background: var(--gg-signal); box-shadow: none; padding: 0 0.3em; }
+
+/* Steps: square mono counters. */
+.sl-steps > li::before {
+  border-radius: 0;
+  font-family: var(--__sl-font-mono);
+  font-weight: 600;
+  background: var(--gg-ink);
+  color: var(--gg-signal);
+  border: 0;
+}
+.sl-steps > li::after {
+  background: var(--sl-color-hairline);
+  border-radius: 0;
+}
+:root:not([data-theme='light']) .sl-steps > li::before {
+  background: var(--gg-signal);
+  color: var(--gg-ink);
+}
+
+/* Tabs */
+starlight-tabs [role='tablist'] {
+  border-bottom: 1px solid var(--gg-line);
+}
+starlight-tabs [role='tab'] {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 0;
+}
+starlight-tabs [role='tab'][aria-selected='true'] {
+  color: var(--gg-ink);
+  background: var(--gg-signal);
+  border-color: transparent;
+}
+
+/* Cards, link cards, pagination: square, hairline, hard shadow on hover. */
+.card,
+.sl-link-card,
+.pagination-links a {
+  border-radius: 0;
+  border: 1px solid var(--gg-line);
+  background: transparent;
+  box-shadow: none;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+.sl-link-card:hover,
+.pagination-links a:hover {
+  border-color: var(--gg-line);
+  background: transparent;
+  box-shadow: 6px 6px 0 var(--gg-fg);
+  transform: translate(-2px, -2px);
+}
+.pagination-links a .link-title {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.pagination-links a > span {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Footer meta (edit link, last updated) in mono caps. */
+.meta {
+  font-family: var(--__sl-font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Rule spec sheet (RuleSpec.astro) ---- */
+.gg-spec {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  border: 1px solid var(--gg-line);
+  margin: 0;
+  font-family: var(--__sl-font-mono);
+}
+.gg-spec > div {
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border-inline-end: 1px solid var(--gg-line);
+}
+.gg-spec > div:last-child {
+  border-inline-end: 0;
+}
+.gg-spec dt {
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-4);
+}
+.gg-spec dd {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--gg-fg);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.gg-spec .gg-fix {
+  background: var(--gg-signal);
+}
+.gg-spec .gg-fix :is(dt, dd) {
+  color: var(--gg-ink);
+}
+.gg-spec .gg-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  flex-shrink: 0;
 }

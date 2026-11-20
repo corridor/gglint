@@ -13,9 +13,38 @@ export default defineConfig({
       description:
         'Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync, and secrets out of their config files.',
       favicon: '/favicon.svg',
+      logo: { light: './src/assets/logo-light.svg', dark: './src/assets/logo-dark.svg' },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/corridor/gglint' }],
       editLink: { baseUrl: 'https://github.com/corridor/gglint/edit/main/docs/' },
-      customCss: ['./src/styles/custom.css'],
+      customCss: [
+        '@fontsource-variable/geist',
+        '@fontsource-variable/geist-mono',
+        './src/styles/custom.css',
+      ],
+      components: { PageTitle: './src/components/PageTitle.astro' },
+      // Code is always a dark terminal, in both themes.
+      expressiveCode: {
+        themes: ['github-dark-default'],
+        useStarlightUiThemeColors: false,
+        styleOverrides: {
+          borderRadius: '0px',
+          borderColor: 'var(--gg-line)',
+          codeBackground: '#0a0a0a',
+          codeFontFamily: 'var(--__sl-font-mono)',
+          uiFontFamily: 'var(--__sl-font-mono)',
+          frames: {
+            shadowColor: 'transparent',
+            editorTabBarBackground: '#161616',
+            editorActiveTabBackground: '#0a0a0a',
+            editorActiveTabIndicatorTopColor: '#d4ff3a',
+            editorTabBarBorderBottomColor: '#2e2e2e',
+            terminalTitlebarBackground: '#161616',
+            terminalTitlebarBorderBottomColor: '#2e2e2e',
+            terminalBackground: '#0a0a0a',
+            frameBoxShadowCssValue: 'none',
+          },
+        },
+      },
       sidebar: [
         {
           label: 'Start here',

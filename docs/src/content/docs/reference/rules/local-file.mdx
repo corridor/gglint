@@ -3,8 +3,9 @@ title: local-file
 description: A coding-agent file meant for one person's machine, such as .claude/settings.local.json, is committed to git or can be.
 ---
 
-**Command:** `gglint secrets` · **Severity:** problem when it's in git; a warning while git
-doesn't ignore it · **Fixed by `--fix`:** adds it to `.gitignore`
+import RuleSpec from '../../../../components/RuleSpec.astro';
+
+<RuleSpec command="gglint secrets" severity="problem in git; warning on disk" fix="adds it to .gitignore" />
 
 ## What it finds
 

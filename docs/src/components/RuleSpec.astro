@@ -1,0 +1,29 @@
+---
+// The spec sheet at the top of a rule page: which command reports it, how serious it is,
+// and what --fix does about it.
+interface Props {
+	command: 'gglint mcp' | 'gglint secrets';
+	severity: string;
+	fix: string;
+	warning?: boolean;
+}
+const { command, severity, fix, warning = false } = Astro.props;
+---
+
+<dl class="gg-spec not-content">
+	<div>
+		<dt>Command</dt>
+		<dd>{command}</dd>
+	</div>
+	<div>
+		<dt>Severity</dt>
+		<dd>
+			<span class="gg-dot" style={`background: ${warning ? 'var(--gg-amber)' : 'var(--gg-alarm)'}`}></span>
+			{severity}
+		</dd>
+	</div>
+	<div class="gg-fix">
+		<dt>--fix</dt>
+		<dd>{fix}</dd>
+	</div>
+</dl>
