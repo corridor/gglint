@@ -2,7 +2,7 @@
 #
 #   repos:
 #     - repo: https://github.com/corridor/gglint
-#       rev: v0.4.5
+#       rev: v0.5.0
 #       hooks:
 #         - id: gglint-secrets
 #
@@ -12,7 +12,7 @@
 - id: gglint-secrets
   name: gglint secrets
   description: Find secrets written out in the config and instruction files of coding agents
-  entry: uvx gglint@0.4.5 secrets
+  entry: uvx gglint@0.5.0 secrets
   language: system
   pass_filenames: true
   files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.rules|(CLAUDE|AGENTS?|GEMINI|QWEN|CRUSH)\.md|CLAUDE\.local\.md|\.cursorrules|\.windsurfrules|\.clinerules|\.github/(mcp\.json|copilot-instructions\.md|copilot/settings(\.local)?\.json|instructions/.*|prompts/.*|hooks/.*)|\.vscode/mcp\.json|\.zed/settings\.json|\.(claude|codex|cursor|opencode|amp|agents|agent|continue|factory|gemini|junie|kilo|kimi-code|kiro|vibe|qoder|qwen|trae)/.*)$'
@@ -20,7 +20,7 @@
 - id: gglint-mcp
   name: gglint mcp
   description: Check that every coding agent in the repository gets the same MCP servers
-  entry: uvx gglint@0.4.5 mcp --format lines
+  entry: uvx gglint@0.5.0 mcp --format lines
   language: system
   pass_filenames: false
   files: '^(\.mcp\.json|opencode\.jsonc?|kilo\.jsonc?|\.?crush\.json|\.?crushrc|\.github/mcp\.json|\.vscode/mcp\.json|\.zed/settings\.json|\.(codex|cursor|amp|agents|continue|factory|gemini|junie|kilo|kimi-code|kiro|vibe|qoder|qwen|trae)/.*)$'
