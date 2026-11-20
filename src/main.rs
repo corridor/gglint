@@ -18,7 +18,7 @@ use gglint::harness::{
     Cell, Finding, FixReport, HARNESSES, Harness, McpCheck, McpConfig, McpServer, Rule, Setting, Transport,
     check_mcp_from, fix_mcp, read_mcp,
 };
-use gglint::hook::{self, Outcome, TOOLS, Tool};
+use gglint::hook::{self, Outcome, Runner, TOOLS, Tool};
 use gglint::report::{self, Diagnostic, Paint, Severity, exit_code};
 use gglint::secrets::{Scope, apply_fixes, ignore_local_files, scan_files};
 
@@ -37,8 +37,10 @@ Usage:
   gglint secrets FILE...            check these files, as a pre-commit hook passes them
   gglint hook [PATH]                run `gglint secrets --staged` before every commit, through
                                     husky or git; for pre-commit, lefthook and lint-staged it
-                                    prints the lines to add. `--tool NAME` picks the tool,
-                                    `--with-mcp` adds the MCP check, `hook print` only prints.
+                                    prints the lines to add. A repository with a package.json
+                                    gets gglint as a dev dependency first, with its package
+                                    manager. `--tool NAME` picks the tool, `--with-mcp` adds
+                                    the MCP check, `hook print` only prints.
 
 `--format` takes table, lines, github (annotations for a pull request's diff), sarif (for
 GitHub's Code scanning) or markdown (a pull request comment), for `mcp` and `secrets`.
@@ -538,12 +540,36 @@ fn hook_command(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     let tool = tool.unwrap_or_else(|| hook::detect(root));
+    let runner = hook::runner(root, tool);
+    // A JavaScript repository's hook runs the gglint in its dev dependencies.
+    let missing = match runner {
+        Runner::Package(manager) if !hook::has_dependency(root) => Some(manager),
+        _ => None,
+    };
     if print_only {
-        let (file, snippet) = hook::print(tool, with_mcp);
+        if let Some(manager) = missing {
+            println!(
+                "# First add gglint to the dev dependencies:\n{}\n",
+                manager.add_command()
+            );
+        }
+        let (file, snippet) = hook::print(tool, runner, with_mcp);
         println!("# {} ({file})\n{snippet}", tool.as_str());
         return ExitCode::SUCCESS;
     }
-    match hook::install(root, tool, with_mcp) {
+    // Without the dependency, the hook would stop every commit, so it isn't written.
+    if let Some(manager) = missing {
+        if let Err(error) = hook::add_dependency(root, manager) {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "Added gglint {} to the dev dependencies with {}.",
+            env!("CARGO_PKG_VERSION"),
+            manager.as_str()
+        );
+    }
+    match hook::install(root, tool, runner, with_mcp) {
         Ok(Outcome::Wrote(file)) => {
             println!(
                 "Added gglint to {}. It runs before each commit ({}).",
