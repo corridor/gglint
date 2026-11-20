@@ -4,6 +4,24 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- gglint is on npm, so `npx gglint`, `pnpm dlx gglint` and `bunx gglint` run it, and a
+  JavaScript project can pin a version with `npm install --save-dev gglint`. The `gglint`
+  package runs the same program as the PyPI wheels, from an optional dependency built for
+  each platform, `@gglint/cli-<platform>-<arch>`. It has no install script, so it works with
+  pnpm and Bun, which don't run them. Each release publishes it through npm's trusted
+  publishing, with provenance.
+
+### Changed
+
+- `gglint hook` in a repository with a `package.json` first adds gglint to the dev
+  dependencies with the repository's package manager, npm, pnpm, yarn or bun, and the hook
+  runs that copy, so contributors don't need uv. If the package manager fails, the hook isn't
+  written, as it would stop every commit. Other repositories' hooks still run `uvx`.
+
 ## [0.4.5] - 2026-11-19
 
 gglint now supports the last 7 coding agents from
