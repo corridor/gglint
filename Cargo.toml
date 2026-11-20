@@ -1,6 +1,6 @@
 [package]
 name = "gglint"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 rust-version = "1.88"
 description = "Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync, and secrets out of their config files"

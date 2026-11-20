@@ -4,7 +4,11 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.1] - 2026-11-20
+
+pre-commit runs gglint's hooks without uv, in any repository: they come from
+[corridor/gglint-pre-commit](https://github.com/corridor/gglint-pre-commit), which installs
+gglint from PyPI, and every release is published there automatically.
 
 ### Added
 
@@ -268,6 +272,7 @@ First release.
 - Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and Apple silicon) and
   Windows (x64 and ARM64).
 
+[0.5.1]: https://github.com/corridor/gglint/releases/tag/v0.5.1
 [0.5.0]: https://github.com/corridor/gglint/releases/tag/v0.5.0
 [0.4.5]: https://github.com/corridor/gglint/releases/tag/v0.4.5
 [0.4.0]: https://github.com/corridor/gglint/releases/tag/v0.4.0

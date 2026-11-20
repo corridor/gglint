@@ -253,7 +253,7 @@ pre-commit installs gglint from PyPI itself. Nobody needs uv, in any repository:
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/corridor/gglint-pre-commit
-    rev: v0.5.0
+    rev: v0.5.1
     hooks:
       - id: gglint-secrets
       - id: gglint-mcp      # optional: the MCP servers of every agent match
@@ -539,8 +539,8 @@ To run gglint without the action:
 
 ```yaml
       - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.5.0 mcp --format github
-      - run: uvx gglint@0.5.0 secrets --format github
+      - run: uvx gglint@0.5.1 mcp --format github
+      - run: uvx gglint@0.5.1 secrets --format github
 ```
 
 ## Security
