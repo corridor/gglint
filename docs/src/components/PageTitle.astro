@@ -1,0 +1,18 @@
+---
+// Starlight's page title, set in mono for rule pages, whose titles are rule names. The landing
+// page draws its own title, with the same id, so it has none here.
+const { entry } = Astro.locals.starlightRoute;
+const isLanding = entry.id === '' || entry.id === 'index';
+const isRule = entry.id.startsWith('reference/rules/') && entry.id !== 'reference/rules';
+---
+
+{!isLanding && <h1 id="_top" class:list={{ 'gg-mono-title': isRule }}>{entry.data.title}</h1>}
+
+<style>
+	h1 {
+		margin-top: 1rem;
+		font-size: var(--sl-text-h1);
+		line-height: var(--sl-line-height-headings);
+		color: var(--sl-color-white);
+	}
+</style>

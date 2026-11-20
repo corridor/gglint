@@ -3,7 +3,9 @@ title: missing-config
 description: A coding agent has its own directory in the repository but no MCP config file, while other agents have servers.
 ---
 
-**Command:** `gglint mcp` · **Severity:** problem · **Fixed by `--fix`:** yes
+import RuleSpec from '../../../../components/RuleSpec.astro';
+
+<RuleSpec command="gglint mcp" severity="problem · exit 1" fix="creates the file" />
 
 ## What it finds
 
