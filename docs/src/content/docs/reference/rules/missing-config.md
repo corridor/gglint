@@ -1,0 +1,49 @@
+---
+title: missing-config
+description: A coding agent has its own directory in the repository but no MCP config file, while other agents have servers.
+---
+
+**Command:** `gglint mcp` · **Severity:** problem · **Fixed by `--fix`:** yes
+
+## What it finds
+
+An agent that's set up in the repository, because it has its own directory such as `.codex/`
+or `.opencode/`, but has no MCP config file, while other agents have servers.
+
+## Why it matters
+
+The agent gets none of the repository's MCP servers. It happens when an agent is added to a
+repository: its directory is created for its rules or skills, and its MCP config is never
+written.
+
+## Example
+
+The repository has `.mcp.json` and `.cursor/mcp.json` with four servers between them, and a
+`.codex/` directory with no `config.toml`.
+
+```text
+./.mcp.json:3:5  missing-config   Codex has a .codex directory but no .codex/config.toml, so it gets none of the 4 MCP servers set up for Claude Code and Cursor
+```
+
+## How to fix it
+
+Run `uvx gglint mcp --fix`. It creates the config file with every server that's turned on in
+the other agents:
+
+```toml
+# .codex/config.toml
+[mcp_servers.github]
+url = "https://api.githubcopilot.com/mcp/"
+bearer_token_env_var = "GITHUB_TOKEN"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@0.0.78", "--headless"]
+```
+
+## When it isn't reported
+
+A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't count, because it doesn't
+show that the agent is set up. Antigravity, Copilot CLI and Gemini CLI count only once they
+have their config file: many repositories have an `.agents/`, `.github/` or `.gemini/`
+directory for other reasons. See [Supported agents](/gglint/reference/agents/).

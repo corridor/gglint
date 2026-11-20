@@ -4,6 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/gglint.svg)](https://pypi.org/project/gglint/)
 [![npm](https://img.shields.io/npm/v/@gglint/cli.svg)](https://www.npmjs.com/package/@gglint/cli)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/corridor/gglint/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-corridor.github.io%2Fgglint-blue.svg)](https://corridor.github.io/gglint/)
 
 Keep every coding agent in your repository in sync, and keep secrets out of their config
 files.
@@ -21,6 +22,9 @@ checks those files for two problems:
   all, in `.claude/settings.local.json`, and tokens get pasted into `.mcp.json`,
   `.codex/config.toml` and `CLAUDE.md`. `gglint secrets` finds them, replaces the ones it can
   with environment variables, and stops the agents' personal files from being committed.
+
+**[Read the documentation](https://corridor.github.io/gglint/)** for guides, a page for every
+rule, and how each agent's files are read and written.
 
 <p align="center">
   <a href="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg"><img src="https://raw.githubusercontent.com/corridor/gglint/main/docs/demo.svg" alt="A terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file" width="100%"></a>
@@ -578,48 +582,11 @@ To run gglint without the action:
 
 ## Development
 
-gglint is written in Rust. With a [Rust toolchain](https://rustup.rs) 1.88 or later, run these
-three commands in order before each commit; CI runs the same checks:
-
-```sh
-cargo fmt
-cargo clippy --all-targets -- --deny warnings
-cargo test
-```
-
-`tests/corpus.rs` runs `--fix` against a directory of real repositories and checks that no
-server is removed, that no environment variable, header or on/off state changes, that a
-config file is created only in an agent's own directory, that no file becomes unreadable,
-that the number of missing servers and differences never grows, and that a second run changes
-nothing:
-
-```sh
-GGLINT_CORPUS=path/to/clones cargo test --release --test corpus -- --ignored --nocapture
-```
-
-The code lives in [`src/`](https://github.com/corridor/gglint/tree/main/src).
-[`harness/`](https://github.com/corridor/gglint/tree/main/src/harness) does the MCP check:
-`agents.rs` describes each agent in one table, `mcp.rs` reads each agent's config,
-`compare.rs` finds the problems, and `fix.rs` writes the fixes. Supporting another agent
-starts with a row in `agents.rs`. `report.rs` is what every check prints through,
-`secrets.rs` finds secrets and replaces them, and `hook.rs` sets up the pre-commit hooks.
-[`npm/`](https://github.com/corridor/gglint/tree/main/npm) holds the npm package's launcher,
-`gglint.js`, and `build.py`, which builds the packages from each platform's program.
-
-### Releasing
-
-1. Update `version` in `Cargo.toml` and add the release to `CHANGELOG.md`.
-2. Merge to `main`.
-3. Publish a GitHub release tagged `v<version>`, for example `v0.4.5`.
-4. Move the `v1` tag to the release's commit, so `uses: corridor/gglint@v1` runs it:
-   `git tag -f v1 v<version> && git push -f origin v1`.
-
-The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
-builds and tests every wheel, publishes them to PyPI, publishes the npm packages built from
-the same programs, and attaches the wheels to the release. On npm, `@gglint/cli` runs the
-program from `@gglint/cli-<platform>-<arch>`, an optional dependency npm installs only on the
-platform it's built for. Both registries trust the workflow through trusted publishing, so no
-token is stored in the repository.
+gglint is written in Rust. [CONTRIBUTING.md](https://github.com/corridor/gglint/blob/main/CONTRIBUTING.md)
+says how to build and test it and open a pull request, and how releases are made.
+[ARCHITECTURE.md](https://github.com/corridor/gglint/blob/main/ARCHITECTURE.md) is a map of the
+code, and says where to start to support another agent. The documentation site's source is in
+[`docs/`](https://github.com/corridor/gglint/tree/main/docs).
 
 ## License
 

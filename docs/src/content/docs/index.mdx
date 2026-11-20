@@ -1,0 +1,96 @@
+---
+title: Coding agents in sync, secrets out
+description: Keep every coding agent in your repository in sync, and keep secrets out of their config files.
+template: splash
+hero:
+  title: gglint
+  tagline: Keep every coding agent in your repository in sync, and keep secrets out of their config files.
+  actions:
+    - text: Quick start
+      link: /gglint/start/quick-start/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/corridor/gglint
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import demo from '../../../demo.svg';
+
+Claude Code, Codex, Cursor, Gemini CLI, VS Code and sixteen other coding agents are each set
+up by their own files in a repository. gglint checks those files for two problems, and fixes
+what it can.
+
+```sh
+uvx gglint mcp       # do all your agents get the same MCP servers?
+uvx gglint secrets   # is a token written out in one of their files?
+```
+
+<a href={demo.src}>
+  <img
+    src={demo.src}
+    alt="A terminal running uvx gglint mcp: it draws each MCP server in Claude Code, Codex, Cursor and OpenCode as a table, then lists six problems: missing servers, a server set up differently, and an agent without a config file"
+    width="100%"
+  />
+</a>
+
+The terminal shows `gglint mcp` on a repository whose agents have drifted apart. Open it on
+its own and hover over a cell to see what gglint found there and what `--fix` does about it.
+
+## Two checks
+
+<CardGrid>
+  <Card title="MCP servers that drift apart" icon="random">
+    Each agent reads MCP servers from its own file, in its own format. A server gets added to
+    `.mcp.json` but not to `.cursor/mcp.json`, or a version is pinned in one and not the other.
+    `gglint mcp` finds every difference, and `--fix` writes each server in each agent's own
+    format.
+  </Card>
+  <Card title="Secrets written into agent files" icon="warning">
+    Approving a command in Claude Code saves it, keys and all, in
+    `.claude/settings.local.json`, and tokens get pasted into `.mcp.json` and `CLAUDE.md`.
+    `gglint secrets` finds them, replaces the ones it can with environment variables, and
+    stops personal files from being committed.
+  </Card>
+</CardGrid>
+
+## Why it matters
+
+In November 2026 we checked the 258 most-starred GitHub repositories set up for two or more
+of Claude Code, Codex, Cursor and OpenCode. Of the 179 that configure MCP servers, **128
+(72%)** had at least one of the problems gglint reports.
+
+The same month, `gglint secrets` over 441 public repositories set up for coding agents found
+**21** that had committed `.claude/settings.local.json`, and **5** with secrets that look real
+in their agent files.
+
+## Built for teams and CI
+
+<CardGrid>
+  <Card title="Fast and read-only" icon="rocket">
+    It reads a few files at fixed paths and typically finishes in under a millisecond. It
+    never starts a server, downloads anything, or writes a file without `--fix`.
+  </Card>
+  <Card title="Keeps your formatting" icon="pencil">
+    `--fix` edits JSON and TOML in place, keeping comments and formatting. It never removes a
+    server, and running it twice changes nothing.
+  </Card>
+  <Card title="Never prints a secret" icon="seti:lock">
+    Findings show a secret's kind, the name it's under and where it is. Environment variables
+    and headers are shown by name only.
+  </Card>
+  <Card title="Runs where you work" icon="github">
+    A pre-commit hook, a GitHub Action with annotations and a pull request comment, and SARIF
+    for Code scanning. It exits with status 1 when it finds a problem.
+  </Card>
+</CardGrid>
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Quick start" description="Run both checks on your repository in a minute." href="/gglint/start/quick-start/" />
+  <LinkCard title="Rules" description="Every problem gglint reports, with examples and fixes." href="/gglint/reference/rules/" />
+  <LinkCard title="Supported agents" description="The 21 agents gglint reads, and where each keeps its servers." href="/gglint/reference/agents/" />
+  <LinkCard title="GitHub Action" description="Check every pull request, with annotations and one comment." href="/gglint/guides/github-action/" />
+</CardGrid>

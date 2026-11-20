@@ -1,0 +1,53 @@
+---
+title: local-file
+description: A coding-agent file meant for one person's machine, such as .claude/settings.local.json, is committed to git or can be.
+---
+
+**Command:** `gglint secrets` · **Severity:** problem when it's in git; a warning while git
+doesn't ignore it · **Fixed by `--fix`:** adds it to `.gitignore`
+
+## What it finds
+
+An agent file meant for one person's machine, whatever it holds. The agent's docs say to keep it out of git, or it's where they say to put
+your API key:
+
+| File                                   | Agent         | What it holds                             |
+| -------------------------------------- | ------------- | ----------------------------------------- |
+| `.claude/settings.local.json`          | Claude Code   | The commands you allow, secrets and all   |
+| `CLAUDE.local.md`                      | Claude Code   | Personal instructions                     |
+| `.claude/.credentials.json`            | Claude Code   | Login credentials                         |
+| `.codex/auth.json`                     | Codex         | Login credentials                         |
+| `.continue/.env`                       | Continue      | Values for `${{ secrets.NAME }}`          |
+| `.github/copilot/settings.local.json`  | Copilot CLI   | Personal settings                         |
+| `.factory/settings.local.json`         | Factory Droid | Personal settings                         |
+| `.gemini/.env`                         | Gemini CLI    | Where its docs put your API key           |
+| `.qoder/settings.local.json`           | Qoder         | The commands you allow                    |
+| `.qwen/.env`                           | Qwen Code     | Where its docs put your API key           |
+
+It's a problem when the file is in git, and a warning while it's on disk and git doesn't
+ignore it yet.
+
+## Why it matters
+
+These files are where secrets end up without anyone deciding to write them down. Stopping the
+file stops a secret no pattern recognises too. GitGuardian counted about 31,000 secrets in
+`.claude/settings.local.json` files across public GitHub
+([report](https://blog.gitguardian.com/claude-code-settings-local-json-secrets-docker-hub/)).
+
+## Example
+
+```text
+./.claude/settings.local.json:1:1  local-file       warning: git doesn't ignore this file, so it can be committed by accident; it's Claude Code's personal settings, where it saves the commands you allow, secrets and all
+```
+
+## How to fix it
+
+Run `uvx gglint secrets --fix`. It adds the file to `.gitignore`. A file that's already in git
+needs one more step:
+
+```sh
+git rm --cached .claude/settings.local.json
+```
+
+If you build container images from the repository, add it to `.dockerignore` too. Anything
+that was committed is in git history: rotate it.

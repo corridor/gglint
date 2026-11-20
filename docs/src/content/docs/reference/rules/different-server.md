@@ -1,0 +1,63 @@
+---
+title: different-server
+description: The same MCP server is set up differently in two coding agents, such as another version, other arguments or another program.
+---
+
+**Command:** `gglint mcp` · **Severity:** problem · **Fixed by `--fix`:** versions and arguments
+
+## What it finds
+
+The same server, set up differently in two agents. gglint reports one problem for each kind of
+difference:
+
+| Difference                                        | Fixed by `--fix` |
+| ------------------------------------------------- | ---------------- |
+| Another version of the same package               | Yes              |
+| The same program with other arguments             | Yes              |
+| Another program or URL                            | No               |
+| Other environment variables or headers, by name   | No               |
+| Turned off in one agent                           | No               |
+
+The way a package is launched isn't a difference: `npx -y pkg` and `bunx pkg` run the same
+package, and no version means the same as `latest`. See
+[How servers are matched](/gglint/concepts/matching/).
+
+## Why it matters
+
+An agent running another version, or without a flag such as `--headless`, behaves differently
+from the others, and the difference is easy to miss when each file is read on its own.
+
+## Example
+
+```json
+// .mcp.json (Claude Code)
+"playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@0.0.78", "--headless"] }
+
+// .cursor/mcp.json
+"playwright": { "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }
+```
+
+```text
+./.mcp.json:8:5  different-server `playwright` runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor
+    also at ./.cursor/mcp.json:3:5
+./.mcp.json:8:5  different-server `playwright` is started with different arguments: `--headless` in Claude Code; no arguments in Cursor
+    also at ./.cursor/mcp.json:3:5
+```
+
+## How to fix it
+
+Run `uvx gglint mcp --fix`. Every agent gets the command and arguments of the first config
+file where the server is turned on, or of the agent named with `--source`:
+
+```diff
+# .cursor/mcp.json
+-      "args": ["-y", "@playwright/mcp@latest"]
++      "args": ["-y", "@playwright/mcp@0.0.78", "--headless"]
+```
+
+Its environment variables, headers, on/off state and keys only one agent has, such as Codex's
+`cwd`, are kept. Review the result with `git diff`: a runtime chosen for one agent, or a path
+that starts with Cursor's `${workspaceFolder}`, may have been deliberate.
+
+The other differences can be deliberate too, such as each agent setting its own environment
+variables, so gglint reports them and leaves them to you. Make the setups match by hand.

@@ -15,10 +15,14 @@ All notable changes to gglint are recorded in this file. The format follows
   an optional dependency built for each platform, `@gglint/cli-<platform>-<arch>`. It has no
   install script, so it works with pnpm and Bun, which don't run them. Each release publishes
   it through npm's trusted publishing, with provenance.
+- A documentation site at <https://corridor.github.io/gglint/>: a quick start, guides, a page
+  for every rule, and how servers are matched and fixed and secrets are found. Its source is
+  in `docs/`.
+- `CONTRIBUTING.md` and `ARCHITECTURE.md`, for people changing gglint.
 
 ### Changed
 
-- `gglint hook` in a repository with a `package.json` first adds gglint to the dev
+- `gglint hook` in a repository with a `package.json` first adds `@gglint/cli` to the dev
   dependencies with the repository's package manager, npm, pnpm, yarn or bun, and the hook
   runs that copy, so contributors don't need uv. If the package manager fails, the hook isn't
   written, as it would stop every commit. Other repositories' hooks still run `uvx`.

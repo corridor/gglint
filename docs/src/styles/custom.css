@@ -1,0 +1,20 @@
+/* gglint's accent colour: a calm blue that matches the action's branding. */
+:root {
+  --sl-color-accent-low: #0d2847;
+  --sl-color-accent: #2f7ae5;
+  --sl-color-accent-high: #c3dcff;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d6e6ff;
+  --sl-color-accent: #1f63c8;
+  --sl-color-accent-high: #0e2c57;
+}
+
+/* Wide tables, such as the agents table, scroll instead of squeezing their columns. */
+.sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
+}
+.sl-markdown-content table code {
+  white-space: nowrap;
+}
