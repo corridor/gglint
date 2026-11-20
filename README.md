@@ -76,20 +76,21 @@ GitHub, GitGuardian counted about 31,000 secrets in `.claude/settings.local.json
 
 ## Quick start
 
-gglint runs with `uvx`, which comes with [uv](https://docs.astral.sh/uv/). If `uvx` isn't on
-your machine, install uv with its
-[installation guide](https://docs.astral.sh/uv/getting-started/installation/) first.
-
-From the root of a repository, run both checks:
+gglint is on [npm](https://www.npmjs.com/package/gglint) and
+[PyPI](https://pypi.org/project/gglint/), so it runs with whichever your machine has: `npx`,
+`pnpm dlx` or `bunx` with Node, or `uvx` with [uv](https://docs.astral.sh/uv/). From the root
+of a repository, run both checks:
 
 ```sh
-uvx gglint mcp
-uvx gglint secrets
+npx gglint mcp          # or: pnpm dlx gglint mcp, bunx gglint mcp, uvx gglint mcp
+npx gglint secrets
 ```
 
 Each reports what it finds. To fix what it can, run each one again with `--fix`, then
-`git diff` to see what changed. `uvx` downloads gglint the first time and reuses it
-afterwards; there's nothing else to install. It works on Linux, macOS and Windows.
+`git diff` to see what changed. The first run downloads gglint and later runs reuse it;
+there's nothing else to install. It works on Linux, macOS and Windows. A JavaScript project
+can pin a version with `npm install --save-dev gglint`, as [`gglint hook`](#before-every-commit)
+does.
 
 To check every pull request for secrets, add this workflow as
 `.github/workflows/agent-secrets.yml` (see [GitHub Action](#github-action) for the options):
@@ -218,7 +219,7 @@ keep their MCP servers outside the repository.
 `gglint hook` runs `gglint secrets --staged` before each commit, so a secret never gets
 committed in the first place. It uses the tool your repository already has:
 
-| Tool         | What `uvx gglint hook` does                                              |
+| Tool         | What `gglint hook` does                                                  |
 | ------------ | ------------------------------------------------------------------------ |
 | husky        | Adds the command to `.husky/pre-commit`, keeping what's there.            |
 | git          | Adds it to git's `pre-commit` hook, wherever `core.hooksPath` puts it.    |
@@ -227,7 +228,14 @@ committed in the first place. It uses the tool your repository already has:
 | lint-staged  | Prints the lines for `package.json`.                                      |
 
 `--tool NAME` picks one instead of detecting it, `--with-mcp` adds the MCP check, and
-`gglint hook print` only prints. Running it twice changes nothing. The hooks run
+`gglint hook print` only prints. Running it twice changes nothing.
+
+In a repository with a `package.json`, `gglint hook` first adds gglint to the dev
+dependencies, pinned to its version, with the repository's package manager: npm, pnpm, yarn
+or bun, from its `packageManager` field or its lockfile. The hook then runs that copy, with
+`npx --no -- gglint`, `pnpm exec gglint`, `yarn gglint` or `bun run gglint`, so every
+contributor has it once they've installed the repository's packages, and nobody needs uv. If
+the package manager fails, the hook isn't written. In any other repository, the hooks run
 `uvx gglint@<version>`, pinned to the version that wrote them, so uv has to be installed.
 
 With the [pre-commit](https://pre-commit.com) framework, gglint is also a source of hooks:
@@ -591,6 +599,8 @@ The code lives in [`src/`](https://github.com/corridor/gglint/tree/main/src).
 `compare.rs` finds the problems, and `fix.rs` writes the fixes. Supporting another agent
 starts with a row in `agents.rs`. `report.rs` is what every check prints through,
 `secrets.rs` finds secrets and replaces them, and `hook.rs` sets up the pre-commit hooks.
+[`npm/`](https://github.com/corridor/gglint/tree/main/npm) holds the npm package's launcher,
+`gglint.js`, and `build.py`, which builds the packages from each platform's program.
 
 ### Releasing
 
@@ -601,7 +611,11 @@ starts with a row in `agents.rs`. `report.rs` is what every check prints through
    `git tag -f v1 v<version> && git push -f origin v1`.
 
 The [release workflow](https://github.com/corridor/gglint/blob/main/.github/workflows/pypi_release.yml)
-builds and tests every wheel, publishes them to PyPI, and attaches them to the release.
+builds and tests every wheel, publishes them to PyPI, publishes the npm packages built from
+the same programs, and attaches the wheels to the release. On npm, `gglint` runs the program
+from `@gglint/cli-<platform>-<arch>`, an optional dependency npm installs only on the
+platform it's built for. Both registries trust the workflow through trusted publishing, so no
+token is stored in the repository.
 
 ## License
 
