@@ -67,7 +67,7 @@ fn a_javascript_repository_gets_gglint_as_a_dev_dependency_then_a_hook_that_runs
     );
     assert_eq!(
         std::fs::read_to_string(args).unwrap().trim(),
-        format!("install --save-dev --save-exact gglint@{VERSION}")
+        format!("install --save-dev --save-exact @gglint/cli@{VERSION}")
     );
     let script = std::fs::read_to_string(repo.join(".husky/pre-commit")).unwrap();
     assert!(script.starts_with("npx lint-staged\n"), "{script}");
@@ -87,7 +87,7 @@ fn gglint_already_in_the_dependencies_isnt_added_again() {
     std::fs::create_dir_all(repo.join(".husky")).unwrap();
     std::fs::write(
         repo.join("package.json"),
-        r#"{ "devDependencies": { "gglint": "0.5.0" } }"#,
+        r#"{ "devDependencies": { "@gglint/cli": "0.5.0" } }"#,
     )
     .unwrap();
     std::fs::write(repo.join("pnpm-lock.yaml"), "").unwrap();
@@ -115,7 +115,9 @@ fn a_package_manager_that_fails_leaves_the_hook_alone() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        text(&output.stderr).contains(&format!("run `npm install --save-dev --save-exact gglint@{VERSION}`")),
+        text(&output.stderr).contains(&format!(
+            "run `npm install --save-dev --save-exact @gglint/cli@{VERSION}`"
+        )),
         "{}",
         text(&output.stderr)
     );
@@ -142,7 +144,7 @@ fn print_says_to_add_the_dependency_and_runs_nothing() {
     assert!(output.status.success());
     let stdout = text(&output.stdout);
     assert!(
-        stdout.contains(&format!("yarn add --dev --exact gglint@{VERSION}")),
+        stdout.contains(&format!("yarn add --dev --exact @gglint/cli@{VERSION}")),
         "{stdout}"
     );
     assert!(stdout.contains("yarn gglint secrets --staged"), "{stdout}");

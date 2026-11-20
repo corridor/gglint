@@ -62,6 +62,10 @@ pub enum Outcome {
     Print { file: &'static str, snippet: String },
 }
 
+/// gglint's package on npm. npm refuses `gglint` alone, as too close to eslint, oxlint and
+/// tslint; its command is still `gglint`.
+pub const NPM_PACKAGE: &str = "@gglint/cli";
+
 /// A JavaScript repository's package manager.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PackageManager {
@@ -84,7 +88,7 @@ impl PackageManager {
     /// The arguments that add this version of gglint to the repository's dev dependencies,
     /// pinned exactly, as a hook should run what the repository chose.
     fn add_args(self) -> Vec<String> {
-        let package = format!("gglint@{}", env!("CARGO_PKG_VERSION"));
+        let package = format!("{NPM_PACKAGE}@{}", env!("CARGO_PKG_VERSION"));
         let options: &[&str] = match self {
             PackageManager::Npm => &["install", "--save-dev", "--save-exact"],
             PackageManager::Pnpm => &["add", "--save-dev", "--save-exact"],
@@ -181,7 +185,7 @@ pub fn has_dependency(root: &Path) -> bool {
     ["devDependencies", "dependencies"].iter().any(|key| {
         object
             .get_object(key)
-            .is_some_and(|dependencies| dependencies.get("gglint").is_some())
+            .is_some_and(|dependencies| dependencies.get(NPM_PACKAGE).is_some())
     })
 }
 
@@ -484,13 +488,13 @@ mod tests {
         assert!(!has_dependency(&dir));
         std::fs::write(
             dir.join("package.json"),
-            r#"{ "devDependencies": { "gglint": "0.5.0" } }"#,
+            r#"{ "devDependencies": { "@gglint/cli": "0.5.0" } }"#,
         )
         .unwrap();
         assert!(has_dependency(&dir));
         std::fs::write(
             dir.join("package.json"),
-            r#"{ "dependencies": { "gglint": "^0.5.0" } }"#,
+            r#"{ "dependencies": { "@gglint/cli": "^0.5.0" } }"#,
         )
         .unwrap();
         assert!(has_dependency(&dir));
@@ -502,19 +506,19 @@ mod tests {
         let version = env!("CARGO_PKG_VERSION");
         assert_eq!(
             PackageManager::Npm.add_command(),
-            format!("npm install --save-dev --save-exact gglint@{version}")
+            format!("npm install --save-dev --save-exact @gglint/cli@{version}")
         );
         assert_eq!(
             PackageManager::Pnpm.add_command(),
-            format!("pnpm add --save-dev --save-exact gglint@{version}")
+            format!("pnpm add --save-dev --save-exact @gglint/cli@{version}")
         );
         assert_eq!(
             PackageManager::Yarn.add_command(),
-            format!("yarn add --dev --exact gglint@{version}")
+            format!("yarn add --dev --exact @gglint/cli@{version}")
         );
         assert_eq!(
             PackageManager::Bun.add_command(),
-            format!("bun add --dev --exact gglint@{version}")
+            format!("bun add --dev --exact @gglint/cli@{version}")
         );
     }
 }

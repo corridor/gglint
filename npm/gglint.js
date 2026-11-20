@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `gglint` on npm: runs the gglint program built for this machine, which npm installs from
+// `@gglint/cli` on npm: runs the gglint program built for this machine, which npm installs from
 // the optional dependency `@gglint/cli-<platform>-<arch>`. No install script downloads it,
 // so it works where install scripts don't run, as with pnpm and Bun.
 "use strict";

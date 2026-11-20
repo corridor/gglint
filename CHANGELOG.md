@@ -8,12 +8,13 @@ All notable changes to gglint are recorded in this file. The format follows
 
 ### Added
 
-- gglint is on npm, so `npx gglint`, `pnpm dlx gglint` and `bunx gglint` run it, and a
-  JavaScript project can pin a version with `npm install --save-dev gglint`. The `gglint`
-  package runs the same program as the PyPI wheels, from an optional dependency built for
-  each platform, `@gglint/cli-<platform>-<arch>`. It has no install script, so it works with
-  pnpm and Bun, which don't run them. Each release publishes it through npm's trusted
-  publishing, with provenance.
+- gglint is on npm as `@gglint/cli`, so `npx @gglint/cli`, `pnpm dlx @gglint/cli` and
+  `bunx @gglint/cli` run it, and a JavaScript project can pin a version with
+  `npm install --save-dev @gglint/cli`; the command is still `gglint`. npm refuses `gglint`
+  alone, as too close to eslint. The package runs the same program as the PyPI wheels, from
+  an optional dependency built for each platform, `@gglint/cli-<platform>-<arch>`. It has no
+  install script, so it works with pnpm and Bun, which don't run them. Each release publishes
+  it through npm's trusted publishing, with provenance.
 
 ### Changed
 

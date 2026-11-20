@@ -3,12 +3,12 @@
     python npm/build.py --version 0.5.0 --out DIR --wheels DIST
     python npm/build.py --version 0.5.0 --out DIR --binary linux-x64=target/release/gglint
 
-`gglint` is a small Node script, `npm/gglint.js`, that runs the program from
+`@gglint/cli` is a small Node script, `npm/gglint.js`, that runs the program from
 `@gglint/cli-<platform>-<arch>`, an optional dependency npm installs only on the machine it
 was built for. The release takes each program from its wheel, so PyPI and npm ship the same
 files; `--binary` packs one built locally, for testing. The packages are written to DIR, one
 folder each, and their folders are printed in the order to publish them: the platforms
-first, so `gglint`'s dependencies exist when it's published.
+first, so `@gglint/cli`'s dependencies exist when it's published.
 """
 
 import argparse
@@ -22,6 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SCOPE = "@gglint"
+# npm refuses `gglint` alone: too close to eslint, oxlint and tslint.
+MAIN = f"{SCOPE}/cli"
 
 # Node's `process.platform-process.arch`, and the wheel that holds the program for it. On
 # Linux the musl build is static, so it runs on glibc and musl systems alike.
@@ -76,14 +78,14 @@ def platform_package(out: Path, version: str, platform: str, binary: Path) -> Pa
     manifest = {
         "name": name,
         **common(version),
-        "description": f"The gglint program for {NAMES[os_name]} on {cpu}; install `gglint` instead",
+        "description": f"The gglint program for {NAMES[os_name]} on {cpu}; install `{MAIN}` instead",
         "os": [os_name],
         "cpu": [cpu],
         "files": ["bin/", "LICENSE", "THIRD_PARTY_LICENSES"],
         # Yarn's Plug'n'Play keeps packages zipped unless they ask; a program has to be a file.
         "preferUnplugged": True,
     }
-    readme = f"# {name}\n\nThe gglint program for {NAMES[os_name]} on {cpu}. Install [`gglint`](https://www.npmjs.com/package/gglint), which installs this on the machines it's for.\n"
+    readme = f"# {name}\n\nThe gglint program for {NAMES[os_name]} on {cpu}. Install [`{MAIN}`](https://www.npmjs.com/package/{MAIN}), which installs this on the machines it's for.\n"
     folder = out / f"cli-{platform}"
     write_package(folder, manifest, {f"bin/{program_name(platform)}": binary}, readme)
     return folder
@@ -92,7 +94,7 @@ def platform_package(out: Path, version: str, platform: str, binary: Path) -> Pa
 def main_package(out: Path, version: str) -> Path:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
     manifest = {
-        "name": "gglint",
+        "name": MAIN,
         **common(version),
         "description": project["description"],
         "keywords": project["keywords"],
@@ -101,7 +103,7 @@ def main_package(out: Path, version: str) -> Path:
         "engines": {"node": ">=14"},
         "optionalDependencies": {f"{SCOPE}/cli-{platform}": version for platform in PLATFORMS},
     }
-    folder = out / "gglint"
+    folder = out / "cli"
     write_package(
         folder,
         manifest,
