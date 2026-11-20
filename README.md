@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/corridor/gglint/actions/workflows/ci.yml/badge.svg)](https://github.com/corridor/gglint/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/gglint.svg)](https://pypi.org/project/gglint/)
+[![npm](https://img.shields.io/npm/v/@gglint/cli.svg)](https://www.npmjs.com/package/@gglint/cli)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/corridor/gglint/blob/main/LICENSE)
 
 Keep every coding agent in your repository in sync, and keep secrets out of their config
@@ -116,11 +117,14 @@ jobs:
 ## Usage
 
 ```text
-uvx gglint mcp [--fix] [--source AGENT] [--format FORMAT] [PATH]
-uvx gglint mcp --servers [PATH]
-uvx gglint secrets [--fix] [--staged] [--format FORMAT] [PATH | FILE...]
-uvx gglint hook [install|print] [--tool NAME] [--with-mcp] [PATH]
+gglint mcp [--fix] [--source AGENT] [--format FORMAT] [PATH]
+gglint mcp --servers [PATH]
+gglint secrets [--fix] [--staged] [--format FORMAT] [PATH | FILE...]
+gglint hook [install|print] [--tool NAME] [--with-mcp] [PATH]
 ```
+
+Run `gglint` as `uvx gglint`, `npx @gglint/cli`, `pnpm dlx @gglint/cli` or `bunx @gglint/cli`;
+the examples below use `uvx`.
 
 The options below are for `gglint mcp`; [`secrets`](#finding-secrets) and
 [`hook`](#before-every-commit) describe their own.
