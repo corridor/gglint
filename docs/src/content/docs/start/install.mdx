@@ -1,13 +1,15 @@
 ---
 title: Install
-description: Run gglint with uvx, or install it with uv, pipx or pip. It works on Linux, macOS and Windows.
+description: Run gglint with uvx, npx, pnpm dlx or bunx, or install it with npm, uv, pipx or pip. It works on Linux, macOS and Windows.
 ---
 
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-gglint is one compiled program, published to [PyPI](https://pypi.org/project/gglint/) as
-wheels for Linux, macOS and Windows. The wheels hold no Python code, so any Python 3.8 or later
-can install them, and gglint doesn't need Python to run.
+gglint is one compiled program, published for Linux, macOS and Windows to
+[PyPI](https://pypi.org/project/gglint/) as `gglint` and to
+[npm](https://www.npmjs.com/package/@gglint/cli) as `@gglint/cli`. Both hold the same program,
+so it needs neither Python nor Node to run; use whichever your machine has. npm refuses the
+name `gglint` alone, but the command is `gglint` either way.
 
 <Tabs syncKey="installer">
   <TabItem label="uvx">
@@ -23,6 +25,29 @@ can install them, and gglint doesn't need Python to run.
 
     ```sh
     uvx gglint@0.4.5 mcp
+    ```
+  </TabItem>
+  <TabItem label="npx">
+    Run it without installing anything, with Node's `npx`. `pnpm dlx @gglint/cli` and
+    `bunx @gglint/cli` work the same way.
+
+    ```sh
+    npx @gglint/cli mcp
+    ```
+
+    To run a fixed version:
+
+    ```sh
+    npx @gglint/cli@0.4.5 mcp
+    ```
+  </TabItem>
+  <TabItem label="npm project">
+    Pin it in a JavaScript project, so everyone who installs the project's packages has it, as
+    [`gglint hook`](/gglint/guides/pre-commit/) does. With pnpm, yarn or bun, use their `add`.
+
+    ```sh
+    npm install --save-dev @gglint/cli
+    npx gglint mcp
     ```
   </TabItem>
   <TabItem label="uv">
@@ -61,5 +86,6 @@ gglint 0.4.5
 ```
 
 <Aside>
-  The rest of these docs write `uvx gglint`. If you installed gglint, drop the `uvx`.
+  The rest of these docs write `uvx gglint`. With Node, write `npx @gglint/cli` instead; if
+  you installed gglint, write just `gglint`.
 </Aside>

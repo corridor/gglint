@@ -14,7 +14,7 @@ uvx gglint hook
 
 It uses the hook tool your repository already has:
 
-| Tool        | What `uvx gglint hook` does                                            |
+| Tool        | What `gglint hook` does                                                |
 | ----------- | ---------------------------------------------------------------------- |
 | husky       | Adds the command to `.husky/pre-commit`, keeping what's there.         |
 | git         | Adds it to git's `pre-commit` hook, wherever `core.hooksPath` puts it. |
@@ -34,8 +34,26 @@ overwritten.
 | `hook print`   | Print the lines to add, and change nothing.                |
 | `PATH`         | The repository's root. Defaults to the current directory.  |
 
-The hooks run `uvx gglint@<version>`, pinned to the version that wrote them, so everyone who
-commits needs [uv](https://docs.astral.sh/uv/) installed.
+## In a JavaScript repository
+
+In a repository with a `package.json`, `gglint hook` first adds `@gglint/cli`, pinned to its
+version, to the dev dependencies with the repository's package manager: npm, pnpm, yarn or bun,
+from the `packageManager` field or the lockfile. The hook then runs that copy, so everyone who
+installs the repository's packages has it, and nobody needs uv:
+
+| Package manager | Added with                                          | The hook runs        |
+| --------------- | --------------------------------------------------- | -------------------- |
+| npm             | `npm install --save-dev --save-exact @gglint/cli`   | `npx --no -- gglint` |
+| pnpm            | `pnpm add --save-dev --save-exact @gglint/cli`      | `pnpm exec gglint`   |
+| yarn            | `yarn add --dev --exact @gglint/cli`                | `yarn gglint`        |
+| bun             | `bun add --dev --exact @gglint/cli`                 | `bun run gglint`     |
+
+None of these downloads a gglint the repository doesn't list. If the package manager fails, the
+hook isn't written, since it would stop every commit; `gglint hook print` shows the command to
+run first.
+
+In any other repository, the hooks run `uvx gglint@<version>`, pinned to the version that
+wrote them, so everyone who commits needs [uv](https://docs.astral.sh/uv/) installed.
 
 ## With the pre-commit framework
 

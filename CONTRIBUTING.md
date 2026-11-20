@@ -79,7 +79,11 @@ as tutorials (`start/`), how-to guides (`guides/`), reference (`reference/`) and
    `git tag -f v1 v<version> && git push -f origin v1`.
 
 The [release workflow](.github/workflows/pypi_release.yml) builds and tests every wheel,
-publishes them to PyPI, and attaches them to the release.
+publishes them to PyPI, publishes the npm packages built from the same programs
+(`@gglint/cli` and one `@gglint/cli-<platform>-<arch>` per platform), and attaches the wheels to
+the release. PyPI and npm both trust the workflow through trusted publishing, in the `pypi` and
+`npm` environments, so no token is stored; renaming the workflow file or an environment means
+updating the publishers on PyPI and npm too.
 
 ## License
 
