@@ -85,6 +85,11 @@ the release. PyPI and npm both trust the workflow through trusted publishing, in
 `npm` environments, so no token is stored; renaming the workflow file or an environment means
 updating the publishers on PyPI and npm too.
 
+[gglint-pre-commit](https://github.com/corridor/gglint-pre-commit) publishes the release's
+pre-commit hooks itself, within the half hour: its `Update` workflow finds the new version on
+PyPI, runs `pre-commit/build.py` from the release's tag, commits the files and tags them. To
+publish them at once, run that workflow from its Actions tab.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the

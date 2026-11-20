@@ -4,6 +4,23 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- pre-commit gets gglint's hooks from
+  [corridor/gglint-pre-commit](https://github.com/corridor/gglint-pre-commit), and installs
+  gglint from PyPI itself, so the hooks no longer need uv, in a Python repository or any
+  other. prek reads the same configuration and uses them too. The hooks are the same,
+  `gglint-secrets` and `gglint-mcp`; `pre-commit/build.py` writes them from
+  `.pre-commit-hooks.yaml`, and a workflow in gglint-pre-commit publishes each release there
+  within the half hour.
+
+### Changed
+
+- `gglint hook` in a repository that uses pre-commit prints the lines for gglint-pre-commit,
+  instead of for gglint's own repository, whose hooks run uvx.
+
 ## [0.5.0] - 2026-11-20
 
 gglint is now on npm as `@gglint/cli`, so it runs with `npx`, `pnpm dlx` and `bunx` as well
