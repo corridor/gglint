@@ -1,61 +1,42 @@
 ---
 title: Quick start
-description: Run both gglint checks on a repository, fix what they find, and check every pull request.
+description: Run gglint's two checks on a repository and fix what they find, in about a minute.
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
 
-This page takes you from nothing to a repository whose agents get the same MCP servers and
-whose agent files hold no secrets. It takes about a minute.
+If you use more than one coding agent, each one is set up by its own files in your repository:
+`.mcp.json` for Claude Code, `.codex/config.toml` for Codex, `.cursor/mcp.json` for Cursor, and
+so on. Over time those files drift. You add an MCP server for one agent and forget the others,
+or you approve a command in Claude Code and your database password gets saved in a settings file
+that ends up in git.
 
-gglint runs with `uvx`, which comes with [uv](https://docs.astral.sh/uv/), or with Node's
-`npx`: wherever this page writes `uvx gglint`, `npx @gglint/cli` does the same. For other ways
-to install gglint, see [Install](/gglint/start/install/).
+gglint reads all of those files and tells you what's wrong. Right now it checks two things: that
+every agent gets the same MCP servers, and that no secret is written into an agent's files. It
+fixes most of what it finds, and it never deletes anything.
+
+You don't need to install or configure anything. From the root of your repository:
 
 <Steps>
 
-1. **Check the MCP servers.** From the root of a repository, run:
+1. **Check the MCP servers.**
 
    ```sh
    uvx gglint mcp
    ```
 
-   gglint draws each server in each agent as a table, then lists the problems:
-
    ```text
-     ╭────────────┬─────────────┬───────┬────────┬──────────╮
-     │ Server     │ Claude Code │ Codex │ Cursor │ OpenCode │
-     ├────────────┼─────────────┼───────┼────────┼──────────┤
-     │ github     │      ✓      │   ✗   │   ✗    │    ✗     │
-     │ playwright │      ✓      │   ✗   │   ≠    │    ✗     │
-     │ linear     │      ✗      │   ✗   │   ✓    │    ✗     │
-     ╰────────────┴─────────────┴───────┴────────┴──────────╯
-     ✓ set up   ≠ set up differently   ✗ missing   ○ turned off
+     ╭────────────┬─────────────┬───────┬────────╮
+     │ Server     │ Claude Code │ Codex │ Cursor │
+     ├────────────┼─────────────┼───────┼────────┤
+     │ github     │      ✓      │   ✗   │   ✗    │
+     │ playwright │      ✓      │   ✗   │   ≠    │
+     │ linear     │      ✗      │   ✗   │   ✓    │
+     ╰────────────┴─────────────┴───────┴────────╯
+     ✓ set up   ≠ set up differently   ✗ missing
    ```
 
-   `uvx` downloads gglint the first time and reuses it afterwards; there's nothing else to
-   install.
-
-2. **Fix them.** Run it again with `--fix`:
-
-   ```console
-   $ uvx gglint mcp --fix
-   Changed 4 files:
-     .mcp.json                  added linear
-     .codex/config.toml (new)   added github, playwright, linear
-     .cursor/mcp.json           added github; updated playwright
-     opencode.json (new)        added github, playwright, linear
-
-   Review the changes with `git diff`.
-   ```
-
-   Each server is written in each agent's own format, and your comments and formatting are
-   kept. `--fix` never removes a server.
-
-3. **Review the changes.** Run `git diff`. A difference that was deliberate, such as a
-   runtime chosen for one agent, shows up here. See [How fixing works](/gglint/concepts/fixing/).
-
-4. **Check for secrets.**
+2. **Check for secrets.**
 
    ```sh
    uvx gglint secrets
@@ -64,53 +45,31 @@ to install gglint, see [Install](/gglint/start/install/).
    ```text
    .cursor/mcp.json
      ✗  5:45  GitHub token in "Authorization" is written out in the file
-               use ${env:GITHUB_TOKEN} and set GITHUB_TOKEN in your environment; rotate it,
-               as it stays in git history once committed
    ```
 
-   A secret's value is never printed: gglint shows its kind, the name it's under and where it
-   is.
+   gglint shows where the secret is and what kind it is, never the secret itself.
 
-5. **Replace them.**
+3. **Fix what they found.**
 
    ```sh
+   uvx gglint mcp --fix
    uvx gglint secrets --fix
+   git diff
    ```
 
-   Each secret it can replace becomes a reference to an environment variable, written in the
-   agent's own syntax, and personal files such as `.claude/settings.local.json` are added to
-   `.gitignore`. Set those variables in your environment.
-
-   <Aside type="caution">
-     A secret that was ever committed stays in git history. Rotate it.
-   </Aside>
-
-6. **Check every pull request.** Add this workflow as `.github/workflows/agent-secrets.yml`:
-
-   ```yaml
-   name: Agent secrets
-   on:
-     pull_request:
-   permissions:
-     contents: read
-   jobs:
-     gglint:
-       name: gglint secrets
-       runs-on: ubuntu-latest
-       steps:
-         - uses: actions/checkout@v7
-         - uses: corridor/gglint@v1
-           with:
-             command: secrets
-             comment: "false"
-   ```
+   Missing servers get copied over in each agent's own format, and secrets are swapped for
+   environment variables. Look through the diff before you commit.
 
 </Steps>
 
-## Next steps
+<Aside type="caution">
+  If a secret was ever committed, it's still in git history. Rotate it.
+</Aside>
 
-- [Check before every commit](/gglint/guides/pre-commit/), so a secret never gets committed in
-  the first place.
-- [Check every pull request](/gglint/guides/github-action/) for both problems, with
-  annotations and a comment.
-- [Rules](/gglint/reference/rules/) explains each problem gglint reports.
+No uv? Use `npx @gglint/cli` instead of `uvx gglint`, or see [Install](/gglint/start/install/)
+for other ways to run it.
+
+To find out more about what each check looks for, read [MCP servers](/gglint/checks/mcp-servers/)
+and [Secrets](/gglint/checks/secrets/). To stop problems coming back, run gglint
+[before every commit](/gglint/guides/pre-commit/) or
+[on every pull request](/gglint/guides/github-action/).

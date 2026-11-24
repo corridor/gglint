@@ -1,14 +1,9 @@
 ---
-title: Check every pull request
+title: On every pull request
 description: Run gglint on every pull request with its GitHub Action, for annotations on the diff, one comment, and optional Code scanning.
 ---
 
-The gglint action checks every pull request for both problems. It only reports: it never
-changes a file.
-
-## Add the workflow
-
-Save this as `.github/workflows/gglint.yml`:
+To check every pull request, save this as `.github/workflows/gglint.yml`:
 
 ```yaml
 name: gglint
@@ -26,18 +21,26 @@ jobs:
       - uses: corridor/gglint@v1
 ```
 
-On the next pull request you get:
+On the next pull request, problems show up as notes on the changed lines, gglint leaves one
+comment that it updates on every push, and the check fails until they're fixed. The action only
+reports. It never changes your files. Pull requests from forks can't post the comment, but they
+still get the notes and the failing check.
 
-- **Annotations.** Each problem appears on its line in the pull request's *Files changed*.
-- **One comment.** The problems, and a table of which agent gets which MCP server, in a single
-  comment that's updated on every push, and left alone when a pull request has no problems.
-- **A failing check** while a problem is left.
+`@v1` always runs the latest release. Pin `@v0.5.1` if you'd rather update on your own schedule.
 
-A pull request from a fork can't post the comment, and still gets the annotations and the
-failing check. A repository with no MCP config files has nothing to compare, so `mcp` is
-skipped with a notice.
+## Options
 
-## Only check for secrets
+| Input              | Default               | What it does                                             |
+| ------------------ | --------------------- | -------------------------------------------------------- |
+| `command`          | `all`                 | Which check to run: `all`, `mcp` or `secrets`            |
+| `comment`          | `true`                | Post a comment. Needs `pull-requests: write`.            |
+| `fail-on-problems` | `true`                | Set to `false` to report without failing                 |
+| `sarif`            | `false`               | Also send results to Code scanning. Needs `security-events: write`. |
+| `version`          | the action's release  | Which gglint version to run                              |
+| `path`             | `.`                   | Where the repository is checked out                      |
+| `token`            | `${{ github.token }}` | The token used to post the comment                       |
+
+For example, to check only for secrets and skip the comment:
 
 ```yaml
       - uses: corridor/gglint@v1
@@ -46,44 +49,10 @@ skipped with a notice.
           comment: "false"
 ```
 
-With `comment: "false"` the workflow only needs `contents: read`.
-
-## Send findings to Code scanning
-
-With `sarif: true`, the findings also go to *Security*, *Code scanning*, where they can be
-tracked and dismissed:
+On another CI, run gglint directly. `--format github` gives GitHub-style annotations, and
+[other formats](/gglint/reference/output-formats/) are available:
 
 ```yaml
-permissions:
-  contents: read
-  pull-requests: write
-  security-events: write
-
-# ...
-      - uses: corridor/gglint@v1
-        with:
-          sarif: true
+- run: uvx gglint@0.5.1 mcp --format github
+- run: uvx gglint@0.5.1 secrets --format github
 ```
-
-On a private repository, Code scanning has to be enabled.
-
-## Report without failing
-
-```yaml
-      - uses: corridor/gglint@v1
-        with:
-          fail-on-problems: "false"
-```
-
-## Run gglint without the action
-
-In any CI, run gglint with uv and the `github` format, or another
-[output format](/gglint/reference/output-formats/):
-
-```yaml
-      - uses: astral-sh/setup-uv@v7
-      - run: uvx gglint@0.5.1 mcp --format github
-      - run: uvx gglint@0.5.1 secrets --format github
-```
-
-Every input of the action is listed in the [GitHub Action reference](/gglint/reference/github-action/).

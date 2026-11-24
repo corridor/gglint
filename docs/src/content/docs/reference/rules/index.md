@@ -1,27 +1,17 @@
 ---
 title: Rules
-description: Every problem gglint reports, which command reports it, and whether --fix fixes it.
+description: Every problem gglint reports, grouped by check, and whether --fix fixes it.
 ---
 
-Each problem gglint reports has a rule name, shown in the `lines`, `github`, `sarif` and
-`markdown` [output formats](/gglint/reference/output-formats/).
+Every problem gglint reports belongs to a rule, and every rule belongs to one of the two checks.
+A problem fails the check. A warning, such as a secret in a file git ignores, doesn't.
 
-## MCP servers: `gglint mcp`
-
-| Rule                                                           | Reported when                                                                  | Fixed by `--fix` |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------- |
-| [`missing-server`](/gglint/reference/rules/missing-server/)     | A server in one agent's config file is missing from another agent's.           | Yes              |
-| [`missing-config`](/gglint/reference/rules/missing-config/)     | An agent has its own directory but no MCP config file, while others have servers. | Yes           |
-| [`different-server`](/gglint/reference/rules/different-server/) | The same server is set up differently in two agents.                           | Versions and arguments |
-| [`renamed-server`](/gglint/reference/rules/renamed-server/)     | The same server has a different name in some agents.                           | No               |
-
-## Secrets: `gglint secrets`
-
-| Rule                                                             | Reported when                                                              | Fixed by `--fix` |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------- |
-| [`inline-secret`](/gglint/reference/rules/inline-secret/)         | Text has the format of a known credential, such as a GitHub token.         | Where the agent can read the environment |
-| [`inline-credential`](/gglint/reference/rules/inline-credential/) | A value under a name such as `token` or `password` is written out, a password is in a URL, or a command carries one. | Where the agent can read the environment |
-| [`local-file`](/gglint/reference/rules/local-file/)               | An agent file meant for one person's machine is in git, or can be committed. | Adds it to `.gitignore` |
-
-A secret in a file git ignores is a warning, since it isn't committed. Only problems make
-gglint exit with status 1.
+| Rule                                                              | Check   | What it catches                                     | `--fix`             |
+| ----------------------------------------------------------------- | ------- | --------------------------------------------------- | ------------------- |
+| [`missing-server`](/gglint/reference/rules/missing-server/)       | MCP     | A server one agent has and another doesn't          | Adds it             |
+| [`missing-config`](/gglint/reference/rules/missing-config/)       | MCP     | An agent with a folder but no MCP config            | Creates the file    |
+| [`different-server`](/gglint/reference/rules/different-server/)   | MCP     | The same server with another version or arguments   | Makes them match    |
+| [`renamed-server`](/gglint/reference/rules/renamed-server/)       | MCP     | The same server under another name                  | Reports only        |
+| [`inline-secret`](/gglint/reference/rules/inline-secret/)         | Secrets | A token in a known format                           | Uses an env variable |
+| [`inline-credential`](/gglint/reference/rules/inline-credential/) | Secrets | A password or key under a name, in a URL or command | Uses an env variable |
+| [`local-file`](/gglint/reference/rules/local-file/)               | Secrets | A personal agent file that isn't gitignored         | Adds to `.gitignore` |

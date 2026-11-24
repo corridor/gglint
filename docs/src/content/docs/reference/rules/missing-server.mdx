@@ -7,55 +7,25 @@ import RuleSpec from '../../../../components/RuleSpec.astro';
 
 <RuleSpec command="gglint mcp" severity="problem · exit 1" fix="adds the server" />
 
-## What it finds
-
-A server that's set up in one agent's MCP config file and missing from another agent's.
-
-## Why it matters
-
-Each agent reads only its own file. A server added to `.mcp.json` for Claude Code isn't there
-for Cursor, so the same task works in one agent and fails in the other, and whoever uses
-Cursor doesn't know a server was meant to be there.
-
-## Example
-
-```json
-// .mcp.json (Claude Code)
-{
-  "mcpServers": {
-    "github": {
-      "type": "http",
-      "url": "https://api.githubcopilot.com/mcp/",
-      "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }
-    }
-  }
-}
-```
-
-`.cursor/mcp.json` has no `github` server.
+A server is set up for one agent but not for another. Each agent only reads its own file, so
+something that works in Claude Code quietly fails in Cursor, and whoever uses Cursor has no way
+of knowing a server was supposed to be there.
 
 ```text
 ./.mcp.json:3:5  missing-server   `github` is set up for Claude Code but not for Cursor (.cursor/mcp.json)
 ```
 
-## How to fix it
+## Fixing it
 
-Run `uvx gglint mcp --fix`. The server is added to each config file that lacks it, written in
-that agent's format, with references to environment variables in its syntax:
+`uvx gglint mcp --fix` adds the server to every agent that's missing it, in that agent's format:
 
 ```diff
 # .cursor/mcp.json
 +    "github": {
 +      "url": "https://api.githubcopilot.com/mcp/",
-+      "headers": {
-+        "Authorization": "Bearer ${env:GITHUB_TOKEN}"
-+      }
++      "headers": { "Authorization": "Bearer ${env:GITHUB_TOKEN}" }
 +    }
 ```
 
-A server is copied from the first config file where it's turned on, or from the agent named
-with `--source`. It's listed under `Not added:` instead when its setup can't be written in the
-other agent's format; see [How fixing works](/gglint/concepts/fixing/).
-
-If an agent shouldn't have the server, remove it from the other agents too: gglint compares
-the files, and can't know which one is right.
+If an agent really shouldn't have the server, take it out of the other agents as well. gglint
+can see the files disagree, but not which one is right.

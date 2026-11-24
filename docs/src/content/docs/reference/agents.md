@@ -3,8 +3,11 @@ title: Supported agents
 description: The 21 coding agents gglint reads, where each keeps its MCP servers, and how each refers to environment variables.
 ---
 
-gglint reads the MCP config file of each of these agents at the repository's root. The order of
-this table is the order `--fix` takes servers in, unless `--source` names another agent.
+gglint picks up any of these agents on its own, from its config file or its folder at the root of
+your repository. A `CLAUDE.md`, `AGENTS.md` or `.cursorrules` file alone doesn't count. Neither
+do `.agents/`, `.github/`, `.gemini/`, `.vscode/` or `.zed/` folders without a config file, since
+most repositories have those for other reasons. When `--fix` copies a server, it takes it from
+the first agent in this table that has it, unless you pick one with `--source`.
 
 | Agent         | `--source`    | MCP config file                     | Agent directory | Format                                     |
 | ------------- | ------------- | ----------------------------------- | --------------- | ------------------------------------------ |
@@ -30,21 +33,12 @@ this table is the order `--fix` takes servers in, unless `--source` names anothe
 | VS Code       | `vscode`      | `.vscode/mcp.json`                  | none            | JSON, `servers`, each with a `type`        |
 | Zed           | `zed`         | `.zed/settings.json`                | none            | JSON with comments, `context_servers` among other settings |
 
-## Which agents are compared
-
-gglint compares the agents that have an MCP config file or their own directory at the
-repository's root. A `CLAUDE.md`, `.cursorrules` or `AGENTS.md` file on its own doesn't count,
-because it doesn't show that the agent is set up in the repository.
-
-Antigravity, Copilot CLI, Gemini CLI, VS Code and Zed count only once they have their config
-file: many repositories have an `.agents/`, `.github/`, `.gemini/`, `.vscode/` or `.zed/`
-directory for other reasons, such as skills, workflows, Gemini Code Assist's reviews or editor
-settings.
 
 ## Environment variables
 
-References to environment variables are rewritten in each agent's syntax, in values and in
-command lines:
+Every agent writes environment variables its own way. gglint translates between them when it
+copies a server or replaces a secret. If an agent has no way to read one, a server that needs it
+isn't copied there.
 
 | Agent                                     | Environment variable `KEY`                                                                      |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -60,7 +54,7 @@ command lines:
 | Kilo Code, Zed                            | None that works in a repository's config, so a server that reads the environment isn't copied to them |
 | Antigravity, Copilot CLI, Junie, Trae     | None documented, so a server that reads the environment isn't copied to them                    |
 
-## Notes on particular agents
+## Agent quirks
 
 **Qoder** reads Claude Code's `.mcp.json` as well as its own file: a server there counts as
 Qoder's, and a server missing from both is added to `.mcp.json` only.
@@ -106,10 +100,9 @@ reads `.trae/mcp.json` once project MCP is turned on in its settings.
 
 ## Files `gglint secrets` reads
 
-Besides each agent's MCP config file, listed in the table at the top of this page,
-`gglint secrets` reads these files. In a folder, it reads the Markdown, JSON, TOML and YAML
-files at its top. A personal file is reported by `local-file` once it's in git, whatever is in it; the
-agent's docs say to keep it out of git, or it's where they say to put your API key.
+On top of the MCP config files above, `gglint secrets` reads these. For a folder, it reads the
+Markdown, JSON, TOML and YAML files directly inside it. Personal files are reported by
+[`local-file`](/gglint/reference/rules/local-file/) whenever git doesn't ignore them.
 
 | Agent         | Instructions and settings                                                         | Rules, commands and hooks                                                           | Personal files                                                                  |
 | ------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -135,13 +128,7 @@ agent's docs say to keep it out of git, or it's where they say to put your API k
 | VS Code       | `.github/copilot-instructions.md`, `AGENTS.md`                                    | `.github/instructions/`, `.github/prompts/`                                         |                                                                                 |
 | Zed           | `.rules`, `AGENTS.md`                                                             |                                                                                     |                                                                                 |
 
-It also reads `.windsurfrules` and `.clinerules`, the instructions of Windsurf and Cline, which
-keep their MCP servers outside the repository.
-
-## Not supported
-
-Windsurf, Cline and Goose read MCP servers only from the user's home directory, so there's
-nothing in a repository to compare. `gglint secrets` still reads the instructions of Windsurf
-and Cline.
-
-To add an agent, see [Contributing](/gglint/project/contributing/).
+Windsurf, Cline and Goose aren't in the first table because they only read MCP servers from your
+home directory, so there's nothing in the repository to compare. `gglint secrets` still reads the
+`.windsurfrules` and `.clinerules` files. To add an agent, see
+[Contributing](/gglint/project/contributing/).

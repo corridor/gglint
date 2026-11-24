@@ -1,73 +1,34 @@
 ---
-title: Check before every commit
-description: Run gglint secrets on staged files before each commit, through husky, git hooks, pre-commit, lefthook or lint-staged.
+title: Before every commit
+description: Run gglint before each commit, through husky, git hooks, pre-commit, lefthook or lint-staged, so a secret never gets committed.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-`gglint hook` runs `gglint secrets --staged` before each commit, so a secret never gets
-committed in the first place. From the root of a repository:
+The easiest way to keep a secret out of git is to check before it's committed. Run this once
+from the root of your repository:
 
 ```sh
 uvx gglint hook
 ```
 
-It uses the hook tool your repository already has:
+gglint looks for the hook tool you already use. With husky or plain git hooks, it adds the check
+to your pre-commit hook. With pre-commit, lefthook or lint-staged, it prints the lines to paste
+into their config. It never overwrites an existing hook, and running it twice does nothing the
+second time. Add `--with-mcp` to check MCP servers on each commit too.
 
-| Tool        | What `gglint hook` does                                                |
-| ----------- | ---------------------------------------------------------------------- |
-| husky       | Adds the command to `.husky/pre-commit`, keeping what's there.         |
-| git         | Adds it to git's `pre-commit` hook, wherever `core.hooksPath` puts it. |
-| pre-commit  | Prints the lines for `.pre-commit-config.yaml`.                        |
-| lefthook    | Prints the lines for `lefthook.yml`.                                   |
-| lint-staged | Prints the lines for `package.json`.                                   |
+In a JavaScript project, it also adds `@gglint/cli` to your dev dependencies, so the hook works
+for everyone who runs `npm install`. Anywhere else, the hook runs gglint through `uvx`, so whoever
+commits needs [uv](https://docs.astral.sh/uv/).
 
-Running it twice changes nothing, and an existing hook script is extended once, never
-overwritten.
+## With pre-commit
 
-## Options
-
-| Option         | Effect                                                     |
-| -------------- | ---------------------------------------------------------- |
-| `--tool NAME`  | Use this tool instead of detecting one.                    |
-| `--with-mcp`   | Also check that every agent gets the same MCP servers.     |
-| `hook print`   | Print the lines to add, and change nothing.                |
-| `PATH`         | The repository's root. Defaults to the current directory.  |
-
-## In a JavaScript repository
-
-In a repository with a `package.json`, `gglint hook` first adds `@gglint/cli`, pinned to its
-version, to the dev dependencies with the repository's package manager: npm, pnpm, yarn or bun,
-from the `packageManager` field or the lockfile. The hook then runs that copy, so everyone who
-installs the repository's packages has it, and nobody needs uv:
-
-| Package manager | Added with                                          | The hook runs        |
-| --------------- | --------------------------------------------------- | -------------------- |
-| npm             | `npm install --save-dev --save-exact @gglint/cli`   | `npx --no -- gglint` |
-| pnpm            | `pnpm add --save-dev --save-exact @gglint/cli`      | `pnpm exec gglint`   |
-| yarn            | `yarn add --dev --exact @gglint/cli`                | `yarn gglint`        |
-| bun             | `bun add --dev --exact @gglint/cli`                 | `bun run gglint`     |
-
-None of these downloads a gglint the repository doesn't list. If the package manager fails, the
-hook isn't written, since it would stop every commit; `gglint hook print` shows the command to
-run first.
-
-In any other repository, the hooks of husky, git and lefthook run `uvx gglint@<version>`,
-pinned to the version that wrote them, so everyone who commits needs
-[uv](https://docs.astral.sh/uv/) installed. pre-commit doesn't: see below.
-
-## With the pre-commit framework
-
-With [pre-commit](https://pre-commit.com), or [prek](https://github.com/j178/prek), which reads
-the same file, the hooks come from
-[gglint-pre-commit](https://github.com/corridor/gglint-pre-commit). pre-commit installs gglint
-from PyPI itself, as a program built for the machine, so nobody needs uv, Node or Rust, in a
-Python repository or any other:
+If you use [pre-commit](https://pre-commit.com) or [prek](https://github.com/j178/prek), add
+gglint to `.pre-commit-config.yaml`. It installs gglint by itself, so nobody needs uv or Node.
 
 <Tabs>
-  <TabItem label="Secrets only">
+  <TabItem label="Secrets">
     ```yaml
-    # .pre-commit-config.yaml
     repos:
       - repo: https://github.com/corridor/gglint-pre-commit
         rev: v0.5.1
@@ -75,9 +36,8 @@ Python repository or any other:
           - id: gglint-secrets
     ```
   </TabItem>
-  <TabItem label="Secrets and MCP">
+  <TabItem label="Secrets and MCP servers">
     ```yaml
-    # .pre-commit-config.yaml
     repos:
       - repo: https://github.com/corridor/gglint-pre-commit
         rev: v0.5.1
@@ -88,10 +48,4 @@ Python repository or any other:
   </TabItem>
 </Tabs>
 
-`gglint-secrets` runs on the agent files in each commit, and on every agent file with
-`pre-commit run --all-files`. `gglint-mcp` runs when an MCP config file changes, and checks the
-whole repository. Each gglint release is published to gglint-pre-commit within the hour, and
-`pre-commit autoupdate` moves to it.
-
-gglint's own repository has the same hooks, run with `uvx gglint@<version>`, for configs that
-already name `https://github.com/corridor/gglint`; they need uv.
+`pre-commit autoupdate` picks up new releases.

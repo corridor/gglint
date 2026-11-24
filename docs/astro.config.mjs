@@ -1,17 +1,29 @@
 // The gglint documentation site, built with Starlight (https://starlight.astro.build).
-// Pages live in src/content/docs/ and are grouped the Diátaxis way: Start here (tutorials),
-// Guides (how-to), Reference, and Concepts (explanation).
+// The story: gglint is a linter for the files that set up coding agents, with two checks today.
+// Pages live in src/content/docs/: Start here, one page per check, ways to run it automatically,
+// Reference, and About.
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://corridor.github.io',
   base: '/gglint',
+  // Pages that were merged into others keep working.
+  redirects: {
+    '/guides/sync-mcp-servers': '/gglint/checks/mcp-servers/',
+    '/guides/keep-secrets-out': '/gglint/checks/secrets/',
+    '/concepts/matching': '/gglint/checks/mcp-servers/#how-it-decides-two-servers-are-the-same',
+    '/concepts/fixing': '/gglint/checks/mcp-servers/#fixing-it',
+    '/concepts/secrets': '/gglint/checks/secrets/',
+    '/concepts/limitations': '/gglint/checks/mcp-servers/#how-it-decides-two-servers-are-the-same',
+    '/concepts/security': '/gglint/about/security/',
+    '/reference/github-action': '/gglint/guides/github-action/#options',
+  },
   integrations: [
     starlight({
       title: 'gglint',
       description:
-        'Keep the MCP servers of Claude Code, Codex, Cursor, Gemini CLI and other coding agents in sync, and secrets out of their config files.',
+        'A linter for coding-agent setup: gglint checks the files that set up Claude Code, Codex, Cursor and 18 more for drifted MCP servers and leaked secrets.',
       favicon: '/favicon.svg',
       logo: { light: './src/assets/logo-light.svg', dark: './src/assets/logo-dark.svg' },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/corridor/gglint' }],
@@ -54,49 +66,55 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Guides',
+          label: 'Checks',
           items: [
-            { label: 'Sync MCP servers across agents', slug: 'guides/sync-mcp-servers' },
-            { label: 'Keep secrets out of agent files', slug: 'guides/keep-secrets-out' },
-            { label: 'Check before every commit', slug: 'guides/pre-commit' },
-            { label: 'Check every pull request', slug: 'guides/github-action' },
+            { label: 'MCP servers', slug: 'checks/mcp-servers' },
+            { label: 'Secrets', slug: 'checks/secrets' },
+          ],
+        },
+        {
+          label: 'Run automatically',
+          items: [
+            { label: 'Before every commit', slug: 'guides/pre-commit' },
+            { label: 'On every pull request', slug: 'guides/github-action' },
+          ],
+        },
+        {
+          label: 'Rules',
+          items: [
+            { label: 'All rules', slug: 'reference/rules' },
+            {
+              label: 'MCP servers',
+              items: [
+                { label: 'missing-server', slug: 'reference/rules/missing-server' },
+                { label: 'missing-config', slug: 'reference/rules/missing-config' },
+                { label: 'different-server', slug: 'reference/rules/different-server' },
+                { label: 'renamed-server', slug: 'reference/rules/renamed-server' },
+              ],
+            },
+            {
+              label: 'Secrets',
+              items: [
+                { label: 'inline-secret', slug: 'reference/rules/inline-secret' },
+                { label: 'inline-credential', slug: 'reference/rules/inline-credential' },
+                { label: 'local-file', slug: 'reference/rules/local-file' },
+              ],
+            },
           ],
         },
         {
           label: 'Reference',
           items: [
             { label: 'Command line', slug: 'reference/cli' },
-            {
-              label: 'Rules',
-              items: [
-                { label: 'Overview', slug: 'reference/rules' },
-                { label: 'missing-server', slug: 'reference/rules/missing-server' },
-                { label: 'missing-config', slug: 'reference/rules/missing-config' },
-                { label: 'different-server', slug: 'reference/rules/different-server' },
-                { label: 'renamed-server', slug: 'reference/rules/renamed-server' },
-                { label: 'inline-secret', slug: 'reference/rules/inline-secret' },
-                { label: 'inline-credential', slug: 'reference/rules/inline-credential' },
-                { label: 'local-file', slug: 'reference/rules/local-file' },
-              ],
-            },
             { label: 'Supported agents', slug: 'reference/agents' },
             { label: 'Output formats', slug: 'reference/output-formats' },
-            { label: 'GitHub Action', slug: 'reference/github-action' },
           ],
         },
         {
-          label: 'Concepts',
+          label: 'About',
+          collapsed: true,
           items: [
-            { label: 'How servers are matched', slug: 'concepts/matching' },
-            { label: 'How fixing works', slug: 'concepts/fixing' },
-            { label: 'How secrets are found', slug: 'concepts/secrets' },
-            { label: 'Security', slug: 'concepts/security' },
-            { label: 'Limitations', slug: 'concepts/limitations' },
-          ],
-        },
-        {
-          label: 'Project',
-          items: [
+            { label: 'Security', slug: 'about/security' },
             { label: 'Contributing', slug: 'project/contributing' },
             { label: 'Changelog', link: 'https://github.com/corridor/gglint/blob/main/CHANGELOG.md' },
           ],
