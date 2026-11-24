@@ -1,91 +1,52 @@
 ---
 title: Install
-description: Run gglint with uvx, npx, pnpm dlx or bunx, or install it with npm, uv, pipx or pip. It works on Linux, macOS and Windows.
+description: Run gglint with uvx or npx, or install it with npm, uv, pipx, pip or cargo. Linux, macOS and Windows.
 ---
 
-import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-gglint is one compiled program, published for Linux, macOS and Windows to
-[PyPI](https://pypi.org/project/gglint/) as `gglint` and to
-[npm](https://www.npmjs.com/package/@gglint/cli) as `@gglint/cli`. Both hold the same program,
-so it needs neither Python nor Node to run; use whichever your machine has. npm refuses the
-name `gglint` alone, but the command is `gglint` either way.
+Most people never install gglint. `uvx` and `npx` download it the first time and reuse it after
+that. It's a single compiled program, so it doesn't need Python or Node to run, whichever one
+you use to fetch it.
 
 <Tabs syncKey="installer">
   <TabItem label="uvx">
-    Run it without installing anything. `uvx` comes with
-    [uv](https://docs.astral.sh/uv/getting-started/installation/); it downloads gglint the
-    first time and reuses it afterwards.
+    Needs [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
     ```sh
     uvx gglint mcp
-    ```
-
-    To run a fixed version, as the hooks and the GitHub Action do:
-
-    ```sh
-    uvx gglint@0.5.1 mcp
+    uvx gglint@0.5.1 mcp   # a fixed version
     ```
   </TabItem>
   <TabItem label="npx">
-    Run it without installing anything, with Node's `npx`. `pnpm dlx @gglint/cli` and
-    `bunx @gglint/cli` work the same way.
+    `pnpm dlx` and `bunx` work too.
 
     ```sh
     npx @gglint/cli mcp
-    ```
-
-    To run a fixed version:
-
-    ```sh
-    npx @gglint/cli@0.5.1 mcp
+    npx @gglint/cli@0.5.1 mcp   # a fixed version
     ```
   </TabItem>
   <TabItem label="npm project">
-    Pin it in a JavaScript project, so everyone who installs the project's packages has it, as
-    [`gglint hook`](/gglint/guides/pre-commit/) does. With pnpm, yarn or bun, use their `add`.
-
     ```sh
     npm install --save-dev @gglint/cli
     npx gglint mcp
     ```
   </TabItem>
-  <TabItem label="uv">
+  <TabItem label="uv / pipx / pip">
     ```sh
-    uv tool install gglint
-    gglint mcp
-    ```
-  </TabItem>
-  <TabItem label="pipx">
-    ```sh
-    pipx install gglint
-    gglint mcp
-    ```
-  </TabItem>
-  <TabItem label="pip">
-    ```sh
-    pip install gglint
+    uv tool install gglint   # or: pipx install gglint, pip install gglint
     gglint mcp
     ```
   </TabItem>
   <TabItem label="From source">
-    With a [Rust toolchain](https://rustup.rs) 1.88 or later:
+    Needs [Rust](https://rustup.rs) 1.88 or later.
 
     ```sh
     cargo install --git https://github.com/corridor/gglint
-    gglint mcp
     ```
   </TabItem>
 </Tabs>
 
-Check that it works:
-
-```console
-$ gglint --version
-gglint 0.5.1
-```
-
-<Aside>
-  The rest of these docs write `uvx gglint`. With Node, write `npx @gglint/cli` instead; if
-  you installed gglint, write just `gglint`.
-</Aside>
+On npm the package is called `@gglint/cli`, because npm wouldn't allow plain `gglint`, but the
+command is still `gglint`. The rest of these docs write `uvx gglint`; swap in `npx @gglint/cli`
+or just `gglint` depending on how you run it.

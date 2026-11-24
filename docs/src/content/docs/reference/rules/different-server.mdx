@@ -7,29 +7,8 @@ import RuleSpec from '../../../../components/RuleSpec.astro';
 
 <RuleSpec command="gglint mcp" severity="problem · exit 1" fix="versions + arguments" />
 
-## What it finds
-
-The same server, set up differently in two agents. gglint reports one problem for each kind of
-difference:
-
-| Difference                                        | Fixed by `--fix` |
-| ------------------------------------------------- | ---------------- |
-| Another version of the same package               | Yes              |
-| The same program with other arguments             | Yes              |
-| Another program or URL                            | No               |
-| Other environment variables or headers, by name   | No               |
-| Turned off in one agent                           | No               |
-
-The way a package is launched isn't a difference: `npx -y pkg` and `bunx pkg` run the same
-package, and no version means the same as `latest`. See
-[How servers are matched](/gglint/concepts/matching/).
-
-## Why it matters
-
-An agent running another version, or without a flag such as `--headless`, behaves differently
-from the others, and the difference is easy to miss when each file is read on its own.
-
-## Example
+The same server is set up differently in two agents, so they don't behave the same. It's easy
+to miss when you look at each file on its own.
 
 ```json
 // .mcp.json (Claude Code)
@@ -41,15 +20,16 @@ from the others, and the difference is easy to miss when each file is read on it
 
 ```text
 ./.mcp.json:8:5  different-server `playwright` runs different versions of the npm package `@playwright/mcp`: 0.0.78 in Claude Code; the newest in Cursor
-    also at ./.cursor/mcp.json:3:5
 ./.mcp.json:8:5  different-server `playwright` is started with different arguments: `--headless` in Claude Code; no arguments in Cursor
-    also at ./.cursor/mcp.json:3:5
 ```
 
-## How to fix it
+How you launch a package doesn't count as a difference: `npx -y pkg` and `bunx pkg` are the same,
+and no version means `latest`.
 
-Run `uvx gglint mcp --fix`. Every agent gets the command and arguments of the first config
-file where the server is turned on, or of the agent named with `--source`:
+## Fixing it
+
+`uvx gglint mcp --fix` fixes different versions and different arguments by copying them from
+the first agent that has the server, or from the one you name with `--source`:
 
 ```diff
 # .cursor/mcp.json
@@ -57,9 +37,6 @@ file where the server is turned on, or of the agent named with `--source`:
 +      "args": ["-y", "@playwright/mcp@0.0.78", "--headless"]
 ```
 
-Its environment variables, headers, on/off state and keys only one agent has, such as Codex's
-`cwd`, are kept. Review the result with `git diff`: a runtime chosen for one agent, or a path
-that starts with Cursor's `${workspaceFolder}`, may have been deliberate.
-
-The other differences can be deliberate too, such as each agent setting its own environment
-variables, so gglint reports them and leaves them to you. Make the setups match by hand.
+It leaves environment variables, headers and on/off settings as they are. A different program or
+URL, different environment variables or headers, or a server turned off in one agent might be
+deliberate, so gglint only reports those. Look at `git diff` afterwards and fix the rest by hand.
