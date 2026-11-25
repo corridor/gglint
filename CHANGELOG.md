@@ -4,6 +4,18 @@ All notable changes to gglint are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and gglint follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `gglint watch claude` and `gglint watch codex` start the agent with what it sends recorded,
+  and show it on a local page: each model request broken into its system prompt, tools,
+  injected context, earlier conversation, tool results and your prompt, with their sizes; the
+  headers sent; the reply; and every host the agent connects to. Credentials are never
+  recorded, and secrets and email addresses in a request are flagged. `gglint watch --
+  COMMAND` does the same for any program, and `gglint watch --view` shows an earlier run
+  ([#27](https://github.com/corridor/gglint/issues/27)).
+
 ## [0.5.1] - 2026-11-20
 
 pre-commit runs gglint's hooks without uv, in any repository: they come from

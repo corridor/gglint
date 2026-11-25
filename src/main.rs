@@ -8,6 +8,8 @@
 //!                               find secrets written out in agent config files
 //! gglint hook [install|print] [--tool T] [--with-mcp] [PATH]
 //!                               run gglint before every commit
+//! gglint watch [--port N] [--no-open] AGENT [ARGS...]
+//!                               record what a coding agent sends, and show it
 //! ```
 
 use std::path::Path;
@@ -21,6 +23,7 @@ use gglint::harness::{
 use gglint::hook::{self, Outcome, Runner, TOOLS, Tool};
 use gglint::report::{self, Diagnostic, Paint, Severity, exit_code};
 use gglint::secrets::{Scope, apply_fixes, ignore_local_files, scan_files};
+use gglint::watch::{self, Agent, proxy};
 
 const USAGE: &str = "\
 Keep the MCP servers of every coding agent in a repository in sync, and secrets out of their files.
@@ -41,6 +44,13 @@ Usage:
                                     gets gglint as a dev dependency first, with its package
                                     manager. `--tool NAME` picks the tool, `--with-mcp` adds
                                     the MCP check, `hook print` only prints.
+  gglint watch claude [ARGS...]     start Claude Code (or `codex`) with what it sends recorded,
+                                    and show it on a local page: each request's system prompt,
+                                    tools, context and your prompt, its headers, and every
+                                    host it connects to. Credentials are never recorded.
+  gglint watch -- COMMAND...        the same for any command, through ANTHROPIC_BASE_URL,
+                                    OPENAI_BASE_URL and HTTPS_PROXY
+  gglint watch --view DIR           show an earlier recording again
 
 `--format` takes table, lines, github (annotations for a pull request's diff), sarif (for
 GitHub's Code scanning) or markdown (a pull request comment), for `mcp` and `secrets`.
@@ -85,6 +95,7 @@ fn main() -> ExitCode {
         Some("mcp") => mcp(&args[1..]),
         Some("secrets") => scan_command(&args[1..]),
         Some("hook") => hook_command(&args[1..]),
+        Some("watch") => watch_command(&args[1..]),
         Some("--version" | "-V") => {
             println!("gglint {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -592,6 +603,219 @@ fn hook_command(args: &[String]) -> ExitCode {
         Err(error) => {
             eprintln!("error: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// `gglint watch`: starts an agent with its traffic routed through gglint, and shows it.
+fn watch_command(args: &[String]) -> ExitCode {
+    let mut port: u16 = 0;
+    let mut open = true;
+    let mut dir: Option<std::path::PathBuf> = None;
+    let mut view: Option<std::path::PathBuf> = None;
+    let mut routes = proxy::default_routes();
+    let mut index = 0;
+    let value = |index: &mut usize, name: &str| -> Result<String, ExitCode> {
+        *index += 1;
+        args.get(*index).cloned().ok_or_else(|| {
+            eprintln!("error: {name} needs a value");
+            ExitCode::FAILURE
+        })
+    };
+    while index < args.len() && args[index].starts_with('-') && args[index] != "--" {
+        let arg = args[index].as_str();
+        let result = match arg {
+            "--port" => value(&mut index, arg)
+                .and_then(|v| {
+                    v.parse().map_err(|_| {
+                        eprintln!("error: --port takes a number");
+                        ExitCode::FAILURE
+                    })
+                })
+                .map(|v| port = v),
+            "--dir" => value(&mut index, arg).map(|v| dir = Some(v.into())),
+            "--view" => value(&mut index, arg).map(|v| view = Some(v.into())),
+            "--no-open" => {
+                open = false;
+                Ok(())
+            }
+            "--upstream" => value(&mut index, arg).and_then(|v| match v.split_once('=') {
+                Some((prefix, upstream)) => {
+                    routes.retain(|route| route.prefix != prefix);
+                    routes.push(proxy::Route {
+                        prefix: prefix.to_string(),
+                        upstream: upstream.trim_end_matches('/').to_string(),
+                    });
+                    Ok(())
+                }
+                None => {
+                    eprintln!("error: --upstream takes NAME=URL, such as anthropic=https://gateway.example.com");
+                    Err(ExitCode::FAILURE)
+                }
+            }),
+            "--help" | "-h" => {
+                print!("{}", usage());
+                return ExitCode::SUCCESS;
+            }
+            other => {
+                eprintln!("error: unknown option {other:?}; see `gglint --help`");
+                Err(ExitCode::FAILURE)
+            }
+        };
+        if let Err(code) = result {
+            return code;
+        }
+        index += 1;
+    }
+    let rest = &args[index..];
+
+    if let Some(view) = view {
+        let recorder = match watch::record::Recorder::open(&view) {
+            Ok(recorder) => std::sync::Arc::new(recorder),
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let server = match proxy::Server::bind(port, recorder, routes, true) {
+            Ok(server) => server,
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let url = format!("http://127.0.0.1:{}/", server.port);
+        server.spawn();
+        eprintln!("gglint watch: showing {} at {url} (Ctrl-C to stop)", view.display());
+        if open {
+            open_browser(&url);
+        }
+        loop {
+            std::thread::park();
+        }
+    }
+
+    let (agent, command): (Option<Agent>, &[String]) = match rest.first().map(String::as_str) {
+        Some("--") if rest.len() > 1 => (None, &rest[1..]),
+        Some(name) if name != "--" => match Agent::parse(name) {
+            Some(agent) => (Some(agent), &rest[1..]),
+            None => {
+                eprintln!(
+                    "error: gglint watch knows `claude` and `codex`; for anything else use `gglint watch -- COMMAND`"
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+        _ => {
+            eprintln!("error: name the agent to watch: `gglint watch claude` or `gglint watch codex`");
+            return ExitCode::FAILURE;
+        }
+    };
+    let name = agent.map_or_else(
+        || {
+            Path::new(&command[0])
+                .file_name()
+                .map_or("command".to_string(), |n| n.to_string_lossy().to_string())
+        },
+        |agent| agent.program().to_string(),
+    );
+    let dir = dir.unwrap_or_else(|| watch::recording_dir(&name));
+    let recorder = match watch::record::Recorder::create(&dir) {
+        Ok(recorder) => std::sync::Arc::new(recorder),
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let server = match proxy::Server::bind(port, recorder, routes, false) {
+        Ok(server) => server,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let base = format!("http://127.0.0.1:{}", server.port);
+    server.spawn();
+
+    let launch = match agent {
+        Some(agent) => {
+            let codex_home = std::env::var_os("CODEX_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_default()
+                        .join(".codex")
+                });
+            watch::launch(agent, &base, command, watch::codex_uses_chatgpt(&codex_home))
+        }
+        None => watch::launch_command(command, &base),
+    };
+    eprintln!("gglint watch: recording {name} to {}", dir.display());
+    eprintln!("gglint watch: see it at {base}/");
+    if open {
+        open_browser(&format!("{base}/"));
+    }
+    signals::ignore_interrupt();
+    let status = std::process::Command::new(&launch.program)
+        .args(&launch.args)
+        .envs(launch.env.iter().map(|(k, v)| (k, v)))
+        .status();
+    signals::default_interrupt();
+    let code = match status {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(error) => {
+            eprintln!("error: can't start {}: {error}", launch.program);
+            return ExitCode::FAILURE;
+        }
+    };
+    // In a terminal the page stays up to look through; in a script, gglint ends with the agent.
+    if open && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        eprintln!("gglint watch: {name} has exited. The page stays at {base}/ until Ctrl-C.");
+        loop {
+            std::thread::park();
+        }
+    }
+    ExitCode::from(u8::try_from(code).unwrap_or(1))
+}
+
+fn open_browser(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        ("open", vec![url])
+    } else if cfg!(windows) {
+        ("cmd", vec!["/c", "start", "", url])
+    } else {
+        ("xdg-open", vec![url])
+    };
+    let _ = std::process::Command::new(opener.0)
+        .args(&opener.1)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// While the agent runs, Ctrl-C is the agent's: gglint keeps recording until it exits.
+mod signals {
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    #[cfg(unix)]
+    extern "C" fn nothing(_: i32) {}
+
+    /// A handler that does nothing, rather than ignoring the signal, so the agent, which
+    /// inherits ignored signals but not handlers, still gets Ctrl-C.
+    pub fn ignore_interrupt() {
+        #[cfg(unix)]
+        unsafe {
+            signal(2, nothing as extern "C" fn(i32) as usize);
+        }
+    }
+
+    pub fn default_interrupt() {
+        #[cfg(unix)]
+        unsafe {
+            signal(2, 0);
         }
     }
 }

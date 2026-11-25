@@ -896,6 +896,34 @@ fn scan_text(text: &str, config: bool) -> Vec<Hit> {
     hits
 }
 
+/// The secrets in free text, such as a request a coding agent sends: the byte range of each in
+/// `text`, and what it is. Uses the same token formats, private keys, passwords in URLs and
+/// keys in command lines as the file checks; a private key's range runs to its `END` line.
+pub fn find_secrets(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    let starts: Vec<usize> = text
+        .split_inclusive('\n')
+        .scan(0, |offset, line| {
+            let start = *offset;
+            *offset += line.len();
+            Some(start)
+        })
+        .collect();
+    scan_text(text, false)
+        .into_iter()
+        .map(|hit| {
+            let start = starts[hit.line - 1] + hit.start;
+            let mut end = starts[hit.line - 1] + hit.end;
+            if hit.kind == "private key"
+                && let Some(found) = text[end..].find("PRIVATE KEY-----")
+                && let Some(close) = text[end + found + 16..].find("PRIVATE KEY-----")
+            {
+                end += found + 16 + close + 16;
+            }
+            (start..end, hit.kind)
+        })
+        .collect()
+}
+
 fn is_config(path: &Path) -> bool {
     // Kiro's older hooks are JSON files named `*.kiro.hook`.
     matches!(

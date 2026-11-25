@@ -70,6 +70,7 @@ export default defineConfig({
           items: [
             { label: 'MCP servers', slug: 'checks/mcp-servers' },
             { label: 'Secrets', slug: 'checks/secrets' },
+            { label: 'See what an agent sends', slug: 'checks/watch' },
           ],
         },
         {

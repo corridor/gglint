@@ -8,3 +8,4 @@ pub mod harness;
 pub mod hook;
 pub mod report;
 pub mod secrets;
+pub mod watch;

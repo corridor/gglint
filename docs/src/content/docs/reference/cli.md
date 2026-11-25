@@ -8,6 +8,8 @@ gglint mcp     [--fix] [--source AGENT] [--format FORMAT] [PATH]
 gglint mcp     --servers [PATH]
 gglint secrets [--fix] [--staged] [--format FORMAT] [PATH | FILE...]
 gglint hook    [install | print] [--tool NAME] [--with-mcp] [PATH]
+gglint watch   [--port N] [--dir FOLDER] [--no-open] (claude | codex | -- COMMAND) [ARGS...]
+gglint watch   --view FOLDER
 ```
 
 `PATH` is the root of the repository, and defaults to where you are. Every command exits with `0`
@@ -47,3 +49,18 @@ Sets up a check [before every commit](/gglint/guides/pre-commit/).
 | `print`       | Only prints the lines to add                                       |
 | `--tool NAME` | `husky`, `git`, `pre-commit`, `lefthook` or `lint-staged`          |
 | `--with-mcp`  | Also checks MCP servers                                            |
+
+## `gglint watch`
+
+Starts an agent with what it sends recorded, and shows it on a local page
+([how it works](/gglint/checks/watch/)). Exits with the agent's exit status; in a terminal the
+page stays up after the agent exits, until Ctrl-C.
+
+| Option                | What it does                                                    |
+| --------------------- | --------------------------------------------------------------- |
+| `-- COMMAND...`       | Watch any program, through `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL` and `HTTPS_PROXY` |
+| `--view FOLDER`       | Show an earlier run from `~/.gglint/watch/`                     |
+| `--port N`            | Listen on this port of `127.0.0.1`                              |
+| `--dir FOLDER`        | Record into this folder                                         |
+| `--no-open`           | Don't open the page in the browser                              |
+| `--upstream NAME=URL` | Send `anthropic`, `openai` or `chatgpt` requests to another URL |

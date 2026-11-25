@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gglint watch</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e4e3df;
+  --soft: #f0efeb; --accent: #2f6fdf; --warn: #b4441f; --warn-bg: #fdeee8; --ok: #2c7a4b;
+  --c-system: #7b5cd6; --c-tools: #2f6fdf; --c-context: #c98a12; --c-history: #9a9a94;
+  --c-toolres: #1a8a82; --c-prompt: #2c9a4b; --c-settings: #59606b; --c-other: #b9b9b2;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413; --panel: #1d1d1b; --ink: #ecebe7; --muted: #9c9b95; --line: #2f2f2c;
+    --soft: #262624; --accent: #6b9cf0; --warn: #f08a63; --warn-bg: #3a2219; --ok: #5cc185;
+    --c-history: #6f6f6a; --c-other: #55554f;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+header .dir { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.live.off i { background: var(--muted); }
+.stats { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.stat { background: var(--soft); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+.stat b { color: var(--ink); font-size: 14px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.stat.warn b { color: var(--warn); }
+main { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; height: calc(100% - 58px); }
+aside { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); }
+.tabs { display: flex; gap: 4px; padding: 10px; position: sticky; top: 0; background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1; }
+.tabs button { border: 0; background: transparent; color: var(--muted); padding: 5px 10px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; }
+.tabs button.on { background: var(--soft); color: var(--ink); font-weight: 600; }
+.item { padding: 9px 14px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: baseline; }
+.item:hover { background: var(--soft); }
+.item.on { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+.item .time { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.item .title { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .size { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.item .sub { grid-column: 2 / 4; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 4px; padding: 1px 5px; }
+.badge.model { background: color-mix(in srgb, var(--c-system) 18%, transparent); color: var(--c-system); }
+.badge.tunnel { background: var(--soft); color: var(--muted); }
+.badge.http { background: color-mix(in srgb, var(--c-tools) 16%, transparent); color: var(--c-tools); }
+.flag { color: var(--warn); font-weight: 700; }
+section.detail { overflow: auto; padding: 22px 28px 60px; }
+h2 { font-size: 18px; margin: 0 0 4px; letter-spacing: -0.01em; word-break: break-all; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 28px 0 10px; font-weight: 650; }
+.meta { color: var(--muted); font-size: 13px; display: flex; gap: 14px; flex-wrap: wrap; }
+.meta b { color: var(--ink); font-weight: 600; }
+.bar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; background: var(--soft); margin-top: 6px; }
+.bar div { min-width: 2px; cursor: pointer; transition: filter .15s; }
+.bar div:hover { filter: brightness(1.15); }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 18px; margin-top: 12px; }
+.legend div { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.legend i { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.legend span { color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+.headline { font-size: 15px; margin: 16px 0 0; }
+.headline b { font-variant-numeric: tabular-nums; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.card > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+.card > summary::-webkit-details-marker { display: none; }
+.card > summary i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.card > summary .size { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.card > summary .peek { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+pre { margin: 0; padding: 12px 14px; border-top: 1px solid var(--line); font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; background: var(--soft); }
+pre.full { max-height: none; }
+mark { background: var(--warn-bg); color: var(--warn); border-radius: 3px; padding: 0 2px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td.k { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+td.v { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scroll { overflow-x: auto; }
+.tag { font-size: 11px; color: var(--c-context); white-space: nowrap; }
+.flags { background: var(--warn-bg); border-radius: 10px; padding: 12px 16px; margin-top: 16px; }
+.flags b { color: var(--warn); }
+.flags ul { margin: 6px 0 0; padding-left: 18px; }
+.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+.note { color: var(--muted); font-size: 13px; max-width: 720px; }
+button.link { background: none; border: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12px; padding: 0; }
+@media (max-width: 760px) {
+  main { grid-template-columns: 1fr; height: auto; }
+  aside { max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  section.detail { padding: 16px; }
+  header .dir { max-width: 90vw; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>gglint watch</h1>
+  <span class="live" id="live"><i></i><span>recording</span></span>
+  <span class="dir" id="dir"></span>
+  <div class="stats" id="stats"></div>
+</header>
+<main>
+  <aside>
+    <div class="tabs" id="tabs">
+      <button data-f="all" class="on">All</button>
+      <button data-f="model">Model requests</button>
+      <button data-f="other">Other connections</button>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <section class="detail" id="detail"></section>
+</main>
+<script>
+"use strict";
+const CATS = {
+  system:   ["Hidden system prompt", "var(--c-system)"],
+  tools:    ["Tool definitions", "var(--c-tools)"],
+  context:  ["Injected context (rules, skills, reminders)", "var(--c-context)"],
+  history:  ["Earlier conversation", "var(--c-history)"],
+  toolres:  ["Tool results (files, command output)", "var(--c-toolres)"],
+  prompt:   ["Your prompt", "var(--c-prompt)"],
+  settings: ["Settings and metadata", "var(--c-settings)"],
+  other:    ["Other", "var(--c-other)"],
+};
+const exchanges = new Map(), conns = new Map();
+let seq = 0, selected = null, filter = "all", live = true, viewOnly = false;
+
+const $ = (id) => document.getElementById(id);
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v; else if (k === "style") n.style.cssText = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid instanceof Node ? kid : String(kid));
+  return n;
+}
+function kb(n) { if (n == null) return ""; if (n < 1024) return n + " B"; if (n < 1048576) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB"; return (n / 1048576).toFixed(1) + " MB"; }
+function chars(n) { return n.toLocaleString() + " chars"; }
+function clock(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour12: false }) : ""; }
+function str(v) { return typeof v === "string" ? v : JSON.stringify(v, null, 2); }
+function hostOf(url) { try { return new URL(url).host; } catch { return url; } }
+function pathOf(url) { try { const u = new URL(url); return u.pathname; } catch { return url; } }
+
+// Secrets gglint removed, and email addresses, stand out wherever text is shown.
+const HIGHLIGHT = /(\[[^\]\n]{1,60} removed by gglint(?::[^\]]*)?\]|\[removed by gglint: \d+ characters\]|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+function highlighted(text) {
+  const out = []; let last = 0;
+  for (const m of text.matchAll(HIGHLIGHT)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    out.push(el("mark", {}, m[0])); last = m.index + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+
+function ingest(events) {
+  for (const e of events) {
+    seq = Math.max(seq, e.seq || 0);
+    if (e.type === "request") exchanges.set(e.id, { req: e, res: null });
+    else if (e.type === "response") { const x = exchanges.get(e.id); if (x) x.res = e; }
+    else if (e.type === "connect") conns.set(e.id, { open: e, close: null });
+    else if (e.type === "close") { const c = conns.get(e.id); if (c) c.close = e; }
+  }
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/__gglint/events?after=" + seq, { cache: "no-store" });
+    const events = await r.json();
+    if (events.length) { ingest(events); render(); }
+    if (!viewOnly) $("live").classList.remove("off");
+  } catch { $("live").classList.add("off"); $("live").lastChild.textContent = "stopped"; live = false; }
+  if (live) setTimeout(poll, 1000);
+}
+
+// ---- Breaking a request into its parts --------------------------------------------------
+function blockText(b) {
+  if (typeof b === "string") return b;
+  if (b == null) return "";
+  if (Array.isArray(b)) return b.map(blockText).join("\n\n");
+  if (typeof b.text === "string") return b.text;
+  if (Array.isArray(b.content)) return b.content.map(blockText).join("\n");
+  if (typeof b.content === "string") return b.content;
+  if (typeof b.output === "string") return b.output;
+  return JSON.stringify(b, null, 2);
+}
+// Tools can be nested in namespaces (Codex's `additional_tools`): one line per tool.
+function toolLines(tools, prefix = "") {
+  const out = [];
+  for (const t of tools || []) {
+    const name = t.name || t.function?.name || t.type || "tool";
+    if (Array.isArray(t.tools)) out.push(...toolLines(t.tools, prefix + name + "."));
+    else out.push(prefix + name + "\n" + (t.description || t.function?.description || "").trim());
+  }
+  return out;
+}
+const CONTEXT_START = /^\s*(<system-reminder>|# AGENTS\.md|<environment_context>|<user_instructions>|<skills|<permissions|<INSTRUCTIONS>|<user_shell_command>|<local-command|Caveat:)/;
+
+function parts(body) {
+  const out = [];
+  const add = (cat, label, value, role) => { const text = str(value ?? ""); out.push({ cat, label, text, size: text.length, role }); };
+  if (body == null) return out;
+  if (typeof body !== "object" || body.gglint) { add("other", "Body", body); return out; }
+  const used = new Set();
+  const take = (k) => { used.add(k); return body[k]; };
+
+  if (body.system != null) {
+    const s = take("system");
+    if (Array.isArray(s)) s.forEach((b, i) => add("system", "System prompt" + (s.length > 1 ? " · part " + (i + 1) : ""), blockText(b)));
+    else add("system", "System prompt", s);
+  }
+  if (body.instructions != null) add("system", "System prompt (instructions)", take("instructions"));
+  if (Array.isArray(body.tools) && body.tools.length) {
+    const tools = take("tools");
+    const lines = toolLines(tools);
+    add("tools", "Tool definitions · " + lines.length + " tools", lines.join("\n\n"));
+  } else if ("tools" in body) take("tools");
+
+  const items = Array.isArray(body.messages) ? take("messages") : Array.isArray(body.input) ? take("input") : null;
+  if (typeof body.input === "string") add("prompt", "Your prompt", take("input"));
+  if (items) {
+    let lastUser = -1;
+    items.forEach((m, i) => { if (m.role === "user" && (typeof m.content === "string" || (m.content || []).some(b => b.type === "text" || b.type === "input_text"))) lastUser = i; });
+    items.forEach((m, i) => {
+      const role = m.role || m.type || "item";
+      if (Array.isArray(m.tools)) { const lines = toolLines(m.tools); add("tools", "Tool definitions · " + lines.length + " tools", lines.join("\n\n"), role); return; }
+      if (role === "system" || role === "developer") {
+        const text = blockText(m.content ?? m);
+        if (/^\s*<skills/.test(text)) add("context", "Skills list", text, role);
+        else add("system", role === "developer" ? "Hidden instruction (developer)" : "System message", text, role);
+        return;
+      }
+      if (m.type === "function_call_output" || m.type === "custom_tool_call_output") { add("toolres", "Tool result", m.output ?? m, "tool"); return; }
+      if (role === "assistant" || m.type === "reasoning" || m.type === "function_call" || m.type === "custom_tool_call") { add("history", m.type === "reasoning" ? "Earlier reasoning" : m.type && m.type.includes("call") ? "Earlier tool call" : "Earlier reply", blockText(m.content ?? m), "assistant"); return; }
+      const blocks = typeof m.content === "string" ? [{ type: "text", text: m.content }] : Array.isArray(m.content) ? m.content : [m];
+      for (const b of blocks) {
+        if (b.type === "tool_result") { add("toolres", "Tool result", blockText(b), "tool"); continue; }
+        const text = blockText(b);
+        if (CONTEXT_START.test(text)) add("context", "Injected context", text, role);
+        else if (b.type === "image" || b.type === "input_image") add(i === lastUser ? "prompt" : "history", "Image", b, role);
+        else if (i === lastUser) add("prompt", "Your prompt", text, role);
+        else add(role === "user" ? "history" : "other", role === "user" ? "Earlier message" : role, text, role);
+      }
+    });
+  }
+  const rest = {};
+  for (const [k, v] of Object.entries(body)) if (!used.has(k) && k !== "system" && k !== "instructions") rest[k] = v;
+  if (Object.keys(rest).length) add("settings", "Settings and metadata", rest);
+  return out;
+}
+
+function reply(res) {
+  if (!res || res.body == null) return "";
+  const b = res.body;
+  if (typeof b === "string") {
+    let text = "";
+    for (const line of b.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      try {
+        const d = JSON.parse(line.slice(5));
+        if (d.type === "content_block_delta" && d.delta?.text) text += d.delta.text;
+        else if (d.type === "response.output_text.delta" && typeof d.delta === "string") text += d.delta;
+        else if (d.choices?.[0]?.delta?.content) text += d.choices[0].delta.content;
+      } catch {}
+    }
+    return text;
+  }
+  if (Array.isArray(b.content)) return b.content.map(blockText).join("\n");
+  if (Array.isArray(b.output)) return b.output.map(o => blockText(o.content ?? o)).join("\n");
+  if (b.choices?.[0]?.message?.content) return b.choices[0].message.content;
+  return "";
+}
+
+// ---- Headers ------------------------------------------------------------------------------
+function headerTag(name) {
+  const n = name.toLowerCase();
+  if (n.includes("removed")) return "";
+  if (/(account|user|session|installation|device|machine|org|thread|turn|window|-id$|metadata)/.test(n)) return "identifies you or this session";
+  if (/(user-agent|x-stainless-(os|arch|runtime|lang|package))/.test(n)) return "describes your machine";
+  return "";
+}
+function headersTable(headers) {
+  const rows = [];
+  for (const [name, values] of Object.entries(headers || {})) for (const v of values) {
+    let shown = v;
+    try { if (/^[\[{]/.test(v)) shown = JSON.stringify(JSON.parse(v), null, 2); } catch {}
+    const tag = headerTag(name);
+    rows.push(el("tr", {}, el("td", { class: "k" }, name, tag ? el("div", { class: "tag" }, tag) : null), el("td", { class: "v" }, shown.includes("\n") ? el("pre", { style: "border:0;padding:0;background:none;max-height:200px" }, highlighted(shown)) : highlighted(shown))));
+  }
+  return rows.length ? el("div", { class: "scroll" }, el("table", {}, el("tr", {}, el("th", {}, "Header"), el("th", {}, "Value")), rows)) : el("p", { class: "note" }, "None.");
+}
+
+function flagsBox(findings) {
+  if (!findings || !findings.length) return null;
+  const secrets = findings.filter(f => f.kind === "secret"), emails = findings.filter(f => f.kind === "email");
+  const uniq = (a) => [...new Map(a.map(f => [f.what + "|" + f.where, f])).values()];
+  return el("div", { class: "flags" },
+    el("b", {}, (secrets.length ? secrets.length + " secret" + (secrets.length > 1 ? "s" : "") + " left in this request" : "") + (secrets.length && emails.length ? " · " : "") + (emails.length ? emails.length + " email address" + (emails.length > 1 ? "es" : "") : "")),
+    el("ul", {}, uniq(secrets).map(f => el("li", {}, f.what + " in " + f.where + " (removed from this recording)")), uniq(emails).slice(0, 12).map(f => el("li", {}, f.what + " in " + f.where))));
+}
+
+// ---- Rendering ----------------------------------------------------------------------------
+function entries() {
+  const list = [];
+  for (const [id, x] of exchanges) list.push({ id: "x" + id, kind: x.req.kind, time: x.req.time, x });
+  for (const [id, c] of conns) list.push({ id: "c" + id, kind: "tunnel", time: c.open.time, c });
+  list.sort((a, b) => b.time - a.time);
+  return list;
+}
+
+function render() {
+  const all = entries();
+  const models = all.filter(e => e.kind === "model");
+  const sent = [...exchanges.values()].reduce((n, x) => n + (x.req.bytes || 0), 0) + [...conns.values()].reduce((n, c) => n + (c.close?.sent || 0), 0);
+  const hosts = new Set([...conns.values()].map(c => c.open.host).concat([...exchanges.values()].map(x => hostOf(x.req.url))));
+  const flags = [...exchanges.values()].reduce((n, x) => n + (x.req.findings || []).filter(f => f.kind === "secret").length, 0);
+  $("stats").replaceChildren(
+    el("span", { class: "stat" }, el("b", {}, models.length), "model requests"),
+    el("span", { class: "stat" }, el("b", {}, kb(sent)), "sent"),
+    el("span", { class: "stat" }, el("b", {}, hosts.size), "hosts"),
+    el("span", { class: "stat" + (flags ? " warn" : "") }, el("b", {}, flags), "secrets sent"));
+
+  const shown = all.filter(e => filter === "all" || (filter === "model" ? e.kind === "model" : e.kind !== "model"));
+  $("list").replaceChildren(...(shown.length ? shown.map(item) : [el("div", { class: "empty" }, "Nothing yet. Use the agent and its requests appear here.")]));
+  renderDetail();
+}
+
+function item(e) {
+  let title, sub, size, badge = e.kind;
+  if (e.x) {
+    const { req, res } = e.x;
+    title = req.method + " " + pathOf(req.url);
+    const model = req.body && typeof req.body === "object" ? req.body.model : null;
+    sub = hostOf(req.url) + (model ? " · " + model : "") + (res ? " · " + (res.status || "error") : " · waiting");
+    size = kb(req.bytes);
+  } else {
+    const { open, close } = e.c;
+    title = open.host; badge = "tunnel";
+    sub = "encrypted · port " + open.port + (close ? " · " + kb(close.received) + " back" : " · open");
+    size = close ? kb(close.sent) : "";
+  }
+  const flagged = e.x && (e.x.req.findings || []).some(f => f.kind === "secret");
+  return el("div", { class: "item" + (selected === e.id ? " on" : ""), onclick: () => { selected = e.id; render(); } },
+    el("span", { class: "time" }, clock(e.time)),
+    el("span", { class: "title" }, el("span", { class: "badge " + badge }, badge === "tunnel" ? "host" : badge), " ", flagged ? el("span", { class: "flag" }, "⚑ ") : null, title),
+    el("span", { class: "size" }, size),
+    el("span", { class: "sub" }, sub));
+}
+
+function renderDetail() {
+  const d = $("detail");
+  const keepOpen = new Set([...d.querySelectorAll("details[open]")].map(n => n.dataset.key));
+  const scroll = d.scrollTop;
+  let content;
+  if (selected && selected[0] === "x" && exchanges.get(+selected.slice(1))) content = exchangeView(exchanges.get(+selected.slice(1)));
+  else if (selected && selected[0] === "c" && conns.get(+selected.slice(1))) content = connView(conns.get(+selected.slice(1)));
+  else content = overview();
+  d.replaceChildren(...content.filter(n => n != null));
+  d.querySelectorAll("details").forEach(n => { if (keepOpen.has(n.dataset.key)) n.open = true; });
+  d.scrollTop = scroll;
+}
+
+function composition(ps) {
+  const total = ps.reduce((n, p) => n + p.size, 0) || 1;
+  const byCat = {};
+  for (const p of ps) byCat[p.cat] = (byCat[p.cat] || 0) + p.size;
+  const order = Object.keys(CATS).filter(c => byCat[c]);
+  const prompt = byCat.prompt || 0;
+  return [
+    el("div", { class: "bar" }, order.map(c => el("div", { title: CATS[c][0] + ": " + chars(byCat[c]), style: `width:${(byCat[c] / total * 100).toFixed(3)}%;background:${CATS[c][1]}`, onclick: () => { const n = document.querySelector(`details[data-cat="${c}"]`); if (n) { n.open = true; n.scrollIntoView({ behavior: "smooth", block: "start" }); } } }))),
+    el("div", { class: "legend" }, order.map(c => el("div", {}, el("i", { style: "background:" + CATS[c][1] }), CATS[c][0], el("span", {}, chars(byCat[c]) + " · " + (byCat[c] / total * 100).toFixed(byCat[c] / total < 0.01 ? 2 : 0) + "%")))),
+    prompt ? el("p", { class: "headline" }, "What you typed is ", el("b", {}, (prompt / total * 100).toFixed(prompt / total < 0.01 ? 2 : 1) + "%"), " of this request. The rest, ", el("b", {}, chars(total - prompt)), ", was added by the agent.") : null,
+  ];
+}
+
+function textCard(key, color, label, text, open, cat) {
+  const pre = el("pre", {}, highlighted(text));
+  const peek = text.replace(/\s+/g, " ").slice(0, 140);
+  return el("details", { class: "card", "data-key": key, "data-cat": cat || "", ...(open ? { open: "" } : {}) },
+    el("summary", {}, color ? el("i", { style: "background:" + color }) : null, el("b", {}, label), el("span", { class: "peek" }, peek), el("span", { class: "size" }, chars(text.length))),
+    pre);
+}
+
+function exchangeView({ req, res }) {
+  const body = req.body;
+  const isModel = req.kind === "model";
+  const ps = isModel ? parts(body) : [];
+  const answer = reply(res);
+  const out = [
+    el("h2", {}, req.method + " " + req.url),
+    el("div", { class: "meta" },
+      el("span", {}, "Sent ", el("b", {}, kb(req.bytes))),
+      res ? el("span", {}, "Received ", el("b", {}, kb(res.bytes))) : el("span", {}, "Waiting for the answer…"),
+      res && res.status ? el("span", {}, "Status ", el("b", {}, res.status)) : null,
+      res && res.error ? el("span", { style: "color:var(--warn)" }, res.error) : null,
+      res && res.ms != null ? el("span", {}, el("b", {}, (res.ms / 1000).toFixed(1) + " s")) : null,
+      body && body.model ? el("span", {}, "Model ", el("b", {}, body.model)) : null,
+      el("span", {}, clock(req.time))),
+    flagsBox(req.findings),
+  ];
+  if (isModel && ps.length) {
+    out.push(el("h3", {}, "What was sent"), ...composition(ps));
+    out.push(el("h3", {}, "In the order it was sent"));
+    ps.forEach((p, i) => out.push(textCard("p" + i, CATS[p.cat][1], p.label + (p.role && !/prompt|message|reply|result|instruction|context/i.test(p.label) ? " · " + p.role : ""), p.text, p.cat === "prompt", p.cat)));
+  } else if (body != null) {
+    out.push(el("h3", {}, "Body"), textCard("body", null, "Request body", str(body), true));
+  }
+  out.push(el("h3", {}, "Headers sent"), headersTable(req.headers));
+  if (answer) out.push(el("h3", {}, "The reply"), textCard("reply", "var(--c-prompt)", "Text of the reply", answer, true));
+  if (res && res.headers) out.push(el("h3", {}, "Headers received"), headersTable(res.headers));
+  out.push(el("h3", {}, "Raw"), textCard("raw", null, "The request as recorded", str(body), false));
+  if (res && res.body != null) out.push(textCard("rawres", null, "The response as recorded", str(res.body), false));
+  return out;
+}
+
+function connView({ open, close }) {
+  return [
+    el("h2", {}, open.host),
+    el("div", { class: "meta" },
+      el("span", {}, "Port ", el("b", {}, open.port)),
+      el("span", {}, "Opened ", el("b", {}, clock(open.time))),
+      close && close.sent != null ? el("span", {}, "Sent ", el("b", {}, kb(close.sent))) : null,
+      close && close.received != null ? el("span", {}, "Received ", el("b", {}, kb(close.received))) : null,
+      close && close.ms != null ? el("span", {}, "Open for ", el("b", {}, (close.ms / 1000).toFixed(1) + " s")) : null,
+      close && close.error ? el("span", { style: "color:var(--warn)" }, close.error) : null,
+      !close ? el("span", {}, "still open") : null),
+    el("p", { class: "note" }, "This connection went through gglint's proxy encrypted, so only the host, the time and the amount of data are visible. gglint doesn't decrypt it."),
+  ];
+}
+
+function overview() {
+  const hosts = new Map();
+  const bump = (h, kind, time, sent, received) => {
+    const r = hosts.get(h) || { host: h, n: 0, sent: 0, received: 0, first: time, kinds: new Set() };
+    r.n++; r.sent += sent || 0; r.received += received || 0; r.first = Math.min(r.first, time); r.kinds.add(kind); hosts.set(h, r);
+  };
+  for (const c of conns.values()) bump(c.open.host, "encrypted", c.open.time, c.close?.sent, c.close?.received);
+  for (const x of exchanges.values()) bump(hostOf(x.req.url), x.req.kind === "model" ? "recorded in full" : "plain HTTP, recorded", x.req.time, x.req.bytes, x.res?.bytes);
+  const rows = [...hosts.values()].sort((a, b) => a.first - b.first);
+  const last = [...exchanges.values()].filter(x => x.req.kind === "model").sort((a, b) => b.req.time - a.req.time)[0];
+  const out = [
+    el("h2", {}, "Everything the agent connected to"),
+    el("p", { class: "note" }, "Model requests come to gglint because the agent's base URL points here, so they're recorded in full, with credentials removed. Other connections pass through gglint's proxy encrypted: only the host and the amount of data are visible. Click anything on the left for details."),
+    rows.length ? el("div", { class: "scroll" }, el("table", {}, el("tr", {}, el("th", {}, "Host"), el("th", {}, "Connections"), el("th", {}, "Sent"), el("th", {}, "Received"), el("th", {}, "First seen"), el("th", {}, "How")),
+      rows.map(r => el("tr", {}, el("td", { class: "k" }, r.host), el("td", { class: "num" }, r.n), el("td", { class: "num" }, kb(r.sent)), el("td", { class: "num" }, kb(r.received)), el("td", { class: "num" }, clock(r.first)), el("td", {}, [...r.kinds].join(", "))))))
+      : el("div", { class: "empty" }, "Nothing recorded yet."),
+  ];
+  if (last) {
+    const ps = parts(last.req.body);
+    if (ps.length) out.push(el("h3", {}, "The latest model request"), ...composition(ps), el("p", {}, el("button", { class: "link", onclick: () => { selected = "x" + last.req.id; render(); } }, "Open it →")));
+  }
+  return out;
+}
+
+$("tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  filter = b.dataset.f;
+  $("tabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  render();
+});
+
+fetch("/__gglint/session").then(r => r.json()).then(s => {
+  $("dir").textContent = s.dir; $("dir").title = s.dir;
+  if (!s.live) { viewOnly = true; $("live").classList.add("off"); $("live").lastChild.textContent = "earlier recording"; }
+}).catch(() => {});
+render();
+poll();
+</script>
+</body>
+</html>

@@ -18,6 +18,9 @@ main.rs ── parses the command line
    │
    ├─ gglint hook ─────► hook.rs                install or print the pre-commit hook
    │
+   ├─ gglint watch ────► watch::launch          start the agent, its base URL pointed at gglint
+   │                     watch::proxy           record each request and pass it on; serve the page
+   │
    └─ every check ─────► report.rs              Diagnostics → table, lines, github,
                                                 sarif or markdown; the exit status
 ```
@@ -38,6 +41,10 @@ and the exit status are the same for all of them.
 | `src/harness/fix.rs`     | `--fix`: writes each server in each agent's format, editing JSON with `jsonc-parser` and TOML with `toml_edit` so comments and formatting are kept. |
 | `src/secrets.rs`         | `gglint secrets`: which files are agent files, the token formats, the names that hold credentials, commands, URLs, placeholders, and the fixes. Never keeps or prints a secret's value. |
 | `src/report.rs`          | `Diagnostic` and `Severity`, the `lines`, `github`, `sarif` and `markdown` formats, colours, and the exit status. |
+| `src/watch/mod.rs`       | `gglint watch`: how each agent is started so its requests come to gglint (`ANTHROPIC_BASE_URL`, a Codex model provider, `HTTPS_PROXY`), and where recordings go. |
+| `src/watch/proxy.rs`     | The local server: forwards model requests to the real API and records both sides, passes `CONNECT` tunnels through recording only the host and size, and serves the viewer. |
+| `src/watch/record.rs`    | The recording, `events.jsonl`: removes credential headers, masks secrets in bodies with `secrets::find_secrets`, and notes email addresses. |
+| `src/watch/viewer.html`  | The page, built into the binary: splits each request into system prompt, tools, injected context, history and your prompt, and lists every host. |
 | `src/hook.rs`            | `gglint hook`: detects husky, git, pre-commit, lefthook or lint-staged, and installs or prints the hook. In a repository with a `package.json`, adds `@gglint/cli` to the dev dependencies with its package manager, and the hook runs that copy. |
 | `npm/`                   | The npm package `@gglint/cli`: `gglint.js` runs the program from the platform's optional dependency, and `build.py` builds the packages from the release's wheels. |
 | `pre-commit/`            | `build.py` writes [gglint-pre-commit](https://github.com/corridor/gglint-pre-commit), where pre-commit gets gglint's hooks without uv: `.pre-commit-hooks.yaml` started as `gglint`, and a `pyproject.toml` that installs gglint from PyPI. A workflow there runs it for each release. |
@@ -49,7 +56,10 @@ and the exit status are the same for all of them.
 
 - **Read-only unless `--fix`.** Only `fix.rs`, `secrets::apply_fixes`,
   `secrets::ignore_local_files` and `hook.rs` write files.
-- **Nothing is executed or fetched.** The only program gglint runs is `git`.
+- **Nothing is executed or fetched.** The only program gglint runs is `git`, except in
+  `gglint watch`, which starts the agent it's asked to and forwards that agent's requests.
+- **No credential is recorded.** `watch::record` drops credential headers and masks secrets
+  before anything is written or shown.
 - **A secret's value never leaves `secrets.rs`.** A `Diagnostic`'s message names the kind of
   secret, the key it's under and where it is.
 - **`--fix` never removes a server**, and running it twice changes nothing. `tests/corpus.rs`

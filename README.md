@@ -543,11 +543,43 @@ To run gglint without the action:
       - run: uvx gglint@0.5.1 secrets --format github
 ```
 
+## Seeing what an agent sends
+
+`gglint watch` starts Claude Code or Codex with everything it sends routed through gglint on
+your machine, and shows it on a local page as it happens.
+
+```sh
+gglint watch claude
+gglint watch codex exec "fix the failing test"
+gglint watch -- my-agent --flag     # any program, through ANTHROPIC_BASE_URL, OPENAI_BASE_URL and HTTPS_PROXY
+```
+
+For each model request the page shows what went into it, with a bar of how much each part
+takes: the system prompt, the tool definitions, the context the agent injects (rules files,
+skills, reminders), the earlier conversation, tool results, and the prompt you typed. A short
+Codex prompt is usually well under 1% of its request. It also shows the headers sent, the
+reply, and every other host the agent connected to, with how much went each way.
+
+How it works: the agent's model requests come to gglint because its base URL points at
+`127.0.0.1` (`ANTHROPIC_BASE_URL`, or a Codex model provider's `base_url`), so gglint records
+them in full and sends them on to the real API over HTTPS. Its other connections go through
+gglint as `HTTPS_PROXY`, so only their host and size are visible; gglint doesn't decrypt
+anything or install a certificate. Credentials (`Authorization`, API keys, cookies) are never
+written to the recording, and a secret found in a request is replaced by its kind and flagged,
+as are email addresses.
+
+Each run is kept in `~/.gglint/watch/`, one folder per run; `gglint watch --view FOLDER` shows
+one again. `--port`, `--dir` and `--no-open` set the port, the folder, and whether the page
+opens in the browser. `--upstream anthropic=https://gateway.example.com` sends requests to a
+gateway instead of the agent's usual API.
+
 ## Security
 
 - **Read-only by default.** Without `--fix`, gglint reads files and writes nothing.
 - **Nothing is executed or fetched.** MCP servers aren't started, packages aren't resolved,
   and environment variables aren't expanded. It's safe to run on an untrusted repository.
+  The exception is `gglint watch`, which starts the agent you name and passes its requests
+  on to the APIs it would have called anyway, listening on `127.0.0.1` only.
 - **Secrets stay out of the output.** Environment variables and headers are printed by name
   only, and `gglint secrets` shows a secret's kind, the name it's under and where it is, never
   its value.

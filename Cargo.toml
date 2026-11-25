@@ -22,6 +22,11 @@ toml_edit = { version = "=0.25.17", default-features = false, features = ["parse
 # Continue's MCP servers, in YAML files: read only, as gglint adds a server to a file of its
 # own. MIT or Apache-2.0.
 yaml-rust2 = { version = "=0.13.0", default-features = false }
+# `gglint watch`: sends each recorded request on to the agent's API over HTTPS (rustls with
+# its built-in roots, no system TLS), and reads and writes the recording. Both MIT or
+# Apache-2.0.
+ureq = { version = "=3.5.2", default-features = false, features = ["rustls"] }
+serde_json = "=1.0.154"
 
 # The binary that ships in the wheels: smaller and a little faster, at the cost of a longer
 # release build.
